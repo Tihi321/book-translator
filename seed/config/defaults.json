@@ -1,0 +1,43 @@
+{
+  "agentModels": {
+    "glossary": ["deepseek/deepseek-v4-flash"],
+    "translator": ["deepseek/deepseek-v4-flash"],
+    "proofreader": ["deepseek/deepseek-v4-flash"],
+    "qa": ["deepseek/deepseek-v4-flash", "gemini/gemini-2.5-flash"]
+  },
+  "defaultMaxChunkTokens": 1500,
+  "languages": [
+    { "code": "en", "name": "English" },
+    { "code": "hr", "name": "Croatian" },
+    { "code": "sr", "name": "Serbian" },
+    { "code": "bs", "name": "Bosnian" },
+    { "code": "sl", "name": "Slovenian" },
+    { "code": "de", "name": "German" },
+    { "code": "fr", "name": "French" },
+    { "code": "es", "name": "Spanish" },
+    { "code": "it", "name": "Italian" },
+    { "code": "pt", "name": "Portuguese" },
+    { "code": "nl", "name": "Dutch" },
+    { "code": "pl", "name": "Polish" },
+    { "code": "cs", "name": "Czech" },
+    { "code": "sk", "name": "Slovak" },
+    { "code": "hu", "name": "Hungarian" },
+    { "code": "ro", "name": "Romanian" },
+    { "code": "bg", "name": "Bulgarian" },
+    { "code": "ru", "name": "Russian" },
+    { "code": "uk", "name": "Ukrainian" },
+    { "code": "el", "name": "Greek" },
+    { "code": "tr", "name": "Turkish" },
+    { "code": "sv", "name": "Swedish" },
+    { "code": "da", "name": "Danish" },
+    { "code": "no", "name": "Norwegian" },
+    { "code": "fi", "name": "Finnish" },
+    { "code": "ar", "name": "Arabic", "rtl": true },
+    { "code": "he", "name": "Hebrew", "rtl": true },
+    { "code": "fa", "name": "Persian", "rtl": true },
+    { "code": "hi", "name": "Hindi" },
+    { "code": "zh", "name": "Chinese" },
+    { "code": "ja", "name": "Japanese" },
+    { "code": "ko", "name": "Korean" }
+  ]
+}
