@@ -1,0 +1,28 @@
+# Windows installer (NSIS, per user, x64). Build it with `npm run dist`; the unpacked app alone with `npm run dist:dir`.
+appId: com.tihomirselak.booktranslator
+productName: Book Translator
+copyright: Tihomir Selak
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!out/**/*.map'
+# No asar archive. The native credential-store module (@napi-rs/keyring, a .node file) and the engine process (which
+# requires its dependencies from node_modules) work with real file paths. With asar, the keyring package
+# (node_modules/@napi-rs/keyring-win32-x64-msvc) would need asarUnpack.
+asar: false
+extraResources:
+  # The first-run data folder is copied from here (main passes --seed to the engine).
+  - from: seed
+    to: seed
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Book-Translator-Setup-${version}.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
