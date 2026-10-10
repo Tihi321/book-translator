@@ -1,9 +1,9 @@
 {
   "agentModels": {
-    "glossary": ["deepseek/deepseek-v4-flash"],
-    "translator": ["deepseek/deepseek-v4-flash"],
-    "proofreader": ["deepseek/deepseek-v4-flash"],
-    "qa": ["deepseek/deepseek-v4-flash", "gemini/gemini-2.5-flash"]
+    "glossary": ["strata/qwen3.8-flash-next", "deepseek/deepseek-v4-flash"],
+    "translator": ["strata/qwen3.8-flash-next", "deepseek/deepseek-v4-flash"],
+    "proofreader": ["strata/qwen3.8-flash-next", "deepseek/deepseek-v4-flash"],
+    "qa": ["strata/qwen3.8-flash-next-low", "deepseek/deepseek-v4-flash", "gemini/gemini-2.5-flash"]
   },
   "defaultMaxChunkTokens": 1500,
   "languages": [

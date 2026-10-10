@@ -87,6 +87,23 @@ providers:
     concurrency: 1
     discover: true
     models: []
+  - id: strata
+    kind: openai-compat
+    local: true
+    base_url: http://127.0.0.1:8080/v1
+    api_key_env: STRATA_API_KEY   # optional; only sent if set
+    concurrency: 1
+    discover: false               # Strata answers any model name; fixed ids keep defaults.json stable across quants
+    json_schema: false
+    models:
+      - id: qwen3.8-flash-next
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: none }
+      - id: qwen3.8-flash-next-low
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: low }
   - id: ollama
     kind: openai-compat
     enabled: false
@@ -126,7 +143,8 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
-- `concurrency`: how many requests may run at once. LM Studio is 1 because all its requests share one GPU. This is also how many chapters are translated in parallel.
+- `concurrency`: how many requests may run at once. LM Studio and Strata are 1 because all their requests share one GPU. This is also how many chapters are translated in parallel.
+- `json_schema`: `false` stops the app from sending the JSON schema as `response_format`. Use it for servers that fail a bad JSON answer (HTTP 502) instead of constraining it. The app would retry that error and then fall back to the next model. With `false`, the prompt asks for JSON and the app's parse-and-repair step handles the answer. Default `true`.
 - `rpm`: optional requests-per-minute limit.
 - `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. LM Studio, Ollama and a custom server are discovered. If the server is not running, discovery fails quietly and the list stays as written here.
 
@@ -140,3 +158,15 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 ## Context size and local models
 
 The app splits the book into chunks that fit the model's context window. For LM Studio it reads the window the model is loaded with. Otherwise it uses `context` from this file, and 8192 if that is missing. LM Studio loads models with a small window (often 4096 or 8192) unless you change it. Load the model you translate with 16384 tokens or more, for example `lms load <model> -c 16384 --parallel 1`, or set it in LM Studio's model settings. A larger window does not make chunks bigger than the chunk size you choose in the app (default 1500 tokens), because long chunks make models skip text.
+
+## Strata
+
+Strata is a local Qwen3.8-Flash-Next server on `http://127.0.0.1:8080/v1`. It needs no key. Set `STRATA_API_KEY` only if you put one in front of it.
+
+- Start it with `D:\Strata\run-iq3_s.bat`. Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes.
+- One model runs per process, and all quants use port 8080. Strata ignores the `model` field, so the ids here are only names. That keeps `defaults.json` stable when you change quants.
+- `context` must match Strata's `--max-context` (131072 now).
+- The IQ3_S quant needs about 84 GB of memory. It can't run next to the big LM Studio models. Keep only small models loaded in LM Studio while Strata runs.
+- Thinking is on by default in Strata and is slow. `qwen3.8-flash-next` sends `reasoning_effort: none`. `qwen3.8-flash-next-low` sends `low`, which gives steadier answers for checks.
+- `json_schema: false`: when Strata can't produce valid JSON for a schema, it answers 502 `structured_output_failed`. The app would retry and then move to a paid model. Without the schema, the app's JSON repair step deals with a bad answer.
+- The disabled `custom` entry also points at port 8080. Don't enable both.

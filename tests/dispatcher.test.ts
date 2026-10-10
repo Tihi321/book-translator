@@ -149,6 +149,7 @@ describe('command dispatcher', () => {
     const { run } = await setup()
     const d = await run<{ agentModels: Record<string, string[]>; languages: unknown[]; defaultMaxChunkTokens: number }>({ type: 'getDefaults' })
     expect(d.languages.length).toBeGreaterThan(10)
+    expect(d.agentModels.translator?.[0]).toBe('strata/qwen3.8-flash-next')
     const next = await run<typeof d>({ type: 'setDefaults', patch: { agentModels: { qa: ['mock/mock-reviewer'] }, defaultMaxChunkTokens: 900 } })
     expect(next.agentModels.qa).toEqual(['mock/mock-reviewer'])
     expect(next.agentModels.translator).toEqual(d.agentModels.translator)

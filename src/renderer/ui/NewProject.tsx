@@ -183,7 +183,7 @@ export function NewProject() {
               </div>
             </div>
             {hiddenCount > 0 && <div className="dim small">{hiddenCount} model(s) are hidden because their provider has no API key or is switched off. See Settings.</div>}
-            {models && models.models.some((m) => m.local) === false && <div className="dim small">No local models found. Start LM Studio (load the model with a context of 32k or more) and press Refresh.</div>}
+            {models && models.models.some((m) => m.local) === false && <div className="dim small">No local models found. Start LM Studio (load the model with a context of 32k or more) or Strata, then press Refresh.</div>}
             {est && budgetLimited && <div className="dim small">Chunks are limited to {est.budget} tokens by the smallest context window of the selected models.</div>}
           </div>
 
@@ -210,7 +210,7 @@ export function NewProject() {
             <button className="primary" disabled={starting || !est || noTranslator || !targetLanguage} onClick={() => void start()} data-testid="start">
               {starting ? 'Starting...' : 'Start translation'}
             </button>
-            {noTranslator && <span className="warn">No model is available. Start LM Studio or add an API key in Settings.</span>}
+            {noTranslator && <span className="warn">No model is available. Start LM Studio or Strata, or add an API key in Settings.</span>}
           </div>
         </>
       )}

@@ -144,7 +144,7 @@ export function Settings() {
             <b>{d.provider}</b>: {d.error ? <span className="warn">not reachable ({d.error})</span> : `${d.found} model(s) found`}
           </div>
         ))}
-        <div className="dim small">Local models (LM Studio): load the model with a context of 32k or more, then press Refresh local models.</div>
+        <div className="dim small">Local models: load LM Studio models with a context of 32k or more, then press Refresh local models. Strata needs no refresh (128k context, set in its run config).</div>
       </div>
 
       <div className="card stack">
