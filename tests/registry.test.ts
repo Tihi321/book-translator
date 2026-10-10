@@ -13,12 +13,16 @@ describe('ModelRegistry with the seed providers.md', () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
     const ids = [...s.registry.providers.keys()]
-    expect(ids).toEqual(expect.arrayContaining(['deepseek', 'openai', 'openrouter', 'anthropic', 'gemini', 'lmstudio', 'ollama', 'custom', 'mock']))
+    expect(ids).toEqual(expect.arrayContaining(['deepseek', 'openai', 'openrouter', 'anthropic', 'gemini', 'lmstudio', 'strata', 'ollama', 'custom', 'mock']))
     expect(s.registry.getModel('mock/mock-translator')).toBeDefined()
     expect(s.registry.getModel('mock/mock-reviewer')).toBeDefined()
     expect(s.registry.providers.get('ollama')!.available).toBe(false)
     expect(s.registry.providers.get('custom')!.available).toBe(false)
     expect(s.registry.providers.get('mock')!.available).toBe(true)
+    expect(s.registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
+    expect(s.registry.contextLength('strata/qwen3.8-flash-next')).toBe(131072)
+    expect(s.registry.getModel('strata/qwen3.8-flash-next')?.extraBody).toEqual({ reasoning_effort: 'none' })
+    expect(s.registry.getModel('strata/qwen3.8-flash-next-low')?.extraBody).toEqual({ reasoning_effort: 'low' })
   })
 
   it('marks API providers unavailable without a key', async () => {

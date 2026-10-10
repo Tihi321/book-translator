@@ -40,6 +40,8 @@ export const providerEntrySchema = z.looseObject({
   tpm: z.number().int().positive().optional(),
   /** Ask the provider which models it has (GET /v1/models) and add the unknown ones. */
   discover: z.boolean().default(false),
+  /** Send the JSON schema as `response_format`. Set false for servers that reject a bad JSON answer (502) instead of constraining it: the prompt and the repair step handle the JSON then. */
+  json_schema: z.boolean().default(true),
   models: z.array(providerModelSchema).default([])
 })
 

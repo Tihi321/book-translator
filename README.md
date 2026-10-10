@@ -1,6 +1,6 @@
 # Book Translator
 
-A Windows desktop app that translates a book or document into another language with local models (LM Studio, Ollama, any OpenAI-compatible server) or API models (DeepSeek, Anthropic, Gemini, OpenAI, OpenRouter ...) and writes the translation back in the same format.
+A Windows desktop app that translates a book or document into another language with local models (LM Studio, Strata, Ollama, any OpenAI-compatible server) or API models (DeepSeek, Anthropic, Gemini, OpenAI, OpenRouter ...) and writes the translation back in the same format.
 
 Books are larger than any model's context, so the text is split into chunks that fit the chosen models. A small pipeline of agents keeps quality and consistency up:
 
@@ -49,6 +49,14 @@ API keys are never written to files. A key is looked up in an environment variab
 - Quality varies a lot with the model: a 4B model (`nvidia/nemotron-3-nano-4b`) gave poor Croatian, while Qwen 35B (`qwen3.6-35b-a3b`) gave good Croatian. For gendered languages use the biggest model you can run, and keep the glossary builder on.
 - Local servers handle one request at a time, so concurrency is 1. API providers default to 4-8 chapters in parallel.
 
+## Strata notes
+
+- Strata is a local Qwen3.8-Flash-Next server on `http://127.0.0.1:8080/v1`. It needs no key.
+- Start it with `D:\Strata\run-iq3_s.bat`. Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes.
+- The default models use Strata first and fall back to DeepSeek (QA falls back to Gemini last). If Strata is not running, the app moves on to the next model.
+- The IQ3_S quant needs about 84 GB of memory. Keep only small models loaded in LM Studio while Strata runs.
+- Strata is set up with `json_schema: false` in `providers.md`, so glossary and QA JSON comes from the prompt and the app's repair step. See the Strata section in `providers.md`.
+
 ## CLI
 
 The engine also runs headless: `npm run engine -- <command>`.
@@ -68,6 +76,8 @@ key-set <ENV_NAME>                          store an API key (npm run key:set <E
 `--to` takes a language name or code (`Croatian`, `hr`). The same file and language always give the same project, so running `translate` again resumes it (Ctrl+C stops cleanly). `--data <dir>` (or `BOOK_TRANSLATOR_DATA`) selects the data folder. Errors print one line and exit with code 1.
 
 Example: `npm run engine -- translate book.epub --to hr --model lmstudio/qwen3.6-35b-a3b --qa-model deepseek/deepseek-v4-flash`
+
+With no `--model` flags the defaults from `config/defaults.json` apply (Strata first, then DeepSeek).
 
 ## Data folder
 

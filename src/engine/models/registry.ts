@@ -21,6 +21,8 @@ export interface ProviderInfo {
   concurrency: number
   rpm?: number
   discover: boolean
+  /** Send the JSON schema as `response_format` (`openai-compat`). */
+  jsonSchema: boolean
   /** Enabled and (local, mock or has a key). */
   available: boolean
   unavailableReason?: string
@@ -99,6 +101,7 @@ export class ModelRegistry {
         concurrency: p.concurrency,
         rpm: p.rpm,
         discover: p.discover,
+        jsonSchema: p.json_schema,
         available: false
       }
       this.setupClient(info, keys)
@@ -158,7 +161,8 @@ export class ModelRegistry {
         id: info.id,
         baseUrl: info.baseUrl,
         apiKey,
-        fetchImpl
+        fetchImpl,
+        jsonSchema: info.jsonSchema
       })
     } else if (info.kind === 'anthropic') {
       info.client = new AnthropicClient({ id: info.id, baseUrl: info.baseUrl, apiKey: apiKey ?? '', fetchImpl })

@@ -9,6 +9,8 @@ export interface OpenAiCompatOptions {
   /** Total time allowed for one request. Default 15 minutes. */
   timeoutMs?: number
   fetchImpl?: typeof fetch
+  /** Send `schema` as `response_format`. Default true. False for servers that fail a bad answer instead of constraining it. */
+  jsonSchema?: boolean
   /** Prefixes added to embedding inputs (nomic wants these). */
   embedPrefixes?: { document: string; query: string }
 }
@@ -55,7 +57,7 @@ export class OpenAiCompatClient implements ProviderClient {
     }
     if (req.maxTokens) body.max_tokens = req.maxTokens
     if (req.temperature !== undefined) body.temperature = req.temperature
-    if (req.schema) {
+    if (req.schema && this.opts.jsonSchema !== false) {
       body.response_format = { type: 'json_schema', json_schema: { name: 'result', strict: true, schema: req.schema } }
     }
     const signal = withTimeout(req.signal, this.opts.timeoutMs ?? 15 * 60_000)
