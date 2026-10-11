@@ -3,3 +3,9 @@ out
 dist
 *.log
 .claude/temp/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions

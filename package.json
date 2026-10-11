@@ -5,16 +5,17 @@
   "description": "Book Translator: translate EPUB, DOCX, TXT/MD and PDF with local or API models",
   "main": "./out/main/index.js",
   "scripts": {
+    "postinstall": "install-electron",
     "build:engine": "vite build --config vite.engine.config.ts --logLevel warn",
-    "dev": "npm run build:engine && electron-vite dev",
-    "build": "npm run build:engine && electron-vite build",
-    "engine": "npm run build:engine && node out/engine/index.js",
-    "key:set": "npm run build:engine && node out/engine/index.js key-set",
+    "dev": "yarn build:engine && electron-vite dev",
+    "build": "yarn build:engine && electron-vite build",
+    "engine": "yarn build:engine && node out/engine/index.js",
+    "key:set": "yarn build:engine && node out/engine/index.js key-set",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
-    "dist": "npm run build && electron-builder --config electron-builder.yml --win nsis --x64",
-    "dist:dir": "npm run build && electron-builder --config electron-builder.yml --win dir --x64"
+    "dist": "yarn build && electron-builder --config electron-builder.yml --win nsis --x64",
+    "dist:dir": "yarn build && electron-builder --config electron-builder.yml --win dir --x64"
   },
   "dependencies": {
     "@napi-rs/keyring": "^2.1.0",
