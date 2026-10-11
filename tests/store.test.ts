@@ -39,6 +39,8 @@ describe('renderer store', () => {
         return undefined
       }) as unknown as BookTranslatorApi['request'],
       pickFile: async () => null,
+      pickBook: async () => null,
+      readBook: async () => ({ name: 'x.txt', ext: '.txt', bytes: new Uint8Array() }),
       openPath: async () => true,
       showInFolder: async () => true
     }

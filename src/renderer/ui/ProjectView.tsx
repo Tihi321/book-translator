@@ -138,6 +138,13 @@ export function ProjectView({ id }: { id: string }) {
     setExporting(false)
   }
 
+  async function readTranslation() {
+    setExporting(true)
+    const res = await attempt(getApi().request<'export'>({ type: 'export', projectId: id }))
+    setExporting(false)
+    if (res) setView({ name: 'reader', source: { path: res.path, projectId: id } })
+  }
+
   return (
     <div className="page stack">
       <div className="row spread">
@@ -164,6 +171,12 @@ export function ProjectView({ id }: { id: string }) {
             <button className="primary" disabled={!canStart} onClick={() => void send({ type: 'start', projectId: id })} data-testid="resume">
               {p.status === 'created' ? 'Start' : p.status === 'glossary-review' ? 'Continue' : 'Resume'}
             </button>
+          )}
+          {p.format !== 'docx' && (
+            <>
+              <button onClick={() => setView({ name: 'reader', source: { projectId: id, side: 'source' } })} data-testid="read-original">Read original</button>
+              <button onClick={() => void readTranslation()} disabled={exporting} title="Exports what is translated so far, then opens it" data-testid="read-translation">Read translation</button>
+            </>
           )}
           <button onClick={() => void doExport()} disabled={exporting} title="Writes the document with what is translated so far" data-testid="export">{exporting ? 'Exporting...' : 'Export'}</button>
           <button onClick={() => void attempt(getApi().openPath(detail.outputRel))}>Open folder</button>

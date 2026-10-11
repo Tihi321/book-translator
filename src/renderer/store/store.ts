@@ -5,7 +5,10 @@ import type { ChunkState, ProjectSummary } from '../../shared/project'
 import type { DefaultsConfig } from '../../shared/schemas'
 import { getApi } from '../api'
 
-export type View = { name: 'list' } | { name: 'new' } | { name: 'project'; id: string } | { name: 'settings' }
+/** What the reader opens. A path may carry the project it came from, for Back. */
+export type ReaderSource = { path: string; projectId?: string } | { projectId: string; side: 'source' | 'translation' }
+
+export type View = { name: 'list' } | { name: 'new' } | { name: 'project'; id: string } | { name: 'settings' } | { name: 'reader'; source?: ReaderSource }
 
 export interface Toast {
   id: number

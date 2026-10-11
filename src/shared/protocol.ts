@@ -219,6 +219,16 @@ export interface Transport<In, Out> {
 
 export type EngineTransport = Transport<Request, EngineEvent>
 
+/** A book the reader opens: a local file, or the original file of a project. */
+export type BookTarget = { path: string } | { projectId: string }
+
+/** A book file read by the main process. `ext` is lower case with the dot. */
+export interface BookFile {
+  name: string
+  ext: string
+  bytes: Uint8Array
+}
+
 /** What the preload script exposes to the renderer as `window.bt`. */
 export interface BookTranslatorApi {
   /** Subscribes to engine events. Returns the unsubscribe function. */
@@ -227,6 +237,10 @@ export interface BookTranslatorApi {
   request<K extends CommandType>(command: CommandOf<K>): Promise<CommandResults[K]>
   /** The file dialog (filters from the supported extensions). Null when cancelled. */
   pickFile(): Promise<string | null>
+  /** The file dialog for the reader (epub, pdf, txt, md). Null when cancelled. The chosen path may then be read with `readBook`. */
+  pickBook(): Promise<string | null>
+  /** Reads a book for the reader. Only a picked file, a file in the data folder, or a project's original is allowed. Rejects otherwise. */
+  readBook(target: BookTarget): Promise<BookFile>
   /** Opens a folder or file inside the data folder with the system shell. `rel` is relative to the data folder. */
   openPath(rel: string): Promise<boolean>
   /** Shows an exported file in the file manager. */

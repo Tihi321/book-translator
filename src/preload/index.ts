@@ -11,6 +11,8 @@ const api: BookTranslatorApi = {
   },
   request: (command) => ipcRenderer.invoke('engine:request', command) as never,
   pickFile: () => ipcRenderer.invoke('host:pickFile'),
+  pickBook: () => ipcRenderer.invoke('host:pickBook'),
+  readBook: (target) => ipcRenderer.invoke('host:readBook', target),
   openPath: (rel) => ipcRenderer.invoke('host:openPath', rel),
   showInFolder: (file) => ipcRenderer.invoke('host:showInFolder', file)
 }
