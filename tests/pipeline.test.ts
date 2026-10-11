@@ -180,6 +180,22 @@ describe('resume', () => {
     expect((await service.getProject(id)).status).toBe('cancelled')
     expect((await service.store.listChunks(id)).every((c) => c.state === 'pending')).toBe(true)
   })
+
+  it('pauses a project the engine left running when the app closed, and it resumes to done', async () => {
+    r = await rig()
+    const id = await r.create({ enabled: { glossary: true, proofreader: false, qa: false } })
+    const service = r.service
+    const stale = await service.getProject(id)
+    stale.status = 'glossary' // what a run killed during the glossary leaves on disk
+    await service.store.save(stale)
+
+    expect(await service.recoverInterrupted()).toEqual([id])
+    expect((await service.getProject(id)).status).toBe('paused')
+    expect(await fs.readFile(service.store.file(id, 'log.md'), 'utf8')).toContain('stopped during glossary')
+    expect(await service.recoverInterrupted()).toEqual([])
+
+    expect((await service.start(id)).status).toBe('done')
+  })
 })
 
 describe('translator retries', () => {

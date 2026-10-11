@@ -74,6 +74,23 @@ export class EngineService {
     return out
   }
 
+  /**
+   * Run at engine start: a project saved as running (glossary, translating) was stopped by a closed app or a crash, since no run
+   * survives the engine. It becomes paused, so the app offers Resume instead of showing a run that will never move.
+   */
+  async recoverInterrupted(): Promise<string[]> {
+    const recovered: string[] = []
+    for (const p of await this.store.list()) {
+      if (p.status !== 'glossary' && p.status !== 'translating') continue
+      const was = p.status
+      p.status = 'paused'
+      await this.store.save(p)
+      await this.store.log(p.id, `warn: the run stopped during ${was} when the app closed, paused (press Resume to continue)`)
+      recovered.push(p.id)
+    }
+    return recovered
+  }
+
   async snapshot(): Promise<void> {
     this.emit({ type: 'snapshot', projects: await this.listProjects() })
   }

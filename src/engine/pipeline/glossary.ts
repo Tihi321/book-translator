@@ -155,6 +155,9 @@ export const glossaryReplySchema = z.object({
 
 const TYPES = new Set(['person', 'place', 'org', 'term', 'phrase'])
 
+/** Output cap for one glossary pass. Thinking models count their thinking against it, so it leaves room for that. */
+const GLOSSARY_MAX_TOKENS = 16000
+
 export interface GlossaryBuildResult {
   entries: GlossaryEntry[]
   brief: Brief
@@ -177,8 +180,10 @@ export async function buildGlossary(
   let entries: GlossaryEntry[] = [...(opts.existing ?? [])]
   let brief: Brief = { characters: [] }
   let first = true
+  env.log('info', `glossary: reading the book in ${passes.length} pass(es)`)
   for (const pass of passes) {
     if (env.signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    env.log('info', `glossary pass ${pass.index} of ${passes.length} started`)
     const text = pass.segments.map((s) => s.text).join('\n\n')
     const messages = await buildMessages(
       env.dataDir,
@@ -193,7 +198,12 @@ export async function buildGlossary(
       },
       text
     )
-    const { value } = await chatJson(chatFn(env, 'glossary', 'glossary', opts.unit ?? `glossary-${pass.index}`), messages, glossaryReplySchema, { temperature: 0.2, signal: env.signal })
+    const { value } = await chatJson(chatFn(env, 'glossary', 'glossary', opts.unit ?? `glossary-${pass.index}`), messages, glossaryReplySchema, {
+      temperature: 0.2,
+      // a JSON list of terms is a few thousand tokens at most: the cap stops a model that loops on its answer
+      maxTokens: GLOSSARY_MAX_TOKENS,
+      signal: env.signal
+    })
     const found: GlossaryEntry[] = value.terms
       .filter((t) => t.source.trim() && t.target.trim())
       .map((t) => {
@@ -203,7 +213,9 @@ export async function buildGlossary(
         if (t.note?.trim()) e.note = t.note.trim()
         return e
       })
+    const before = entries.length
     entries = mergeGlossary(entries, found)
+    env.log('info', `glossary pass ${pass.index} of ${passes.length} done: ${entries.length - before} new term(s), ${entries.length} in all`)
     if (value.brief) {
       const b = value.brief
       if (first) brief = { genre: b.genre, tone: b.tone, register: b.register, pov: b.pov, address: b.address, characters: [] }

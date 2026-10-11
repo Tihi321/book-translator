@@ -305,7 +305,7 @@ export class ProjectRunner {
         chunk.costUsd += r.costUsd
         chunk.ms += r.ms
         if (agent === 'translator') chunk.model = r.model.ref
-      }
+      } else this.emitProgress() // calls outside a chunk (the glossary) would otherwise show no spend until the stage ends
       return { text: r.text, costUsd: r.costUsd, model: r.model.ref, usage: r.usage, ms: r.ms }
     }
   }

@@ -26,6 +26,7 @@ export async function serve(argv: string[]): Promise<void> {
   await registry.load()
   if (showMock) scriptDevMock(registry.mock)
   const service = new EngineService({ dataDir, registry, emit: (ev) => transport.send(ev) })
+  await service.recoverInterrupted()
   const dispatcher = new CommandDispatcher({ service, emit: (ev) => transport.send(ev), showMock })
   serveEngine(transport, dispatcher)
   transport.send({ type: 'engine.ready', info: dispatcher.info() })
