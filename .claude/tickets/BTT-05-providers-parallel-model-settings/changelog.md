@@ -1,5 +1,42 @@
 # BTT-05 changelog
 
+## 2026-10-13: Drag and drop, and Open a folder on New translation (follow-up, the user asked for it)
+
+- `src/shared/protocol.ts`: adds `FolderListing { folder, files }`, plus `pickFolder()`, `listFolder(dir)` and `pathForFile(file)` on `BookTranslatorApi`.
+- `src/main/index.ts`:
+  - new `host:pickFolder` (folder dialog; `BOOK_TRANSLATOR_PICK_FOLDER` stands in for the dialog in scripted checks) and `host:listFolder`
+  - both use `listDocuments`: the top-level files with the engine's supported extensions, in natural name order (`chapter2` before `chapter10`)
+- `src/preload/index.ts`: the new calls, and `pathForFile` through `webUtils.getPathForFile`, because `File.path` was removed in Electron 32.
+- `src/renderer/ui/NewProject.tsx`:
+  - an **Open a folder** button next to the file button
+  - the whole page is a drop target, and the first card is highlighted while dragging
+  - **What a drop does:**
+    - one supported file opens as a single translation, as before
+    - a folder, several files, or a mix opens as a batch
+    - unsupported files are skipped, with a message
+  - **Batch:** a list of the documents with checkboxes and All/None buttons, and one set of settings for all of them. The source language is detected per document unless you type one.
+    - An **Estimate N document(s)** button analyzes the ticked files one after another and adds the numbers up.
+    - **Start N translation(s)** creates one project per file and starts each. Untick "Start them now" to only create them. It then goes to the Translations list, and failures are reported per file.
+- `src/renderer/styles.css`: `.dropzone`, `.dropzone.dragging` and `.batch-list`.
+- `tests/store.test.ts`: the fake API gets the three new methods.
+
+**Passed:**
+- `yarn typecheck`, `yarn lint`
+- `yarn test`: 18 files and 198 tests passed.
+- **Live check in Electron** (`yarn dev` driven over CDP with `Input.dispatchDragEvent`; scripts in `.claude/temp/dnd/`):
+  - Open a folder lists `chapter1.md, chapter2.md, chapter10.md` and skips `notes.jpg`.
+  - Dropping the folder highlights the zone and gives the same list.
+  - Dropping a single `.md` switches to one translation with its estimate.
+  - The batch estimate adds up the 3 documents.
+  - Start created 3 projects, and all finished `done`.
+
+**Problem during the check:**
+- The dev harness only adds mock models, so the 3 test projects used the default lists. Strata was not running, so they fell back to the real `deepseek/deepseek-flash` with the stored key: about 8.4k tokens in, 0.7k out, **≈ $0.0033**.
+- This also confirmed DeepSeek V4.1 Flash end to end: the glossary JSON without `response_format`, and the translation.
+- Future UI checks must switch to the mock models before starting a run.
+
+**Not done:** the Reader page has no drag and drop. Only New translation was asked for.
+
 ## 2026-10-13: DeepSeek V4.1 Flash (follow-up, the user asked for it)
 
 This follows Scriptorium's `f592fe8` and its current seed.

@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, shell } from 'electron'
-import { readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { isRequest } from '../shared/protocol'
-import type { BookFile, Command, EngineEvent, EngineInfo } from '../shared/protocol'
+import type { BookFile, Command, EngineEvent, EngineInfo, FolderListing } from '../shared/protocol'
 import { startEngine } from './engineClient'
 import type { EngineClient } from './engineClient'
 
@@ -81,6 +81,18 @@ async function engineInfo(): Promise<EngineInfo> {
   return info
 }
 
+/** The documents the engine can read in a folder: top level only, in natural name order (chapter2 before chapter10). */
+async function listDocuments(dir: unknown): Promise<FolderListing> {
+  if (typeof dir !== 'string' || !dir) throw new Error('no folder')
+  const folder = path.resolve(dir)
+  if (!(await stat(folder)).isDirectory()) throw new Error('Not a folder')
+  const exts = new Set((await engineInfo()).extensions.map((e) => e.toLowerCase()))
+  const entries = await readdir(folder, { withFileTypes: true })
+  const names = entries.filter((e) => e.isFile() && exts.has(path.extname(e.name).toLowerCase())).map((e) => e.name)
+  names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+  return { folder, files: names.map((n) => path.join(folder, n)) }
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -114,6 +126,13 @@ if (!app.requestSingleInstanceLock()) {
       const res = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
       return res.canceled ? null : (res.filePaths[0] ?? null)
     })
+    ipcMain.handle('host:pickFolder', async () => {
+      if (process.env.BOOK_TRANSLATOR_PICK_FOLDER) return listDocuments(process.env.BOOK_TRANSLATOR_PICK_FOLDER)
+      const options = { title: 'Choose a folder of documents to translate', properties: ['openDirectory' as const] }
+      const res = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      return res.canceled || !res.filePaths[0] ? null : listDocuments(res.filePaths[0])
+    })
+    ipcMain.handle('host:listFolder', (_e, dir: unknown) => listDocuments(dir))
     ipcMain.handle('host:pickBook', async () => {
       let picked: string | null
       if (process.env.BOOK_TRANSLATOR_PICK_FILE) picked = process.env.BOOK_TRANSLATOR_PICK_FILE

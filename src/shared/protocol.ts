@@ -296,6 +296,12 @@ export interface BookFile {
   bytes: Uint8Array
 }
 
+/** The documents of a folder that the app can translate (top level only, natural name order, absolute paths). */
+export interface FolderListing {
+  folder: string
+  files: string[]
+}
+
 /** What the preload script exposes to the renderer as `window.bt`. */
 export interface BookTranslatorApi {
   /** Subscribes to engine events. Returns the unsubscribe function. */
@@ -304,6 +310,12 @@ export interface BookTranslatorApi {
   request<K extends CommandType>(command: CommandOf<K>): Promise<CommandResults[K]>
   /** The file dialog (filters from the supported extensions). Null when cancelled. */
   pickFile(): Promise<string | null>
+  /** The folder dialog: the documents in the chosen folder. Null when cancelled. */
+  pickFolder(): Promise<FolderListing | null>
+  /** The documents in a folder (for a dropped folder). Rejects when it is not a folder. */
+  listFolder(dir: string): Promise<FolderListing>
+  /** The path of a dropped file or folder, '' when it has none. */
+  pathForFile(file: File): string
   /** The file dialog for the reader (epub, pdf, txt, md). Null when cancelled. The chosen path may then be read with `readBook`. */
   pickBook(): Promise<string | null>
   /** Reads a book for the reader. Only a picked file, a file in the data folder, or a project's original is allowed. Rejects otherwise. */

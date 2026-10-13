@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { BookTranslatorApi, EngineEvent } from '../shared/protocol'
 
 const api: BookTranslatorApi = {
@@ -11,6 +11,10 @@ const api: BookTranslatorApi = {
   },
   request: (command) => ipcRenderer.invoke('engine:request', command) as never,
   pickFile: () => ipcRenderer.invoke('host:pickFile'),
+  pickFolder: () => ipcRenderer.invoke('host:pickFolder'),
+  listFolder: (dir) => ipcRenderer.invoke('host:listFolder', dir),
+  // File.path is gone since Electron 32: the preload asks webUtils for a dropped file's path
+  pathForFile: (file) => webUtils.getPathForFile(file),
   pickBook: () => ipcRenderer.invoke('host:pickBook'),
   readBook: (target) => ipcRenderer.invoke('host:readBook', target),
   openPath: (rel) => ipcRenderer.invoke('host:openPath', rel),

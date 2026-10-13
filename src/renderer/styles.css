@@ -204,6 +204,27 @@ h3 {
   color: var(--warn);
 }
 
+/* new translation: drop files or a folder */
+.dropzone {
+  border-style: dashed;
+  transition: border-color 0.1s, background 0.1s;
+}
+.dropzone.dragging {
+  border-color: var(--accent);
+  background: var(--panel2);
+}
+.batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
 /* projects list */
 .cards {
   display: grid;
