@@ -42,19 +42,19 @@ describe('ModelRegistry with the seed providers.md', () => {
   it('computes cost per 1M tokens, cached input at its own price', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
-    const m = s.registry.getModel('deepseek/deepseek-v4-flash')!
-    expect(computeCost(m, { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 })).toBeCloseTo(0.42, 6)
+    const m = s.registry.getModel('deepseek/deepseek-flash')!
+    expect(computeCost(m, { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 })).toBeCloseTo(1.5, 6)
   })
 
   it('reports the effective context: loaded, then providers.md, then 8192', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
     const r = s.registry
-    expect(r.contextLength('deepseek/deepseek-v4-flash')).toBe(1_000_000)
+    expect(r.contextLength('deepseek/deepseek-flash')).toBe(1_000_000)
     expect(r.contextLength('mock/mock-translator')).toBe(8192)
     expect(r.contextLength('unknown/model')).toBe(8192)
-    r.getModel('deepseek/deepseek-v4-flash')!.loadedContext = 32768
-    expect(r.contextLength('deepseek/deepseek-v4-flash')).toBe(32768)
+    r.getModel('deepseek/deepseek-flash')!.loadedContext = 32768
+    expect(r.contextLength('deepseek/deepseek-flash')).toBe(32768)
   })
 
   it('discovery of an unreachable server does not throw', async () => {
@@ -176,7 +176,7 @@ describe('config/models.md', () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
     expect(s.registry.modelChoices).toEqual({ kind: 'models', picked: [], hidden: [], limits: {} })
-    expect(s.registry.isShown('deepseek/deepseek-v4-flash')).toBe(true)
+    expect(s.registry.isShown('deepseek/deepseek-flash')).toBe(true)
   })
 
   it('adds the picked models with their price, and hides the hidden ones from the pickers', async () => {
@@ -187,7 +187,7 @@ describe('config/models.md', () => {
     expect(m).toMatchObject({ picked: true, context: 32000, priceIn: 1, priceOut: 2, priceCachedIn: 1, family: 'acme' })
     expect(s.registry.getModel('nope/x')).toBeUndefined()
     expect(s.registry.isShown('deepseek/deepseek-v4-pro')).toBe(false)
-    expect(s.registry.isShown('deepseek/deepseek-v4-flash')).toBe(true)
+    expect(s.registry.isShown('deepseek/deepseek-flash')).toBe(true)
     // hidden is only for the pickers: the model still exists
     expect(s.registry.getModel('deepseek/deepseek-v4-pro')).toBeDefined()
   })
@@ -309,8 +309,8 @@ describe('group aliases and order', () => {
   it('resolves an alias to its default and leaves provider/model alone', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
-    expect(s.registry.resolve('paid')).toBe('deepseek/deepseek-v4-flash')
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
+    expect(s.registry.resolve('paid')).toBe('deepseek/deepseek-flash')
     expect(s.registry.resolve('strata')).toBe('strata/qwen3.8-flash-next')
     expect(s.registry.resolve('lmstudio')).toBe('lmstudio') // no default set: left as it is
     expect(s.registry.resolve('openai/gpt-5')).toBe('openai/gpt-5')
@@ -319,7 +319,7 @@ describe('group aliases and order', () => {
   it('knows the group of an alias or a model', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash' }, lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash' }, lmLoad })
     expect(s.registry.groupOf('paid')).toBe('paid')
     expect(s.registry.groupOf('deepseek/deepseek-v4-pro')).toBe('paid')
     expect(s.registry.groupOf('strata/qwen3.8-flash-next')).toBe('strata')
@@ -331,26 +331,26 @@ describe('group aliases and order', () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
     const list = ['paid', 'strata', 'lmstudio/x', 'openai/gpt-5', 'deepseek/deepseek-v4-pro', 'ollama/y']
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
     expect(s.registry.orderRefs(list)).toEqual(list)
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['strata', 'paid'], lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['strata', 'paid'], lmLoad })
     // lmstudio is not in the order and ollama is in no group: both go last, in their own order
     expect(s.registry.orderRefs(list)).toEqual(['strata', 'paid', 'openai/gpt-5', 'deepseek/deepseek-v4-pro', 'lmstudio/x', 'ollama/y'])
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['lmstudio', 'strata', 'paid'], lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['lmstudio', 'strata', 'paid'], lmLoad })
     expect(s.registry.orderRefs(list)).toEqual(['lmstudio/x', 'strata', 'paid', 'openai/gpt-5', 'deepseek/deepseek-v4-pro', 'ollama/y'])
   })
 
   it('takes the aliases, order and load settings from a defaults.json', async () => {
-    const d = defaultsSchema.parse({ groupDefaults: { paid: 'deepseek/deepseek-v4-flash', lmstudio: '' }, modelOrder: ['strata'], lmstudio: { parallel: 2 } })
+    const d = defaultsSchema.parse({ groupDefaults: { paid: 'deepseek/deepseek-flash', lmstudio: '' }, modelOrder: ['strata'], lmstudio: { parallel: 2 } })
     expect(modelDefaultsOf(d)).toEqual({
-      aliases: { paid: 'deepseek/deepseek-v4-flash' },
+      aliases: { paid: 'deepseek/deepseek-flash' },
       order: ['strata'],
       lmLoad: { parallel: 2, context: 131072, ttlMinutes: 60 }
     })
     // the seed has them too
     const seed = defaultsSchema.parse(JSON.parse(await fs.readFile(path.join(SEED_DIR, 'config', 'defaults.json'), 'utf8')))
     expect(seed).toMatchObject({ modelOrder: [], lmstudio: { parallel: 4 }, parallel: { enabled: true, maxAtOnce: 'auto', splitSections: false } })
-    expect(seed.groupDefaults.paid).toBe('deepseek/deepseek-v4-flash')
+    expect(seed.groupDefaults.paid).toBe('deepseek/deepseek-flash')
   })
 
   it('loadConfigFor uses the model\'s own load settings over the defaults', async () => {

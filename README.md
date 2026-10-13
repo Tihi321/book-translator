@@ -75,7 +75,7 @@ key-set <ENV_NAME>                          store an API key (npm run key:set <E
 
 `--to` takes a language name or code (`Croatian`, `hr`). The same file and language always give the same project, so running `translate` again resumes it (Ctrl+C stops cleanly). `--data <dir>` (or `BOOK_TRANSLATOR_DATA`) selects the data folder. Errors print one line and exit with code 1.
 
-Example: `npm run engine -- translate book.epub --to hr --model lmstudio/qwen3.6-35b-a3b --qa-model deepseek/deepseek-v4-flash`
+Example: `npm run engine -- translate book.epub --to hr --model lmstudio/qwen3.6-35b-a3b --qa-model deepseek/deepseek-flash`
 
 With no `--model` flags the defaults from `config/defaults.json` apply (Strata first, then DeepSeek).
 

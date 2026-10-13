@@ -6,20 +6,21 @@ providers:
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
     concurrency: 8
+    json_schema: false             # DeepSeek answers response_format json_schema with HTTP 400 ("unavailable now"), checked 2026-10-12
     models:
-      - id: deepseek-v4-flash
+      - id: deepseek-flash
         family: deepseek
         context: 1000000
-        price_in: 0.14
-        price_out: 0.28
-        price_cached_in: 0.0028
-        extra_body: null
+        price_in: 0.30
+        price_out: 1.20
+        price_cached_in: 0.006
+        extra_body: { thinking: { type: disabled } }
       - id: deepseek-v4-pro
         family: deepseek
         context: 1000000
-        price_in: 1.74
-        price_out: 3.48
-        price_cached_in: 0.0145
+        price_in: 1.32
+        price_out: 3.96
+        price_cached_in: 0.044
         extra_body: null
   - id: openai
     kind: openai-compat
@@ -141,7 +142,7 @@ providers:
 
 One entry per provider. The app reads this file when it starts and when you refresh the model list in the settings. API keys are never written here: `api_key_env` names an environment variable, and the app also looks in the Windows credential store under that name (`npm run key:set <NAME>`, or the settings screen).
 
-Prices are examples. Verify them on each provider's pricing page. The DeepSeek numbers were checked 2026-10-08. The OpenAI, OpenRouter, Anthropic and Gemini entries are marked "to verify": model ids and prices there may be out of date. Cost estimates in the app come from these numbers.
+Prices are examples. Verify them on each provider's pricing page. The DeepSeek numbers were updated 2026-10-11 from the DeepSeek docs: `deepseek-flash` is DeepSeek-V4.1-Flash (the old name `deepseek-v4-flash` still works, but is served by V4.1 at the Flash price) and `deepseek-v4-pro` is DeepSeek-V4-Pro-0813. DeepSeek charges a peak and an off-peak price; the config holds the peak price, so estimates never count too little (off-peak is half of it). `deepseek-flash` sends `thinking: { type: disabled }`: with thinking on, it bills the hidden thinking as output and can spend the whole answer budget on it. DeepSeek has `json_schema: false` because it answers `response_format` with HTTP 400; the prompt and the repair step handle the JSON instead. The OpenAI, OpenRouter, Anthropic and Gemini entries are marked "to verify": model ids and prices there may be out of date. Cost estimates in the app come from these numbers.
 
 ## Fields of a provider
 

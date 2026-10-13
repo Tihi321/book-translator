@@ -48,12 +48,12 @@ describe('ModelRouter', () => {
     const client = new FlakyClient('deepseek', 2, () => new ProviderError('busy', 429, true))
     registry.providers.get('deepseek')!.client = client
     const router = new ModelRouter(registry, { retries: 2, sleep: noSleep })
-    const r = await router.complete(['deepseek/deepseek-v4-flash'], { messages: [{ role: 'user', content: 'x' }] })
+    const r = await router.complete(['deepseek/deepseek-flash'], { messages: [{ role: 'user', content: 'x' }] })
     expect(r.text).toBe('ok')
     expect(client.calls).toBe(3)
     expect(r.attempts).toBe(3)
-    // 1M in at $0.14 + 1M out at $0.28
-    expect(r.costUsd).toBeCloseTo(0.42, 6)
+    // 1M in at $0.30 + 1M out at $1.20
+    expect(r.costUsd).toBeCloseTo(1.5, 6)
   })
 
   it('falls back to the next model when retries run out', async () => {
@@ -62,7 +62,7 @@ describe('ModelRouter', () => {
     registry.providers.get('deepseek')!.client = bad
     registry.mock.onAny('from mock')
     const router = new ModelRouter(registry, { retries: 1, sleep: noSleep })
-    const r = await router.complete(['deepseek/deepseek-v4-flash', 'mock/mock-translator'], { messages: [{ role: 'user', content: 'x' }] })
+    const r = await router.complete(['deepseek/deepseek-flash', 'mock/mock-translator'], { messages: [{ role: 'user', content: 'x' }] })
     expect(r.model.ref).toBe('mock/mock-translator')
     expect(r.text).toBe('from mock')
     expect(bad.calls).toBe(2)
@@ -73,7 +73,7 @@ describe('ModelRouter', () => {
     const bad = new FlakyClient('deepseek', 99, () => new ProviderError('bad request', 400, false))
     registry.providers.get('deepseek')!.client = bad
     const router = new ModelRouter(registry, { retries: 3, sleep: noSleep })
-    const r = await router.complete(['deepseek/deepseek-v4-flash', 'mock/mock-reviewer'], { messages: [{ role: 'user', content: 'x' }] })
+    const r = await router.complete(['deepseek/deepseek-flash', 'mock/mock-reviewer'], { messages: [{ role: 'user', content: 'x' }] })
     expect(bad.calls).toBe(1)
     expect(r.model.ref).toBe('mock/mock-reviewer')
   })
@@ -82,7 +82,7 @@ describe('ModelRouter', () => {
     const { registry } = await setup()
     registry.providers.get('deepseek')!.client = new FlakyClient('deepseek', 99, () => new ProviderError('down', 500, true))
     const router = new ModelRouter(registry, { retries: 0, sleep: noSleep })
-    await expect(router.complete(['deepseek/deepseek-v4-flash'], { messages: [] })).rejects.toThrow('down')
+    await expect(router.complete(['deepseek/deepseek-flash'], { messages: [] })).rejects.toThrow('down')
     await expect(router.complete(['nope/none'], { messages: [] })).rejects.toThrow('no available model')
   })
 
@@ -141,7 +141,7 @@ describe('ModelRouter provider limits and down servers', () => {
     const client = new FlakyClient('deepseek', 1, () => new ProviderError('HTTP 429: rate limit exceeded, retry shortly', 429, true))
     registry.providers.get('deepseek')!.client = client
     const router = new ModelRouter(registry, { retries: 2, sleep: noSleep })
-    const r = await router.complete(['deepseek/deepseek-v4-flash'], { messages: [] })
+    const r = await router.complete(['deepseek/deepseek-flash'], { messages: [] })
     expect(r.attempts).toBe(2)
     expect(router.limiter.dayFull(registry.providers.get('deepseek')!)).toBe(false)
   })
@@ -179,7 +179,7 @@ describe('ModelRouter provider limits and down servers', () => {
     const client = new FlakyClient('deepseek', 99, unreachable)
     registry.providers.get('deepseek')!.client = client
     const router = new ModelRouter(registry, { retries: 2, sleep: noSleep })
-    await expect(router.complete(['deepseek/deepseek-v4-flash'], { messages: [] })).rejects.toThrow('ECONNREFUSED')
+    await expect(router.complete(['deepseek/deepseek-flash'], { messages: [] })).rejects.toThrow('ECONNREFUSED')
     expect(client.calls).toBe(3)
     expect(registry.providers.get('deepseek')!.down).toBe(false)
   })
@@ -194,7 +194,7 @@ describe('ModelRouter provider limits and down servers', () => {
     // strata is second: it goes down while the first model fails
     router.limiter.markDayFull(registry.providers.get('openrouter')!)
     const events = []
-    for await (const ev of router.chat(['deepseek/deepseek-v4-flash', 'strata/qwen3.8-flash-next', 'mock/mock-translator'], { messages: [] })) {
+    for await (const ev of router.chat(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'mock/mock-translator'], { messages: [] })) {
       events.push(ev)
       if (ev.type === 'attempt') registry.markDown(registry.providers.get('strata')!)
     }
@@ -208,7 +208,7 @@ describe('ModelRouter provider limits and down servers', () => {
     registry.providers.get('deepseek')!.client = small
     registry.mock.onAny('from mock')
     const router = new ModelRouter(registry, { retries: 3, sleep: noSleep })
-    const r = await router.complete(['deepseek/deepseek-v4-flash', 'mock/mock-translator'], { messages: [] })
+    const r = await router.complete(['deepseek/deepseek-flash', 'mock/mock-translator'], { messages: [] })
     expect(small.calls).toBe(1)
     expect(r.model.ref).toBe('mock/mock-translator')
   })
@@ -218,16 +218,16 @@ describe('ModelRouter provider limits and down servers', () => {
     registry.providers.get('deepseek')!.client = new FlakyClient('deepseek', 99, () => new ProviderError('HTTP 503: overloaded', 503, true))
     registry.providers.get('openai')!.client = new FlakyClient('openai', 99, () => new ProviderError('HTTP 401: bad key', 401, false))
     const router = new ModelRouter(registry, { retries: 1, sleep: noSleep })
-    const err = await router.complete(['deepseek/deepseek-v4-flash', 'openai/gpt-5'], { messages: [] }).catch((e: unknown) => e)
+    const err = await router.complete(['deepseek/deepseek-flash', 'openai/gpt-5'], { messages: [] }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ProviderError)
-    expect((err as Error).message).toBe('all models failed. deepseek/deepseek-v4-flash: HTTP 503: overloaded | openai/gpt-5: HTTP 401: bad key')
+    expect((err as Error).message).toBe('all models failed. deepseek/deepseek-flash: HTTP 503: overloaded | openai/gpt-5: HTTP 401: bad key')
   })
 
   it('throws the plain error when a single model fails', async () => {
     const { registry } = await setup()
     registry.providers.get('deepseek')!.client = new FlakyClient('deepseek', 99, () => new ProviderError('HTTP 503: overloaded', 503, true))
     const router = new ModelRouter(registry, { retries: 0, sleep: noSleep })
-    await expect(router.complete(['deepseek/deepseek-v4-flash'], { messages: [] })).rejects.toThrow('HTTP 503: overloaded')
+    await expect(router.complete(['deepseek/deepseek-flash'], { messages: [] })).rejects.toThrow('HTTP 503: overloaded')
   })
 })
 
@@ -236,19 +236,19 @@ describe('ModelRouter aliases and group order', () => {
 
   it('resolves aliases to the default models', async () => {
     const { registry } = await setup()
-    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
     const router = new ModelRouter(registry)
-    expect(router.resolve(['strata', 'paid', 'lmstudio', 'deepseek/deepseek-v4-flash']).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next', 'deepseek/deepseek-v4-flash'])
+    expect(router.resolve(['strata', 'paid', 'lmstudio', 'deepseek/deepseek-flash']).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next', 'deepseek/deepseek-flash'])
   })
 
   it('sorts the list by the group order and keeps the order inside a group', async () => {
     const { registry } = await setup()
-    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['strata', 'paid'], lmLoad })
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['strata', 'paid'], lmLoad })
     const router = new ModelRouter(registry)
     const refs = ['paid', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'strata']
-    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next-low', 'strata/qwen3.8-flash-next', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro'])
-    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next' }, order: [], lmLoad })
-    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'strata/qwen3.8-flash-next'])
+    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next-low', 'strata/qwen3.8-flash-next', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'])
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: [], lmLoad })
+    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'strata/qwen3.8-flash-next'])
   })
 
   it('calls the model an alias stands for', async () => {

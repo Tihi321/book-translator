@@ -1,12 +1,12 @@
 {
   "agentModels": {
-    "glossary": ["strata/qwen3.8-flash-next", "deepseek/deepseek-v4-flash"],
-    "translator": ["strata/qwen3.8-flash-next", "deepseek/deepseek-v4-flash"],
-    "proofreader": ["strata/qwen3.8-flash-next", "deepseek/deepseek-v4-flash"],
-    "qa": ["strata/qwen3.8-flash-next-low", "deepseek/deepseek-v4-flash", "gemini/gemini-2.5-flash"]
+    "glossary": ["strata/qwen3.8-flash-next", "deepseek/deepseek-flash"],
+    "translator": ["strata/qwen3.8-flash-next", "deepseek/deepseek-flash"],
+    "proofreader": ["strata/qwen3.8-flash-next", "deepseek/deepseek-flash"],
+    "qa": ["strata/qwen3.8-flash-next-low", "deepseek/deepseek-flash", "gemini/gemini-2.5-flash"]
   },
   "defaultMaxChunkTokens": 1500,
-  "groupDefaults": { "paid": "deepseek/deepseek-v4-flash", "strata": "strata/qwen3.8-flash-next" },
+  "groupDefaults": { "paid": "deepseek/deepseek-flash", "strata": "strata/qwen3.8-flash-next" },
   "modelOrder": [],
   "lmstudio": { "parallel": 4, "context": 131072, "ttlMinutes": 60 },
   "parallel": { "enabled": true, "maxAtOnce": "auto", "splitSections": false },

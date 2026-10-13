@@ -126,8 +126,8 @@ describe('command dispatcher', () => {
     const info = await run<ModelsInfo>({ type: 'listModels' })
     const ds = info.providers.find((p) => p.id === 'deepseek')!
     expect(ds).toMatchObject({ hasKey: true, available: true, local: false, concurrency: 8 })
-    const model = info.models.find((m) => m.ref === 'deepseek/deepseek-v4-flash')!
-    expect(model).toMatchObject({ context: 1000000, priceIn: 0.14, local: false })
+    const model = info.models.find((m) => m.ref === 'deepseek/deepseek-flash')!
+    expect(model).toMatchObject({ context: 1000000, priceIn: 0.3, local: false })
     expect(info.providers.find((p) => p.id === 'anthropic')).toMatchObject({ hasKey: false })
     expect(info.models.some((m) => m.ref.startsWith('mock/'))).toBe(true)
     const hidden = new CommandDispatcher({ service: r.service, emit: () => undefined, keys: () => undefined })
@@ -244,7 +244,7 @@ describe('models dialog commands', () => {
     await fs.writeFile(file, '---\nkind: models\npicked: []\nhidden: []\nlimits: {}\n---\nMy own notes.\n', 'utf8')
     const hidden = await run<ModelsInfo>({ type: 'showModels', provider: 'deepseek', refs: ['deepseek/deepseek-v4-pro'], show: false })
     expect(hidden.models.find((m) => m.ref === 'deepseek/deepseek-v4-pro')).toMatchObject({ shown: false, picked: false })
-    expect(hidden.models.find((m) => m.ref === 'deepseek/deepseek-v4-flash')).toMatchObject({ shown: true })
+    expect(hidden.models.find((m) => m.ref === 'deepseek/deepseek-flash')).toMatchObject({ shown: true })
     const text = await fs.readFile(file, 'utf8')
     expect(text).toContain('deepseek/deepseek-v4-pro')
     expect(text).toContain('My own notes.')
@@ -284,7 +284,7 @@ describe('models dialog commands', () => {
     await run({ type: 'showModels', provider: 'deepseek', refs: ['deepseek/deepseek-v4-pro'], show: false })
     const info = await run<ModelsInfo>({ type: 'addModel', provider: 'deepseek', id: 'deepseek-v4-pro', priceIn: 1, priceOut: 1 })
     expect(info.models.filter((m) => m.ref === 'deepseek/deepseek-v4-pro')).toHaveLength(1)
-    expect(info.models.find((m) => m.ref === 'deepseek/deepseek-v4-pro')).toMatchObject({ shown: true, picked: false, priceIn: 1.74 })
+    expect(info.models.find((m) => m.ref === 'deepseek/deepseek-v4-pro')).toMatchObject({ shown: true, picked: false, priceIn: 1.32 })
   })
 
   it('setProviderLimits saves limits over providers.md (0 means none) and frees waiting requests', async () => {
@@ -385,7 +385,7 @@ describe('group defaults in defaults.json', () => {
     const { r, run } = await setup()
     const d = await run<DefaultsConfig>({ type: 'getDefaults' })
     expect(d).toMatchObject({ modelOrder: [], lmstudio: { parallel: 4, context: 131072, ttlMinutes: 60 }, parallel: { enabled: true, maxAtOnce: 'auto', splitSections: false } })
-    expect(d.groupDefaults.paid).toBe('deepseek/deepseek-v4-flash')
+    expect(d.groupDefaults.paid).toBe('deepseek/deepseek-flash')
     const next = await run<DefaultsConfig>({
       type: 'setDefaults',
       patch: {
@@ -395,7 +395,7 @@ describe('group defaults in defaults.json', () => {
         parallel: { splitSections: true, maxAtOnce: 5 }
       }
     })
-    expect(next.groupDefaults).toEqual({ paid: 'deepseek/deepseek-v4-flash', strata: 'strata/qwen3.8-flash-next', lmstudio: 'lmstudio/gemma' })
+    expect(next.groupDefaults).toEqual({ paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next', lmstudio: 'lmstudio/gemma' })
     expect(next.modelOrder).toEqual(['strata', 'paid', 'lmstudio'])
     expect(next.lmstudio).toEqual({ parallel: 2, context: 131072, ttlMinutes: 60 })
     expect(next.parallel).toEqual({ enabled: true, maxAtOnce: 5, splitSections: true })

@@ -1,5 +1,28 @@
 # BTT-05 changelog
 
+## 2026-10-13: DeepSeek V4.1 Flash (follow-up, the user asked for it)
+
+This follows Scriptorium's `f592fe8` and its current seed.
+- `seed/config/providers.md`, DeepSeek entry:
+  - `deepseek-v4-flash` is renamed to `deepseek-flash` (DeepSeek-V4.1-Flash), priced $0.30 in, $1.20 out, $0.006 cached in.
+  - It sends `extra_body: { thinking: { type: disabled } }`.
+  - `deepseek-v4-pro` is repriced to $1.32 in, $3.96 out, $0.044 cached in.
+  - The provider gets `json_schema: false`, because DeepSeek answers `response_format` json_schema with HTTP 400.
+  - The pricing note in the docs is updated.
+- `seed/config/defaults.json` and `README.md`: `deepseek/deepseek-v4-flash` becomes `deepseek/deepseek-flash`, in every agent list and in `groupDefaults.paid`.
+- Tests:
+  - `tests/router.test.ts`, `tests/registry.test.ts` and `tests/dispatcher.test.ts` use the new id.
+  - The price expectations follow the new prices: the cost of 1M in plus 1M out goes from 0.42 to 1.5, and `priceIn` from 0.14 to 0.3 and from 1.74 to 1.32.
+
+**Passed:**
+- `yarn typecheck`, `yarn lint`
+- `yarn test`: 18 files and 198 tests passed.
+- `yarn engine models` on a new data folder lists `deepseek/deepseek-flash` at $0.3/$1.2.
+
+**Not run:** a live DeepSeek request.
+
+**Limitation:** an existing data folder and existing projects keep `deepseek/deepseek-v4-flash`. DeepSeek still accepts that name and serves V4.1 Flash with it. But the local price stays the old $0.14/$0.28, so cost estimates come out too low until `providers.md` is edited.
+
 ## 2026-10-13: Port Scriptorium's provider updates, parallel translation, and model settings
 
 Outcome:
