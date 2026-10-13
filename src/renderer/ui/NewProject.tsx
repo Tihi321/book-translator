@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ProjectSettings } from '../../shared/project'
+import type { ParallelSettings, ProjectSettings } from '../../shared/project'
 import type { AnalyzeResult } from '../../shared/protocol'
 import { AGENTS } from '../../shared/agents'
 import type { AgentName } from '../../shared/agents'
 import { getApi } from '../api'
 import { fmtCost, fmtCount, fmtDuration } from '../format'
 import { attempt, useStore } from '../store/store'
-import { ModelSelect, pickDefault } from './ModelSelect'
+import { ModelListEditor } from './ModelListEditor'
+import { seedList } from './ModelSelect'
+import { ParallelFields } from './ParallelFields'
 
 const AGENT_LABEL: Record<AgentName, string> = { glossary: 'Glossary builder', translator: 'Translator', proofreader: 'Proofreader', qa: 'QA reviewer' }
 const OTHER = '__other'
@@ -29,23 +31,26 @@ export function NewProject() {
   const [target, setTarget] = useState('hr')
   const [targetOther, setTargetOther] = useState('')
   const [sourceLang, setSourceLang] = useState('')
-  const [picked, setPicked] = useState<Partial<Record<AgentName, string>>>({})
+  const [picked, setPicked] = useState<Partial<Record<AgentName, string[]>>>({})
+  const [parallelEdit, setParallelEdit] = useState<ParallelSettings | null>(null)
   const [enabled, setEnabled] = useState({ glossary: true, proofreader: true, qa: true })
   const [pauseAfterGlossary, setPauseAfterGlossary] = useState(false)
   const [maxChunk, setMaxChunk] = useState<number | null>(null)
 
   const chunkSize = maxChunk ?? defaults?.defaultMaxChunkTokens ?? 1500
   const targetLanguage = target === OTHER ? targetOther.trim() : target
-  const modelFor = (a: AgentName) => picked[a] ?? pickDefault(models, defaults?.agentModels[a])
+  const listFor = (a: AgentName) => picked[a] ?? seedList(models, defaults?.agentModels[a])
+  const parallel: ParallelSettings = parallelEdit ?? defaults?.parallel ?? { enabled: true, maxAtOnce: 'auto', splitSections: false }
 
   const settings = useMemo<Partial<ProjectSettings>>(
     () => ({
-      agentModels: Object.fromEntries(AGENTS.map((a) => [a, [picked[a] ?? pickDefault(models, defaults?.agentModels[a])].filter(Boolean)])) as Record<AgentName, string[]>,
+      agentModels: Object.fromEntries(AGENTS.map((a) => [a, (picked[a] ?? seedList(models, defaults?.agentModels[a])).filter(Boolean)])) as Record<AgentName, string[]>,
       enabled,
       maxChunkTokens: chunkSize,
-      pauseAfterGlossary
+      pauseAfterGlossary,
+      parallel
     }),
-    [picked, models, defaults, enabled, chunkSize, pauseAfterGlossary]
+    [picked, models, defaults, enabled, chunkSize, pauseAfterGlossary, parallel]
   )
 
   // the estimate follows every change (debounced); a late answer for an older request is dropped
@@ -107,7 +112,7 @@ export function NewProject() {
 
   const f = analysis?.file
   const est = analysis?.estimate
-  const noTranslator = !modelFor('translator')
+  const noTranslator = listFor('translator').filter(Boolean).length === 0
   const hiddenCount = models ? models.models.filter((m) => !m.available).length : 0
   const budgetLimited = est && est.budget < chunkSize
 
@@ -168,7 +173,7 @@ export function NewProject() {
             <div className="form">
               {AGENTS.map((a) => (
                 <Row key={a} agent={a} enabled={a === 'translator' ? true : enabled[a]} onEnabled={(v) => setEnabled((e) => ({ ...e, [a]: v }))}>
-                  <ModelSelect models={models} value={modelFor(a)} onChange={(ref) => setPicked((p) => ({ ...p, [a]: ref }))} disabled={a !== 'translator' && !enabled[a]} testId={`model-${a}`} />
+                  <ModelListEditor value={listFor(a)} onChange={(list) => setPicked((p) => ({ ...p, [a]: list }))} disabled={a !== 'translator' && !enabled[a]} testId={`model-${a}`} />
                 </Row>
               ))}
               <span />
@@ -176,6 +181,7 @@ export function NewProject() {
                 <input type="checkbox" checked={pauseAfterGlossary} disabled={!enabled.glossary} onChange={(e) => setPauseAfterGlossary(e.target.checked)} />
                 Pause after the glossary, so I can review it
               </label>
+              <ParallelFields value={parallel} onChange={setParallelEdit} testId="new-parallel" />
               <label>Chunk size</label>
               <div className="row">
                 <input type="range" min={300} max={6000} step={100} value={chunkSize} onChange={(e) => setMaxChunk(Number(e.target.value))} className="grow" />
@@ -221,7 +227,7 @@ export function NewProject() {
 function Row({ agent, enabled, onEnabled, children }: { agent: AgentName; enabled: boolean; onEnabled: (v: boolean) => void; children: ReactNode }) {
   return (
     <>
-      <label className="row" style={{ color: 'var(--text)' }}>
+      <label className="row" style={{ color: 'var(--text)', alignSelf: 'start', paddingTop: 4 }}>
         {agent === 'translator' ? <input type="checkbox" checked disabled /> : <input type="checkbox" checked={enabled} onChange={(e) => onEnabled(e.target.checked)} data-testid={`enable-${agent}`} />}
         {AGENT_LABEL[agent]}
       </label>

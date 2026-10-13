@@ -7,7 +7,7 @@ import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
 import { computeCost, isPaidModel } from './models/registry'
 import type { ModelRegistry } from './models/registry'
-import { budgetFor, ProjectRunner } from './pipeline/runner'
+import { budgetFor, ProjectRunner, workerCount } from './pipeline/runner'
 import type { RunResult } from './pipeline/runner'
 import { hashFile, mergeSettings, ProjectStore, projectIdFor } from './project/store'
 import { summarize } from './project/summary'
@@ -111,7 +111,8 @@ export class EngineService {
       agentModels,
       enabled: { glossary: true, proofreader: true, qa: true },
       maxChunkTokens: defaults.defaultMaxChunkTokens,
-      pauseAfterGlossary: false
+      pauseAfterGlossary: false,
+      parallel: { ...defaults.parallel }
     }
   }
 
@@ -167,13 +168,15 @@ export class EngineService {
   estimate(ir: DocumentIR, settings: ProjectSettings): Estimate {
     const budget = budgetFor(this.registry, this.router, settings)
     const chunks = planChunks(ir, budget)
+    const workers = workerCount(this.router, settings)
     const sourceTokens = chunks.reduce((n, c) => n + c.tokens, 0)
     const perAgent: Estimate['perAgent'] = {}
     const add = (agent: AgentName, tokensIn: number, tokensOut: number) => {
       const m = this.router.resolve(settings.agentModels[agent] ?? [])[0]
       const costUsd = m && isPaidModel(m) ? computeCost(m, { inputTokens: tokensIn, cachedInputTokens: 0, outputTokens: tokensOut }) : 0
       const tps = !m || m.provider.local ? LOCAL_TPS : API_TPS
-      const seconds = tokensOut / tps / Math.max(1, m?.provider.concurrency ?? 1)
+      // the glossary passes run one after the other, the other agents run `workers` chunks at once
+      const seconds = tokensOut / tps / (agent === 'glossary' ? 1 : workers)
       perAgent[agent] = { tokensIn, tokensOut, costUsd, seconds }
     }
     const n = chunks.length

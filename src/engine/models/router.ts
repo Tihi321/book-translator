@@ -1,6 +1,6 @@
 import { ProviderLimiter } from './limiter'
 import { computeCost, isPaidModel } from './registry'
-import type { ModelInfo, ModelRegistry } from './registry'
+import type { ModelInfo, ModelRegistry, ProviderInfo } from './registry'
 import { emptyUsage, isAbortError, ProviderError } from './types'
 import type { ChatMessage, RequestMeta, Usage } from './types'
 
@@ -63,6 +63,10 @@ const defaultSleep = (ms: number, signal?: AbortSignal) =>
  */
 export class ModelRouter {
   readonly limiter: ProviderLimiter
+  /** Called when a request finds a server not running and marks it down for every project. */
+  onProviderDown?: (p: ProviderInfo) => void
+  /** Called when a provider's daily limit is used up (its `rpd`, or the provider said so): its work uses the next model until midnight UTC. */
+  onProviderDayFull?: (p: ProviderInfo) => void
   private readonly opts: Required<Omit<RouterOptions, 'now'>>
 
   constructor(
@@ -74,17 +78,31 @@ export class ModelRouter {
     this.opts = { retries: opts.retries ?? 2, backoffMs: opts.backoffMs ?? 1000, sleep: opts.sleep ?? defaultSleep }
   }
 
-  /** Resolves refs to models, in order, without duplicates. Unknown, embedding and unavailable models are dropped. */
+  /** The provider can take requests now: its server is up and its daily limit isn't used up. */
+  private usable(p: ProviderInfo): boolean {
+    return !p.down && !this.limiter.dayFull(p)
+  }
+
+  /**
+   * Resolves refs to models, in order, without duplicates. Aliases (`paid`, `strata`, `lmstudio`) become their default model and the
+   * list is sorted by the group order. Unknown, embedding and unavailable models are dropped, and so are servers that are down
+   * and providers whose daily limit is used up, unless nothing else is left.
+   */
   resolve(refs: readonly ModelRef[]): ModelInfo[] {
+    const strs = refs.map((r) => (typeof r === 'string' ? r : r.ref))
+    const objs = new Map<string, ModelInfo>()
+    for (const r of refs) if (typeof r !== 'string') objs.set(r.ref, r)
     const seen = new Set<string>()
-    const list: ModelInfo[] = []
-    for (const r of refs) {
-      const ref = typeof r === 'string' ? r : r.ref
+    let list: ModelInfo[] = []
+    for (const alias of this.registry.orderRefs(strs)) {
+      const ref = this.registry.resolve(alias)
       if (seen.has(ref)) continue
       seen.add(ref)
-      const m = typeof r === 'string' ? this.registry.getModel(r) : r
+      const m = objs.get(ref) ?? this.registry.getModel(ref)
       if (m && m.provider.available && m.provider.client && !m.embedding) list.push(m)
     }
+    const up = list.filter((m) => this.usable(m.provider))
+    if (up.length > 0) list = up
     return list
   }
 
@@ -119,7 +137,10 @@ export class ModelRouter {
     if (models.length === 0) throw new ProviderError(`no available model in: ${refs.map((r) => (typeof r === 'string' ? r : r.ref)).join(', ') || '(empty list)'}`)
     let lastError: unknown
     let attempts = 0
-    for (const model of models) {
+    const failures: string[] = []
+    for (const [i, model] of models.entries()) {
+      // a server that went down, or a daily limit used up, after the call started: skip it while a later model can answer
+      if (!this.usable(model.provider) && models.slice(i + 1).some((m) => this.usable(m.provider))) continue
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
         const paid = isPaidModel(model)
@@ -158,8 +179,25 @@ export class ModelRouter {
         } catch (err) {
           if (isAbortError(err) || req.signal?.aborted) throw err
           lastError = err
-          const retryable = err instanceof ProviderError && err.retryable
-          if (!retryable || retry === this.opts.retries) break
+          const msg = err instanceof Error ? err.message : String(err)
+          // nothing listens there (Strata not started): mark it down for everyone and go to the next model without retries
+          if (err instanceof ProviderError && err.unreachable && provider.concurrencyAuto) {
+            if (this.registry.markDown(provider)) this.onProviderDown?.(provider)
+            failures.push(`${model.ref}: ${msg}`)
+            break
+          }
+          // the provider's daily limit is used up (OpenRouter's free-models-per-day): retrying is no use until midnight UTC
+          if (isDailyLimitError(err)) {
+            if (this.limiter.markDayFull(provider)) this.onProviderDayFull?.(provider)
+            failures.push(`${model.ref}: ${msg}`)
+            break
+          }
+          // a request too big for this model fails the same way every time: go straight to the next model
+          const retryable = err instanceof ProviderError && err.retryable && !isContextError(err)
+          if (!retryable || retry === this.opts.retries) {
+            failures.push(`${model.ref}: ${msg}`)
+            break
+          }
           const delay = (err as ProviderError).retryAfterMs ?? this.opts.backoffMs * 2 ** retry
           await this.opts.sleep(delay, req.signal)
         } finally {
@@ -167,8 +205,22 @@ export class ModelRouter {
         }
       }
     }
+    // with more than one model, say why each one failed: the last error alone hides the real cause
+    if (failures.length > 1) throw new ProviderError(`all models failed. ${failures.map((f) => f.slice(0, 400)).join(' | ')}`)
     throw lastError instanceof Error ? lastError : new ProviderError('all models failed')
   }
+}
+
+/** A 429 that says a daily request limit is used up (OpenRouter: `free-models-per-day`), not a per-minute one. */
+export function isDailyLimitError(err: unknown): boolean {
+  if (!(err instanceof ProviderError) || err.status !== 429) return false
+  return /per[-_ ]day|daily/i.test(err.message)
+}
+
+/** The request is larger than the model's context window, or the model ran out of tokens before answering. */
+export function isContextError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /exceed_context_size|exceeds the available context|context (size|length|window)|maximum context|n_ctx|token limit without an answer/i.test(msg)
 }
 
 function abort(): Error {

@@ -50,7 +50,9 @@ export class ProviderError extends Error {
     message: string,
     readonly status?: number,
     readonly retryable = false,
-    readonly retryAfterMs?: number
+    readonly retryAfterMs?: number,
+    /** The server could not be reached at all (connection refused): it is not running. */
+    readonly unreachable = false
   ) {
     super(message)
     this.name = 'ProviderError'

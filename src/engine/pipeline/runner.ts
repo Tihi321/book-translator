@@ -5,7 +5,7 @@ import { isAbortError } from '../models/types'
 import { emptyChunk } from '../project/store'
 import type { ProjectStore } from '../project/store'
 import { countStates, summarize } from '../project/summary'
-import { IN_PROGRESS_STATES } from '../../shared/project'
+import { DEFAULT_PARALLEL, IN_PROGRESS_STATES } from '../../shared/project'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
 import type { AgentEnv, CallFn } from './env'
@@ -49,6 +49,14 @@ export function budgetFor(registry: ModelRegistry, router: ModelRouter, settings
   return chunkBudget({ contexts, userMax: settings.maxChunkTokens })
 }
 
+/** How many chunks (or sections) run at once: 1 with parallel off, the translator provider's concurrency for `auto`, else `maxAtOnce` (1-16). */
+export function workerCount(router: ModelRouter, settings: ProjectSettings): number {
+  const par = { ...DEFAULT_PARALLEL, ...settings.parallel }
+  if (!par.enabled) return 1
+  if (par.maxAtOnce === 'auto') return Math.max(1, router.resolve(settings.agentModels.translator ?? [])[0]?.provider.concurrency ?? 1)
+  return Math.min(16, Math.max(1, Math.floor(Number(par.maxAtOnce)) || 1))
+}
+
 const isMajor = (i: { severity: string }) => i.severity === 'major'
 
 function resetChunk(c: ChunkRecord): void {
@@ -62,8 +70,9 @@ function resetChunk(c: ChunkRecord): void {
 }
 
 /**
- * Runs the pipeline for one project: glossary pre-pass, then the chunks. Sections run in parallel up to the translator provider's
- * concurrency, the chunks of a section one after the other. Stops at an abort (reason 'cancel' or anything else for pause) and
+ * Runs the pipeline for one project: glossary pre-pass, then the chunks. Work runs in parallel (`settings.parallel`, see `workerCount`):
+ * sections side by side with the chunks of a section one after the other, or with `splitSections` every chunk on its own (a chunk then
+ * gets the end of the previous chunk only when that one is already finished). The provider's concurrency and rpm still cap the requests. Stops at an abort (reason 'cancel' or anything else for pause) and
  * can be started again: chunks in done/flagged are skipped, in-progress and failed ones start over.
  */
 export class ProjectRunner {
@@ -179,23 +188,32 @@ export class ProjectRunner {
   private async schedule(opts: RunOptions): Promise<void> {
     const { router } = this.deps
     const todo = this.chunks.filter((c) => c.state === 'pending' && (!opts.only || opts.only.includes(c.index)))
-    const sections = new Map<string, ChunkRecord[]>()
-    for (const c of todo) {
-      const list = sections.get(c.sectionId) ?? []
-      list.push(c)
-      sections.set(c.sectionId, list)
+    const split = this.project.settings.parallel?.splitSections === true
+    // a unit is what one worker runs from start to end: a section's chunks in order, or (split) one chunk
+    const units: ChunkRecord[][] = []
+    if (split) for (const c of todo) units.push([c])
+    else {
+      const sections = new Map<string, ChunkRecord[]>()
+      for (const c of todo) {
+        const list = sections.get(c.sectionId) ?? []
+        list.push(c)
+        sections.set(c.sectionId, list)
+      }
+      units.push(...sections.values())
     }
-    const queue = [...sections.values()]
-    const concurrency = Math.max(1, router.resolve(this.project.settings.agentModels.translator ?? [])[0]?.provider.concurrency ?? 1)
+    const queue = units
+    const concurrency = workerCount(router, this.project.settings)
     const worker = async () => {
       for (;;) {
-        const section = queue.shift()
-        if (!section || this.signal?.aborted) return
-        for (const chunk of section) {
+        const unit = queue.shift()
+        if (!unit || this.signal?.aborted) return
+        for (const chunk of unit) {
           if (this.signal?.aborted) return
           const at = this.chunks.indexOf(chunk)
           const before = this.chunks[at - 1]
-          await this.runChunk(chunk, before && before.sectionId === chunk.sectionId ? before : undefined)
+          // split: the previous chunk may be running right now, so only a finished one gives its end as context
+          const finished = before && (before.state === 'done' || before.state === 'flagged')
+          await this.runChunk(chunk, before && before.sectionId === chunk.sectionId && (!split || finished) ? before : undefined)
         }
       }
     }

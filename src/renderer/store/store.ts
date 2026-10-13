@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ChunkBrief, EngineEvent, EngineInfo, ModelsInfo, ProgressInfo, ProjectDetail } from '../../shared/protocol'
+import type { CatalogModel, ChunkBrief, EngineEvent, EngineInfo, ModelsInfo, ProgressInfo, ProjectDetail } from '../../shared/protocol'
 import { CHUNK_STATES } from '../../shared/project'
 import type { ChunkState, ProjectSummary } from '../../shared/project'
 import type { DefaultsConfig } from '../../shared/schemas'
@@ -42,12 +42,22 @@ export const emptyLive = (): Live => ({ stream: {}, logs: [] })
 /** For selectors: a constant, because a selector that returns a new object every time makes React loop. */
 export const EMPTY_LIVE: Live = Object.freeze({ stream: {}, logs: [] }) as Live
 
+/** What Detect models found for one provider in the Models dialog. */
+export interface Catalog {
+  models: CatalogModel[]
+  loading: boolean
+  error?: string
+  /** ISO time of the listing. */
+  at?: string
+}
+
 export interface State {
   view: View
   info: EngineInfo | null
   projects: ProjectSummary[]
   models: ModelsInfo | null
   defaults: DefaultsConfig | null
+  catalogs: Record<string, Catalog>
   detail: ProjectDetail | null
   live: Record<string, Live>
   toasts: Toast[]
@@ -58,6 +68,7 @@ export interface State {
   setOpenChunk(index: number | null): void
   setModels(models: ModelsInfo): void
   setDefaults(defaults: DefaultsConfig): void
+  detectModels(provider: string): Promise<void>
   loadDetail(id: string): Promise<void>
   toast(text: string, kind?: Toast['kind']): void
   dismissToast(id: number): void
@@ -77,6 +88,7 @@ export const useStore = create<State>()((set, get) => ({
   projects: [],
   models: null,
   defaults: null,
+  catalogs: {},
   detail: null,
   live: {},
   toasts: [],
@@ -97,6 +109,18 @@ export const useStore = create<State>()((set, get) => ({
 
   setDefaults(defaults) {
     set({ defaults })
+  },
+
+  async detectModels(provider) {
+    const was = get().catalogs[provider]
+    const keep = { models: was?.models ?? [], at: was?.at }
+    set((s) => ({ catalogs: { ...s.catalogs, [provider]: { ...keep, loading: true } } }))
+    try {
+      const res = await getApi().request<'detectModels'>({ type: 'detectModels', provider })
+      set((s) => ({ catalogs: { ...s.catalogs, [provider]: { models: res.models, at: res.at, loading: false } } }))
+    } catch (err) {
+      set((s) => ({ catalogs: { ...s.catalogs, [provider]: { ...keep, loading: false, error: (err as Error).message } } }))
+    }
   },
 
   async loadDetail(id) {

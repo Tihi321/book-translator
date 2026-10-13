@@ -6,6 +6,10 @@
     "qa": ["strata/qwen3.8-flash-next-low", "deepseek/deepseek-v4-flash", "gemini/gemini-2.5-flash"]
   },
   "defaultMaxChunkTokens": 1500,
+  "groupDefaults": { "paid": "deepseek/deepseek-v4-flash", "strata": "strata/qwen3.8-flash-next" },
+  "modelOrder": [],
+  "lmstudio": { "parallel": 4, "context": 131072, "ttlMinutes": 60 },
+  "parallel": { "enabled": true, "maxAtOnce": "auto", "splitSections": false },
   "languages": [
     { "code": "en", "name": "English" },
     { "code": "hr", "name": "Croatian" },

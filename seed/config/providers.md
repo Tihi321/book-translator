@@ -46,6 +46,11 @@ providers:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     concurrency: 4
+    rpm: 20                        # OpenRouter's limit for the free models
+    rpd: 50                        # free-model requests per day without credits (1000 after buying 10 credits): then the next model
+    discover: free                 # adds every model OpenRouter lists at price 0 (the `:free` ones); a paid one goes in the list below
+    discover_skip: [content-safety]
+    json_schema: false             # not every model there supports response_format; the prompt and the repair step handle the JSON instead
     models:
       # to verify
       - id: google/gemini-2.5-flash
@@ -84,15 +89,17 @@ providers:
     kind: openai-compat
     local: true
     base_url: http://localhost:1234/v1
-    concurrency: 1
+    concurrency: auto             # the sum of `parallel` over the loaded chat models (lms load --parallel <n>), 1 when none is loaded
     discover: true
+    discover_skip: [dflash]       # LM Studio lists these, but they are not models it can load here
+    load_models: true             # load a model that isn't loaded yet with the `lmstudio` settings of defaults.json (parallel, context, idle minutes)
     models: []
   - id: strata
     kind: openai-compat
     local: true
     base_url: http://127.0.0.1:8080/v1
     api_key_env: STRATA_API_KEY   # optional; only sent if set
-    concurrency: 1
+    concurrency: auto             # as many as the running Strata serves (its /status): 4 or 1, by the script you started
     discover: false               # Strata answers any model name; fixed ids keep defaults.json stable across quants
     json_schema: false
     models:
@@ -143,10 +150,18 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
-- `concurrency`: how many requests may run at once. LM Studio and Strata are 1 because all their requests share one GPU. This is also how many chapters are translated in parallel.
+- `concurrency`: how many requests may run at once. This is also how many chapters are translated in parallel, unless a project sets its own "How many at once". `auto`: as many as the server says it serves at once, asked at start and every 10 seconds, 1 while the server is down. A server that doesn't answer is skipped: its work goes straight to the next model in the list (no failed retries first) until it answers again. The first request that can't connect marks it down at once, and the Settings screen shows it as down with a **Check now** button for right after you start it. Strata reports it as `concurrency.serving` of `<base_url>/status`, so it follows the script you started: 4 with a parallel script, 1 with a solo one. For LM Studio it is the sum of `parallel` over the loaded chat models (from LM Studio's `/api/v1/models`). Requests in parallel share the GPU, so each one is slower, but the total is higher. A plain number keeps the old behavior (the default for existing files).
 - `json_schema`: `false` stops the app from sending the JSON schema as `response_format`. Use it for servers that fail a bad JSON answer (HTTP 502) instead of constraining it. The app would retry that error and then fall back to the next model. With `false`, the prompt asks for JSON and the app's parse-and-repair step handles the answer. Default `true`.
 - `rpm`: optional requests-per-minute limit.
-- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. LM Studio, Ollama and a custom server are discovered. If the server is not running, discovery fails quietly and the list stays as written here.
+- `rpd`: optional requests per day, counted from midnight UTC (when OpenRouter's daily limit starts again). The count is kept in memory only. A provider that reached it, or that answers that its daily limit is used up, is skipped until then: its work goes to the next model in the list.
+- The **Models** dialog in Settings sets requests at once, per minute and per day for each provider. It saves them in `limits` of `config/models.md`, which win over the values here (0 means no limit).
+- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. LM Studio, Ollama and a custom server are discovered. If the server is not running, discovery fails quietly and the list stays as written here. `discover: free` adds only the models the provider lists at price 0. A model of a paid provider is only added with the price the provider lists, so the cost estimate is right: one listed without a price is left out (add it below with its price). Models that answer with something besides text (music, images) are left out.
+- `discover_skip`: discovery leaves out models whose id contains one of these words (any case). LM Studio skips `dflash`, which it lists but can't load here.
+- `load_models`: (LM Studio) before a request to a model that isn't loaded, the app loads it with the `lmstudio` settings of `config/defaults.json` (parallel, context window, idle minutes), using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is. A model entry can override the context and parallel count with `load_context` and `load_parallel`. A model LM Studio doesn't have fails at once and the next model is tried.
+
+## OpenRouter
+
+One key (`OPENROUTER_API_KEY`, stored in the Settings screen) gives many models. `discover: free` adds every free one OpenRouter lists, with its context and output limit, so they show in the model pickers as `openrouter/<maker>/<model>:free`. Free models cost nothing. OpenRouter limits them to 20 requests a minute and 50 a day, or 1000 a day once the account has bought $10 of credit. A rate-limited request is retried with backoff, then the next model in the list takes it. For a paid OpenRouter model, tick it in the **Models** dialog (Detect models lists them all) or add it there by its id: it is saved in `config/models.md` with the price OpenRouter lists. You can also add it to the list here with its price from openrouter.ai/models, or set `discover: true` to add all of them with the prices OpenRouter lists.
 
 ## Fields of a model
 
@@ -154,6 +169,7 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 - `price_in`, `price_out`, `price_cached_in`: USD per 1M tokens. Cached input falls back to `price_in` when missing.
 - `embedding: true` marks an embedding model (never used for translation).
 - `extra_body`: optional JSON fields merged into the request body, for example `{ reasoning_effort: none }` to switch thinking off on models that support it. Thinking models are slow and waste tokens on translation.
+- `load_context`, `load_parallel`: (`load_models` providers) load this model with this context window and parallel count instead of the defaults.
 
 ## Context size and local models
 

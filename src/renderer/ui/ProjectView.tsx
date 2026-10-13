@@ -7,8 +7,9 @@ import { fmtCost, fmtCount, fmtDuration, modelName, STATE_LABEL } from '../forma
 import { attempt, EMPTY_LIVE, progressOf, RUNNING_STATUSES, useStore } from '../store/store'
 import { ChunkDrawer } from './ChunkDrawer'
 import { GlossaryTab } from './GlossaryTab'
+import { ProjectSettingsTab } from './ProjectSettingsTab'
 
-type Tab = 'chunks' | 'glossary' | 'log'
+type Tab = 'chunks' | 'glossary' | 'settings' | 'log'
 
 const Tile = memo(function Tile({ index, state, issues, selected, onOpen }: { index: number; state: ChunkState; issues: number; selected: boolean; onOpen: (i: number) => void }) {
   return <button className={`tile ${state}${issues > 0 ? ' has-issues' : ''}${selected ? ' selected' : ''}`} title={`chunk ${index}: ${STATE_LABEL[state]}${issues > 0 ? `, ${issues} issue(s)` : ''}`} onClick={() => onOpen(index)} />
@@ -210,9 +211,9 @@ export function ProjectView({ id }: { id: string }) {
       </div>
 
       <div className="tabs">
-        {(['chunks', 'glossary', 'log'] as const).map((t) => (
+        {(['chunks', 'glossary', 'settings', 'log'] as const).map((t) => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-            {t === 'chunks' ? 'Chunks' : t === 'glossary' ? `Glossary (${detail.glossary.length})` : 'Log'}
+            {t === 'chunks' ? 'Chunks' : t === 'glossary' ? `Glossary (${detail.glossary.length})` : t === 'settings' ? 'Settings' : 'Log'}
           </button>
         ))}
       </div>
@@ -222,6 +223,7 @@ export function ProjectView({ id }: { id: string }) {
         </div>
       )}
       {tab === 'glossary' && <GlossaryTab detail={detail} />}
+      {tab === 'settings' && <ProjectSettingsTab detail={detail} />}
       {tab === 'log' && <LogTab id={id} detail={detail} />}
 
       {openChunk !== null && <ChunkDrawer detail={detail} index={openChunk} onClose={() => setOpenChunk(null)} />}

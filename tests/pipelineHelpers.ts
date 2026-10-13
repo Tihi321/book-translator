@@ -59,9 +59,12 @@ export interface Rig {
   calls: (role: string, task?: string) => { unit?: string; task?: string }[]
 }
 
-export async function rig(opts: { content?: string; delay?: number; script?: boolean; onEvent?: (e: EngineEvent) => void } = {}): Promise<Rig> {
+/** Every request fails like an unreachable server, so a test never reaches a real network or a real LM Studio / Strata. */
+const offline = (() => Promise.reject(new TypeError('offline'))) as unknown as typeof fetch
+
+export async function rig(opts: { content?: string; delay?: number; script?: boolean; onEvent?: (e: EngineEvent) => void; fetchImpl?: typeof fetch } = {}): Promise<Rig> {
   const mock = new MockProvider('mock', { chunkDelayMs: opts.delay ?? 1, chunks: 2 })
-  const { dir, registry, cleanup } = await seededRegistry({ mock })
+  const { dir, registry, cleanup } = await seededRegistry({ mock, fetchImpl: opts.fetchImpl ?? offline, lmsPath: null })
   const file = path.join(dir, 'book.md')
   await fs.writeFile(file, opts.content ?? bookText(), 'utf8')
   const events: EngineEvent[] = []

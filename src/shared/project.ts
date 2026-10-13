@@ -43,7 +43,18 @@ export interface ProjectSettings {
   maxChunkTokens: number
   /** Stop after the glossary is built, so it can be reviewed. */
   pauseAfterGlossary: boolean
+  /** Parallel translation. `maxAtOnce: auto` follows the translator provider's concurrency; `splitSections` also runs the chunks of one section at the same time. */
+  parallel: ParallelSettings
 }
+
+export interface ParallelSettings {
+  enabled: boolean
+  maxAtOnce: 'auto' | number
+  splitSections: boolean
+}
+
+/** What a project without `parallel` in project.json gets: the behavior before the setting existed. */
+export const DEFAULT_PARALLEL: ParallelSettings = { enabled: true, maxAtOnce: 'auto', splitSections: false }
 
 export interface Spend {
   tokensIn: number
