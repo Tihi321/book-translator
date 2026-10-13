@@ -84,6 +84,26 @@ describe('pipeline end to end (mock models)', () => {
     expect(r.events.some((e) => e.type === 'error')).toBe(true)
   })
 
+  it('keeps the glossary of the other passes when one pass fails', async () => {
+    // big enough for more than one glossary pass (6000 tokens each)
+    r = await rig({ content: bookText(8, 60) })
+    const good = r.mock
+    good.on({ role: 'glossary' }, (req) =>
+      req.meta?.unit === 'glossary-2' ? 'I do not know JSON' : JSON.stringify({ terms: [{ source: 'Alice', target: 'Alisa', type: 'person' }] })
+    )
+    const id = await r.create({ enabled: { glossary: true, proofreader: false, qa: false } })
+    expect((await r.service.start(id)).status).toBe('done')
+    const project = await r.service.getProject(id)
+    expect(project.glossaryDone).toBe(true)
+    const units = new Set(r.calls('glossary').map((c) => c.unit))
+    expect(units.size).toBeGreaterThan(2)
+    const glossary = await fs.readFile(r.service.store.file(id, 'glossary.md'), 'utf8')
+    expect(parseGlossary(glossary).map((e) => e.target)).toContain('Alisa')
+    const log = await fs.readFile(r.service.store.file(id, 'log.md'), 'utf8')
+    expect(log).toMatch(/glossary pass 2 of \d+ failed, skipped/)
+    expect(log).toMatch(/1 of them failed and were skipped/)
+  })
+
   it('creates the project files and the same project for the same file and language', async () => {
     r = await rig()
     const id = await r.create()

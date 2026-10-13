@@ -142,7 +142,7 @@ export class ProjectRunner {
       if (hasBrief) await store.writeBrief(project.id, serializeBrief(res.brief))
       project.glossaryDone = true
       await store.save(project)
-      this.log('info', `glossary built: ${res.entries.length} terms in ${res.passes} pass(es)`)
+      this.log(res.failed > 0 ? 'warn' : 'info', `glossary built: ${res.entries.length} terms in ${res.passes} pass(es)${res.failed > 0 ? `, ${res.failed} of them failed and were skipped` : ''}`)
     } catch (err) {
       if (this.signal?.aborted || isAbortError(err)) throw err
       this.log('error', `glossary builder failed, translating without it: ${(err as Error).message}`)

@@ -1,5 +1,32 @@
 # BTT-05 changelog
 
+## 2026-10-13: Glossary error on "The Iron Root" (follow-up, the user reported it)
+
+**Cause:**
+- The user's data folder (`%USERPROFILE%\BookTranslator\config\providers.md`) still had the old `deepseek-v4-flash` entry with `extra_body: null`.
+- DeepSeek serves V4.1 Flash under that name, with thinking on, so glossary passes were slow (57 s and 30 s).
+- On pass 3 the thinking used the whole 16,000-token answer budget ("stopped at its token limit without an answer"). Strata, the fallback, was not running.
+- `buildGlossary` then threw away the 32 terms from passes 1–2, and the project went on without a glossary.
+
+**Code fix:**
+- `src/engine/pipeline/glossary.ts`: a pass that fails, for any reason except an abort, is logged as `warn` ("glossary pass N of M failed, skipped: ...") and skipped. The terms from the other passes are kept.
+  - Only when every pass fails does the error reach the caller, so the old "translate without a glossary" path still covers that case.
+  - `GlossaryBuildResult.failed` counts the skipped passes.
+- `src/engine/pipeline/runner.ts`: the "glossary built" line says how many passes were skipped, and is a `warn` when any were.
+- `tests/pipeline.test.ts`: new test "keeps the glossary of the other passes when one pass fails".
+
+**User data fix** (the user chose to keep the id):
+- In the user's `providers.md`, `deepseek-v4-flash` now has `extra_body: { thinking: { type: disabled } }` and the V4.1 Flash prices ($0.30 / $1.20 / $0.006).
+- `deepseek-v4-pro` now has $1.32 / $3.96 / $0.044.
+- The provider now has `json_schema: false`.
+- Backup: `.claude/temp/providers.md.bak`.
+- The id is unchanged, so `defaults.json` and the 3 existing projects are untouched.
+
+**Passed:**
+- `yarn typecheck`, `yarn lint`
+- `yarn test`: 18 files and 199 tests passed.
+- `node out/engine/index.js models` reads the patched config and lists `deepseek/deepseek-v4-flash` at $0.3/$1.2.
+
 ## 2026-10-13: Drag and drop, and Open a folder on New translation (follow-up, the user asked for it)
 
 - `src/shared/protocol.ts`: adds `FolderListing { folder, files }`, plus `pickFolder()`, `listFolder(dir)` and `pathForFile(file)` on `BookTranslatorApi`.

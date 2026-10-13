@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { chunkBudget, planChunks } from '../chunker'
+import { isAbortError } from '../models/types'
 import type { DocumentIR } from '../../shared/ir'
 import type { GlossaryEntry } from '../../shared/project'
 import { chatFn } from './env'
@@ -162,11 +163,14 @@ export interface GlossaryBuildResult {
   entries: GlossaryEntry[]
   brief: Brief
   passes: number
+  /** Passes whose model call failed: they were skipped, the terms of the other passes are kept. */
+  failed: number
 }
 
 /**
  * The glossary pre-pass: goes over the whole source in large chunks, asks for terms and (in the first pass) the book brief,
- * merges the terms across passes. Entries already in `existing` (for example edited by the user) win.
+ * merges the terms across passes. Entries already in `existing` (for example edited by the user) win. A pass that fails is skipped
+ * (the terms found so far are kept); only when every pass fails does the error reach the caller.
  */
 export async function buildGlossary(
   env: AgentEnv,
@@ -180,6 +184,8 @@ export async function buildGlossary(
   let entries: GlossaryEntry[] = [...(opts.existing ?? [])]
   let brief: Brief = { characters: [] }
   let first = true
+  let failed = 0
+  let lastError: unknown
   env.log('info', `glossary: reading the book in ${passes.length} pass(es)`)
   for (const pass of passes) {
     if (env.signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' })
@@ -198,12 +204,22 @@ export async function buildGlossary(
       },
       text
     )
-    const { value } = await chatJson(chatFn(env, 'glossary', 'glossary', opts.unit ?? `glossary-${pass.index}`), messages, glossaryReplySchema, {
-      temperature: 0.2,
-      // a JSON list of terms is a few thousand tokens at most: the cap stops a model that loops on its answer
-      maxTokens: GLOSSARY_MAX_TOKENS,
-      signal: env.signal
-    })
+    let value: z.output<typeof glossaryReplySchema>
+    try {
+      ;({ value } = await chatJson(chatFn(env, 'glossary', 'glossary', opts.unit ?? `glossary-${pass.index}`), messages, glossaryReplySchema, {
+        temperature: 0.2,
+        // a JSON list of terms is a few thousand tokens at most: the cap stops a model that loops on its answer
+        maxTokens: GLOSSARY_MAX_TOKENS,
+        signal: env.signal
+      }))
+    } catch (err) {
+      if (env.signal?.aborted || isAbortError(err)) throw err
+      // one bad pass (a thinking model that used up its answer budget, a server that went away) must not lose the terms of the others
+      failed++
+      lastError = err
+      env.log('warn', `glossary pass ${pass.index} of ${passes.length} failed, skipped: ${(err as Error).message}`)
+      continue
+    }
     const found: GlossaryEntry[] = value.terms
       .filter((t) => t.source.trim() && t.target.trim())
       .map((t) => {
@@ -225,5 +241,6 @@ export async function buildGlossary(
       first = false
     }
   }
-  return { entries, brief, passes: passes.length }
+  if (passes.length > 0 && failed === passes.length) throw lastError instanceof Error ? lastError : new Error('every glossary pass failed')
+  return { entries, brief, passes: passes.length, failed }
 }
