@@ -1,25 +1,46 @@
 import { useEffect, useState } from 'react'
-import type { ProviderSummary } from '../../shared/protocol'
+import type { ParallelSettings } from '../../shared/project'
+import type { ModelSummary, ProviderSummary } from '../../shared/protocol'
 import { AGENTS } from '../../shared/agents'
 import type { AgentName } from '../../shared/agents'
 import { getApi } from '../api'
 import { attempt, useStore } from '../store/store'
-import { ModelSelect, pickDefault } from './ModelSelect'
+import { ModelListEditor } from './ModelListEditor'
+import { ModelsDialog } from './ModelsDialog'
+import { ParallelFields } from './ParallelFields'
 
 const AGENT_LABEL: Record<AgentName, string> = { glossary: 'Glossary builder', translator: 'Translator', proofreader: 'Proofreader', qa: 'QA reviewer' }
+
+type Group = 'paid' | 'strata' | 'lmstudio'
+const DEFAULT_ORDER: Group[] = ['paid', 'strata', 'lmstudio']
+/** The groups behind the aliases: their name on screen and which models they may point at. */
+const GROUPS: Record<Group, { label: string; pick: (m: ModelSummary) => boolean }> = {
+  paid: { label: 'API', pick: (m) => !m.local },
+  strata: { label: 'Strata', pick: (m) => m.provider === 'strata' },
+  lmstudio: { label: 'LM Studio', pick: (m) => m.provider === 'lmstudio' }
+}
 
 interface Edit {
   enabled?: boolean
   baseUrl?: string
-  concurrency?: number
+  concurrency?: number | 'auto'
 }
+
+const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
 function ProviderRow({ p, edit, onEdit }: { p: ProviderSummary; edit: Edit | undefined; onEdit: (e: Edit) => void }) {
   const setModels = useStore((s) => s.setModels)
   const toast = useStore((s) => s.toast)
   const [key, setKey] = useState('')
   const [saving, setSaving] = useState(false)
+  // per minute / per day as typed: empty means no limit. Filled again when the saved value changes.
+  const [rpm, setRpm] = useState(p.rpm ? String(p.rpm) : '')
+  const [rpd, setRpd] = useState(p.rpd ? String(p.rpd) : '')
+  useEffect(() => setRpm(p.rpm ? String(p.rpm) : ''), [p.rpm])
+  useEffect(() => setRpd(p.rpd ? String(p.rpd) : ''), [p.rpd])
   const enabled = edit?.enabled ?? p.enabled
+  const concurrency = edit?.concurrency ?? (p.concurrencyAuto ? 'auto' : p.concurrency)
+  const auto = concurrency === 'auto'
 
   async function saveKey() {
     if (!p.apiKeyEnv || !key.trim()) return
@@ -33,6 +54,27 @@ function ProviderRow({ p, edit, onEdit }: { p: ProviderSummary; edit: Edit | und
     setSaving(false)
   }
 
+  /** Sends the limits that changed: empty means no limit (0). */
+  async function saveLimits() {
+    const n = (v: string) => (v.trim() === '' ? 0 : Math.max(0, Math.round(Number(v))))
+    const change: { rpm?: number; rpd?: number } = {}
+    if (n(rpm) !== (p.rpm ?? 0) && Number.isFinite(n(rpm))) change.rpm = n(rpm)
+    if (n(rpd) !== (p.rpd ?? 0) && Number.isFinite(n(rpd))) change.rpd = n(rpd)
+    if (Object.keys(change).length === 0) return
+    const info = await attempt(getApi().request<'setProviderLimits'>({ type: 'setProviderLimits', provider: p.id, ...change }))
+    if (info) setModels(info)
+  }
+
+  const status = !p.available ? (
+    <span className={enabled ? 'warn' : 'dim'}>{p.apiKeyEnv && !p.hasKey && p.enabled ? 'needs an API key' : (p.unavailableReason ?? 'unavailable')}</span>
+  ) : p.down ? (
+    <span className="warn" title="The server did not answer: it is skipped while another model is left. Press Check now when it runs.">down</span>
+  ) : p.dayFull ? (
+    <span className="warn">daily limit used, resets {clock(p.dayResetsAt)}</span>
+  ) : (
+    <span className="good">ready</span>
+  )
+
   return (
     <tr data-testid={`provider-${p.id}`}>
       <td><input type="checkbox" checked={enabled} onChange={(e) => onEdit({ ...edit, enabled: e.target.checked })} title="Enabled" /></td>
@@ -41,22 +83,58 @@ function ProviderRow({ p, edit, onEdit }: { p: ProviderSummary; edit: Edit | und
         <div className="dim small">{p.local ? 'local' : 'API'} &middot; {p.kind}</div>
       </td>
       <td><input value={edit?.baseUrl ?? p.baseUrl ?? ''} onChange={(e) => onEdit({ ...edit, baseUrl: e.target.value })} /></td>
-      <td><input type="number" min={1} max={64} style={{ width: 60 }} value={edit?.concurrency ?? p.concurrency} onChange={(e) => onEdit({ ...edit, concurrency: Number(e.target.value) })} /></td>
+      <td>
+        <div className="row" style={{ flexWrap: 'nowrap', gap: 4 }}>
+          <input type="number" min={1} max={64} style={{ width: 52 }} disabled={auto} value={auto ? p.concurrency : concurrency} onChange={(e) => onEdit({ ...edit, concurrency: Number(e.target.value) })} data-testid={`parallel-${p.id}`} />
+          {p.local && (
+            <label className="row small" style={{ flexWrap: 'nowrap', gap: 2 }} title="The server's own slot count (checked every 10 seconds)">
+              <input type="checkbox" checked={auto} onChange={(e) => onEdit({ ...edit, concurrency: e.target.checked ? 'auto' : p.concurrency })} data-testid={`auto-${p.id}`} />
+              auto
+            </label>
+          )}
+        </div>
+      </td>
+      <td>
+        {p.local ? (
+          <span className="dim">-</span>
+        ) : (
+          <div className="row" style={{ flexWrap: 'nowrap', gap: 4 }}>
+            <input type="number" min={0} style={{ width: 52 }} placeholder="min" title="Requests per minute (empty: no limit)" value={rpm} onChange={(e) => setRpm(e.target.value)} onBlur={() => void saveLimits()} onKeyDown={(e) => e.key === 'Enter' && void saveLimits()} data-testid={`rpm-${p.id}`} />
+            <input type="number" min={0} style={{ width: 52 }} placeholder="day" title="Requests per day, from midnight UTC (empty: no limit)" value={rpd} onChange={(e) => setRpd(e.target.value)} onBlur={() => void saveLimits()} onKeyDown={(e) => e.key === 'Enter' && void saveLimits()} data-testid={`rpd-${p.id}`} />
+          </div>
+        )}
+      </td>
       <td>
         {p.apiKeyEnv ? (
           <div className="row" style={{ flexWrap: 'nowrap' }}>
             <span className={p.hasKey ? 'good' : 'dim'} style={{ minWidth: 62 }}>{p.hasKey ? 'key set' : 'no key'}</span>
-            <input type="password" autoComplete="off" placeholder={p.hasKey ? 'replace key' : p.apiKeyEnv} value={key} onChange={(e) => setKey(e.target.value)} style={{ width: 150 }} data-testid={`key-${p.id}`} />
+            <input type="password" autoComplete="off" placeholder={p.hasKey ? 'replace key' : p.apiKeyEnv} value={key} onChange={(e) => setKey(e.target.value)} style={{ width: 110 }} data-testid={`key-${p.id}`} />
             <button disabled={!key.trim() || saving} onClick={() => void saveKey()}>Save key</button>
           </div>
         ) : (
           <span className="dim">no key needed</span>
         )}
       </td>
-      <td className="small">{!p.available ? <span className={enabled ? 'warn' : 'dim'}>{p.apiKeyEnv && !p.hasKey && p.enabled ? 'needs an API key' : (p.unavailableReason ?? 'unavailable')}</span> : <span className="good">ready</span>}</td>
+      <td className="small">
+        {status}
+        {p.concurrencyAuto && p.available && !p.down && <div className="dim">{p.concurrency} slot(s)</div>}
+        {p.rpd ? <div className="dim">today {p.requestsToday} of {p.rpd}</div> : null}
+      </td>
     </tr>
   )
 }
+
+/** The saved defaults being edited. Fields that are undefined are unchanged. */
+interface Draft {
+  agents: Partial<Record<AgentName, string[]>>
+  chunk?: number
+  groups: Partial<Record<Group, string>>
+  order?: Group[]
+  shared?: boolean
+  parallel?: ParallelSettings
+  lm: Partial<{ parallel: number; context: number; ttlMinutes: number }>
+}
+const EMPTY_DRAFT: Draft = { agents: {}, groups: {}, lm: {} }
 
 export function Settings() {
   const models = useStore((s) => s.models)
@@ -66,14 +144,16 @@ export function Settings() {
   const toast = useStore((s) => s.toast)
   const [edits, setEdits] = useState<Record<string, Edit>>({})
   const [refreshing, setRefreshing] = useState(false)
-  const [agentPick, setAgentPick] = useState<Partial<Record<AgentName, string>>>({})
-  const [chunk, setChunk] = useState<number | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [modelsOpen, setModelsOpen] = useState(false)
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
 
   useEffect(() => {
     void attempt(getApi().request<'listModels'>({ type: 'listModels' }).then(setModels))
   }, [setModels])
 
   const changed = Object.keys(edits).length > 0
+  const dirty = Object.keys(draft.agents).length > 0 || Object.keys(draft.groups).length > 0 || Object.keys(draft.lm).length > 0 || draft.chunk !== undefined || draft.order !== undefined || draft.shared !== undefined || draft.parallel !== undefined
 
   async function saveProviders() {
     const patches = Object.entries(edits).map(([id, e]) => ({ id, ...e }))
@@ -92,19 +172,77 @@ export function Settings() {
     setRefreshing(false)
   }
 
+  async function checkNow() {
+    setChecking(true)
+    const info = await attempt(getApi().request<'checkServers'>({ type: 'checkServers' }))
+    if (info) setModels(info)
+    setChecking(false)
+  }
+
+  // the group order as shown: the saved order first, then the groups it doesn't name
+  const savedOrder = defaults?.modelOrder ?? []
+  const shared = draft.shared ?? savedOrder.length > 0
+  const order: Group[] = draft.order ?? (savedOrder.length > 0 ? [...savedOrder, ...DEFAULT_ORDER.filter((g) => !savedOrder.includes(g))] : DEFAULT_ORDER)
+  const groupOf = (g: Group) => draft.groups[g] ?? defaults?.groupDefaults[g] ?? ''
+  const parallel: ParallelSettings = draft.parallel ?? defaults?.parallel ?? { enabled: true, maxAtOnce: 'auto', splitSections: false }
+  const lm = { ...defaults?.lmstudio, ...draft.lm }
+
+  function move(i: number, by: number) {
+    const next = [...order]
+    ;[next[i], next[i + by]] = [next[i + by]!, next[i]!]
+    setDraft((d) => ({ ...d, order: next }))
+  }
+
   async function saveDefaults() {
     const agentModels: Partial<Record<AgentName, string[]>> = {}
     for (const a of AGENTS) {
-      const ref = agentPick[a]
-      if (ref) agentModels[a] = [ref, ...(defaults?.agentModels[a] ?? []).filter((r) => r !== ref)]
+      const list = draft.agents[a]?.filter(Boolean)
+      if (list && list.length > 0) agentModels[a] = list
     }
-    const next = await attempt(getApi().request<'setDefaults'>({ type: 'setDefaults', patch: { agentModels, defaultMaxChunkTokens: chunk ?? undefined } }))
+    const next = await attempt(
+      getApi().request<'setDefaults'>({
+        type: 'setDefaults',
+        patch: {
+          agentModels,
+          defaultMaxChunkTokens: draft.chunk,
+          groupDefaults: Object.keys(draft.groups).length > 0 ? draft.groups : undefined,
+          modelOrder: draft.order !== undefined || draft.shared !== undefined ? (shared ? order : []) : undefined,
+          lmstudio: Object.keys(draft.lm).length > 0 ? draft.lm : undefined,
+          parallel: draft.parallel
+        }
+      })
+    )
     if (next) {
       setDefaults(next)
-      setAgentPick({})
-      setChunk(null)
+      setDraft(EMPTY_DRAFT)
       toast('Defaults saved', 'info')
     }
+  }
+
+  const saveButton = (
+    <button className="primary" disabled={!dirty} onClick={() => void saveDefaults()}>Save defaults</button>
+  )
+
+  /** One group's row: its place in the order, its default model (the models it may point at), and moving it. */
+  function groupRow(g: Group, i: number) {
+    const { label, pick } = GROUPS[g]
+    const value = groupOf(g)
+    const refs = (models?.models ?? []).filter((m) => m.shown !== false && pick(m)).map((m) => m.ref)
+    if (value && !refs.includes(value)) refs.unshift(value)
+    return (
+      <div key={g} className="row" style={{ flexWrap: 'nowrap', gap: 6 }} data-testid={`order-${g}`}>
+        <span className="dim" style={{ width: 16 }}>{shared ? `${i + 1}.` : ''}</span>
+        <span style={{ width: 70 }}>{label}</span>
+        <select className="grow" value={value} onChange={(e) => setDraft((d) => ({ ...d, groups: { ...d.groups, [g]: e.target.value } }))} data-testid={`group-${g}`}>
+          <option value="">(none)</option>
+          {refs.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+        <button disabled={i === 0} onClick={() => move(i, -1)} title="Try this group earlier" data-testid={`order-up-${g}`}>&uarr;</button>
+        <button disabled={i === order.length - 1} onClick={() => move(i, 1)} title="Try this group later" data-testid={`order-down-${g}`}>&darr;</button>
+      </div>
+    )
   }
 
   return (
@@ -115,6 +253,8 @@ export function Settings() {
         <div className="row spread">
           <h3>Providers</h3>
           <div className="row">
+            <button onClick={() => setModelsOpen(true)} data-testid="open-models">Models...</button>
+            <button onClick={() => void checkNow()} disabled={checking} title="Check the Strata and LM Studio servers now" data-testid="check-servers">{checking ? 'Checking...' : 'Check now'}</button>
             <button onClick={() => void refresh()} disabled={refreshing}>{refreshing ? 'Refreshing...' : 'Refresh local models'}</button>
             <button className="primary" disabled={!changed} onClick={() => void saveProviders()} data-testid="save-providers">Save providers</button>
           </div>
@@ -123,11 +263,12 @@ export function Settings() {
           <thead>
             <tr>
               <th style={{ width: 30 }} />
-              <th style={{ width: 130 }}>Provider</th>
+              <th style={{ width: 110 }}>Provider</th>
               <th>Base URL</th>
-              <th style={{ width: 80 }}>Parallel</th>
-              <th style={{ width: 360 }}>API key</th>
-              <th style={{ width: 150 }}>Status</th>
+              <th style={{ width: 110 }}>Parallel</th>
+              <th style={{ width: 120 }}>Per min / day</th>
+              <th style={{ width: 290 }}>API key</th>
+              <th style={{ width: 130 }}>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -137,7 +278,7 @@ export function Settings() {
           </tbody>
         </table>
         <div className="dim small">
-          Keys are stored in the Windows credential store (service "book-translator") and never shown again. An environment variable with the same name takes priority. Parallel is how many requests (and chapters) run at once.
+          Keys are stored in the Windows credential store (service "book-translator") and never shown again. An environment variable with the same name takes priority. Parallel is how many requests (and chapters) run at once; auto uses the slot count the server reports. Per minute and per day are saved when you leave the field (empty: no limit).
         </div>
         {(models?.discovery ?? []).map((d) => (
           <div key={d.provider} className="small">
@@ -150,18 +291,56 @@ export function Settings() {
       <div className="card stack">
         <div className="row spread">
           <h3>Default models for a new translation</h3>
-          <button className="primary" disabled={Object.keys(agentPick).length === 0 && chunk === null} onClick={() => void saveDefaults()}>Save defaults</button>
+          {saveButton}
+        </div>
+        <div className="dim small">Each agent has an ordered list: the first model is tried first, the rest are fallbacks. A group default (API, Strata, LM Studio) can stand in for a model in any list.</div>
+        <div className="stack" style={{ gap: 4 }}>
+          {order.map(groupRow)}
+        </div>
+        <label className="row small">
+          <input type="checkbox" checked={shared} onChange={(e) => setDraft((d) => ({ ...d, shared: e.target.checked, order: e.target.checked ? order : undefined }))} data-testid="order-shared" />
+          Use one fallback order for every agent
+        </label>
+        <div className="dim small">
+          {shared ? 'Every list is sorted by the group order above: the first group is the primary, the rest are fallbacks.' : 'Each list keeps its own order. Tick the box to sort every list by the group order.'}
         </div>
         <div className="form">
           {AGENTS.map((a) => (
             <div key={a} style={{ display: 'contents' }}>
-              <label>{AGENT_LABEL[a]}</label>
-              <ModelSelect models={models} value={agentPick[a] ?? pickDefault(models, defaults?.agentModels[a])} onChange={(ref) => setAgentPick((x) => ({ ...x, [a]: ref }))} />
+              <label style={{ alignSelf: 'start', paddingTop: 4 }}>{AGENT_LABEL[a]}</label>
+              <ModelListEditor value={draft.agents[a] ?? defaults?.agentModels[a] ?? []} onChange={(list) => setDraft((d) => ({ ...d, agents: { ...d.agents, [a]: list } }))} testId={`default-${a}`} />
             </div>
           ))}
           <label>Chunk size (tokens)</label>
-          <input type="number" min={200} max={20000} step={100} style={{ width: 100 }} value={chunk ?? defaults?.defaultMaxChunkTokens ?? 1500} onChange={(e) => setChunk(Number(e.target.value))} />
+          <input type="number" min={200} max={20000} step={100} style={{ width: 100 }} value={draft.chunk ?? defaults?.defaultMaxChunkTokens ?? 1500} onChange={(e) => setDraft((d) => ({ ...d, chunk: Number(e.target.value) }))} />
         </div>
+      </div>
+
+      <div className="card stack">
+        <div className="row spread">
+          <h3>Parallel</h3>
+          {saveButton}
+        </div>
+        <div className="form">
+          <ParallelFields value={parallel} onChange={(v) => setDraft((d) => ({ ...d, parallel: v }))} testId="default-parallel" />
+        </div>
+        <div className="dim small">The starting values for a new translation. A project can change them in its Settings tab.</div>
+      </div>
+
+      <div className="card stack">
+        <div className="row spread">
+          <h3>LM Studio loading</h3>
+          {saveButton}
+        </div>
+        <div className="form">
+          <label>Requests at once</label>
+          <input type="number" min={1} max={16} style={{ width: 100 }} value={lm.parallel ?? 4} onChange={(e) => setDraft((d) => ({ ...d, lm: { ...d.lm, parallel: Number(e.target.value) } }))} data-testid="lm-parallel" />
+          <label>Context window</label>
+          <input type="number" min={2048} step={1024} style={{ width: 100 }} value={lm.context ?? 131072} onChange={(e) => setDraft((d) => ({ ...d, lm: { ...d.lm, context: Number(e.target.value) } }))} data-testid="lm-context" />
+          <label>Unload after idle min</label>
+          <input type="number" min={1} style={{ width: 100 }} value={lm.ttlMinutes ?? 60} onChange={(e) => setDraft((d) => ({ ...d, lm: { ...d.lm, ttlMinutes: Number(e.target.value) } }))} data-testid="lm-ttl" />
+        </div>
+        <div className="dim small">When a model is not loaded yet, the engine loads it with these values. A model LM Studio has loaded already keeps its own settings.</div>
       </div>
 
       <div className="card stack">
@@ -173,6 +352,8 @@ export function Settings() {
         </div>
         <div className="dim small">The prompts of the agents are plain Markdown files with {'{{variables}}'}. Edit them there, changes apply to the next chunk.</div>
       </div>
+
+      {modelsOpen && <ModelsDialog onClose={() => setModelsOpen(false)} />}
     </div>
   )
 }

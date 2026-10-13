@@ -31,7 +31,23 @@ export interface ProviderSummary {
   apiKeyEnv?: string
   /** A key was found (environment or credential store). Never the key itself. */
   hasKey: boolean
+  /** Requests at once. With `concurrencyAuto` the server sets it (Strata, LM Studio), so it can't be changed here. */
   concurrency: number
+  concurrencyAuto: boolean
+  /** `concurrencyAuto` server that did not answer the last check: skipped while another model is left. */
+  down: boolean
+  /** Requests per minute and per day; missing means no limit. */
+  rpm?: number
+  rpd?: number
+  /** Requests sent since midnight UTC (in memory: starts at 0 after a restart). */
+  requestsToday: number
+  /** The daily limit is used up: its work uses the next model until `dayResetsAt` (epoch ms). */
+  dayFull: boolean
+  dayResetsAt: number
+  /** LM Studio: the engine loads a model that isn't loaded yet. */
+  loadModels: boolean
+  /** `discover` of providers.md. */
+  discover: boolean | 'free'
   /** Enabled and usable now (local, or has a key). */
   available: boolean
   unavailableReason?: string
@@ -54,6 +70,32 @@ export interface ModelSummary {
   priceIn: number
   priceOut: number
   discovered: boolean
+  /** The pickers offer it (it is not in `hidden` of config/models.md). */
+  shown: boolean
+  /** It came from `picked` in config/models.md (the Models dialog), not from providers.md. */
+  picked: boolean
+  maxOutput?: number
+}
+
+/** A model a provider lists, from `detectModels`. */
+export interface CatalogModel {
+  id: string
+  /** `provider/model`. */
+  ref: string
+  context?: number
+  /** USD per 1M tokens, when the provider lists prices. */
+  priceIn?: number
+  priceOut?: number
+  /** It can be shown in the pickers: local, or with a listed price (a paid model without a price never is). */
+  pickable: boolean
+}
+
+/** The answer to `detectModels`. */
+export interface CatalogResult {
+  provider: string
+  models: CatalogModel[]
+  /** ISO time of the listing. */
+  at: string
 }
 
 export interface ModelsInfo {
@@ -118,12 +160,19 @@ export interface ProviderPatch {
   id: string
   enabled?: boolean
   baseUrl?: string
-  concurrency?: number
+  /** A number, or `auto` (local servers: the server's own slot count). */
+  concurrency?: number | 'auto'
 }
 
 export interface DefaultsPatch {
   agentModels?: Partial<Record<AgentName, string[]>>
   defaultMaxChunkTokens?: number
+  /** `provider/model` behind each alias. Merged key by key. */
+  groupDefaults?: Partial<Record<'paid' | 'strata' | 'lmstudio', string>>
+  /** The whole group order, replacing the old one. `[]`: each list keeps its own order. */
+  modelOrder?: ('paid' | 'strata' | 'lmstudio')[]
+  lmstudio?: Partial<{ parallel: number; context: number; ttlMinutes: number }>
+  parallel?: Partial<{ enabled: boolean; maxAtOnce: 'auto' | number; splitSections: boolean }>
 }
 
 // ---- events ----
@@ -168,6 +217,18 @@ export type Command =
   | { type: 'updateGlossary'; projectId: string; entries: GlossaryEntry[] }
   | { type: 'export'; projectId: string; outPath?: string }
   | { type: 'deleteProject'; projectId: string }
+  /** Asks a provider for every chat model it lists (`GET /models`). The list is kept for `showModels`. */
+  | { type: 'detectModels'; provider: string }
+  /** Shows models in the pickers (`show: true`) or hides them (config/models.md). A listed model that isn't known yet is added with its listed price. */
+  | { type: 'showModels'; provider: string; refs: string[]; show: boolean }
+  /** Adds a model by its id to `picked` in config/models.md. A paid provider needs both prices (USD per 1M tokens, 0 for free). */
+  | { type: 'addModel'; provider: string; id: string; priceIn?: number; priceOut?: number; context?: number }
+  /** Sets a provider's limits in config/models.md, over providers.md. 0 for `rpm` or `rpd` means no limit; a field left out keeps its value. */
+  | { type: 'setProviderLimits'; provider: string; concurrency?: number; rpm?: number; rpd?: number }
+  /** Checks the `concurrency: auto` servers now (Strata was just started), instead of at the next 10-second check. */
+  | { type: 'checkServers' }
+  /** Changes a project's settings (models, agents on or off, parallel, chunk size ...). Refused while the project runs. */
+  | { type: 'updateProjectSettings'; projectId: string; patch: Partial<ProjectSettings> }
 
 export type CommandType = Command['type']
 
@@ -194,6 +255,12 @@ export interface CommandResults {
   updateGlossary: undefined
   export: { path: string; rel: string | null }
   deleteProject: undefined
+  detectModels: CatalogResult
+  showModels: ModelsInfo
+  addModel: ModelsInfo
+  setProviderLimits: ModelsInfo
+  checkServers: ModelsInfo
+  updateProjectSettings: ProjectDetail
 }
 
 export type CommandOf<K extends CommandType> = Extract<Command, { type: K }>

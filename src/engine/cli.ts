@@ -1,3 +1,4 @@
+import { applyModelDefaults } from './config'
 import { adapterFor } from './formats'
 import { resolveKey, setStoredKey, KEYRING_SERVICE } from './models/keys'
 import { scriptDevMock } from './models/devMock'
@@ -17,6 +18,7 @@ async function loadRegistry(argv: string[]): Promise<{ registry: ModelRegistry; 
   const seed = argValue(argv, 'seed')
   await initDataFolder(dataDir, seed)
   const registry = new ModelRegistry(dataDir)
+  await applyModelDefaults(registry, dataDir)
   await registry.load()
   return { registry, dataDir }
 }
@@ -91,6 +93,8 @@ export async function translate(argv: string[]): Promise<number> {
   }
   const { registry, dataDir } = await loadRegistry(argv)
   for (const d of await registry.discover()) if (d.error) out(`note: ${d.provider} discovery failed (${d.error})`)
+  // `concurrency: auto` servers (Strata, LM Studio): their slot count, and whether they run at all
+  await registry.syncServerSlots()
 
   scriptDevMock(registry.mock)
 

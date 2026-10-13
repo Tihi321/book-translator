@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ChatRequest } from '../src/engine/models/types'
 import { ProviderError } from '../src/engine/models/types'
 import { parseGlossary } from '../src/engine/pipeline/glossary'
-import { asSegs, lastUser, rig, segsIn } from './pipelineHelpers'
+import { asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
 
 let r: Rig | undefined
@@ -377,5 +377,124 @@ describe('editing', () => {
     expect(para.startsWith('[hr] ' + sentence)).toBe(true)
     expect(para.match(/\[hr\] /g)!.length).toBe(ids.filter((i) => i.startsWith('b2#')).length)
     expect(text).toContain('[hr] Short end.')
+  })
+})
+
+describe('parallel translation', () => {
+  const oneChapter = () => bookText(1, 10).replace('# Test Book\n\n', '')
+
+  /** Scripts the translator to hold each request for a while and counts the most requests in flight at once. */
+  function trackInFlight(rg: Rig) {
+    const stat = { now: 0, max: 0, withPrev: 0, calls: 0 }
+    rg.mock.on({ role: 'translator' }, async (req) => {
+      stat.calls++
+      if (lastUser(req).includes('## Previous passage')) stat.withPrev++
+      stat.now++
+      stat.max = Math.max(stat.max, stat.now)
+      await new Promise((res) => setTimeout(res, 40))
+      stat.now--
+      return echo(req)
+    })
+    return stat
+  }
+
+  it('runs one request at a time with parallel off, even for several sections', async () => {
+    r = await rig({ content: bookText(3, 6) })
+    const stat = trackInFlight(r)
+    const id = await r.create({ parallel: { enabled: false, maxAtOnce: 'auto', splitSections: false } })
+    expect((await r.service.start(id)).status).toBe('done')
+    expect(stat.calls).toBeGreaterThan(3)
+    expect(stat.max).toBe(1)
+  })
+
+  it('runs sections at once up to the provider concurrency by default (maxAtOnce auto)', async () => {
+    r = await rig({ content: bookText(6, 3) })
+    const stat = trackInFlight(r)
+    const id = await r.create()
+    expect((await r.service.start(id)).status).toBe('done')
+    // the mock provider allows 4 at once
+    expect(stat.max).toBeGreaterThan(1)
+    expect(stat.max).toBeLessThanOrEqual(4)
+  })
+
+  it('caps the work at maxAtOnce', async () => {
+    r = await rig({ content: bookText(8, 3) })
+    const stat = trackInFlight(r)
+    const id = await r.create({ parallel: { enabled: true, maxAtOnce: 3, splitSections: false } })
+    expect((await r.service.start(id)).status).toBe('done')
+    expect(stat.max).toBe(3)
+  })
+
+  it('keeps the chunks of one section in order, with the previous passage, when not split', async () => {
+    r = await rig({ content: oneChapter() })
+    const stat = trackInFlight(r)
+    const id = await r.create({ parallel: { enabled: true, maxAtOnce: 'auto', splitSections: false } })
+    await r.service.start(id)
+    const chunks = await r.service.store.listChunks(id)
+    expect(new Set(chunks.map((c) => c.sectionId)).size).toBe(1)
+    expect(chunks.length).toBeGreaterThan(2)
+    expect(stat.max).toBe(1)
+    expect(stat.withPrev).toBe(chunks.length - 1)
+  })
+
+  it('runs the chunks of one section at once with splitSections, and sends no previous passage while the earlier chunk is unfinished', async () => {
+    r = await rig({ content: oneChapter() })
+    const stat = trackInFlight(r)
+    const id = await r.create({ parallel: { enabled: true, maxAtOnce: 16, splitSections: true } })
+    expect((await r.service.start(id)).status).toBe('done')
+    const chunks = await r.service.store.listChunks(id)
+    expect(new Set(chunks.map((c) => c.sectionId)).size).toBe(1)
+    expect(chunks.length).toBeGreaterThan(2)
+    expect(chunks.length).toBeLessThanOrEqual(16)
+    expect(chunks.every((c) => c.state === 'done')).toBe(true)
+    // the mock provider allows 4 requests at once
+    expect(stat.max).toBeGreaterThan(1)
+    expect(stat.max).toBeLessThanOrEqual(4)
+    // every worker started before any chunk was finished: nobody had a finished previous chunk
+    expect(stat.withPrev).toBe(0)
+  })
+
+  it('gives a split chunk the previous passage when the earlier chunk is already done (resume)', async () => {
+    r = await rig({ content: oneChapter() })
+    const id = await r.create({ parallel: { enabled: true, maxAtOnce: 16, splitSections: true } })
+    await r.service.start(id)
+    // chunks 2.. go back to pending, chunk 1 stays done
+    const chunks = await r.service.store.listChunks(id)
+    for (const c of chunks.slice(1)) {
+      c.state = 'pending'
+      c.translation = {}
+      c.final = {}
+      await r.service.store.writeChunk(id, c)
+    }
+    const stat = trackInFlight(r)
+    // one worker at a time: each chunk finds its predecessor finished
+    const project = await r.service.store.load(id)
+    project.settings.parallel.maxAtOnce = 1
+    await r.service.store.save(project)
+    await r.service.start(id)
+    expect(stat.calls).toBe(chunks.length - 1)
+    expect(stat.withPrev).toBe(chunks.length - 1)
+  })
+
+  it('lets an old project.json without parallel run, with today\'s behavior', async () => {
+    r = await rig({ content: bookText(4, 3) })
+    const stat = trackInFlight(r)
+    const id = await r.create()
+    const file = path.join(r.dir, 'projects', id, 'project.json')
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as { settings: Record<string, unknown> }
+    delete json.settings.parallel
+    await fs.writeFile(file, JSON.stringify(json), 'utf8')
+    const loaded = await r.service.store.load(id)
+    expect(loaded.settings.parallel).toEqual({ enabled: true, maxAtOnce: 'auto', splitSections: false })
+    expect((await r.service.start(id)).status).toBe('done')
+    expect(stat.max).toBeGreaterThan(1)
+  })
+
+  it('estimates the time with the number of workers', async () => {
+    r = await rig({ content: bookText(4, 6) })
+    const id = await r.create()
+    const off = await r.service.analyze(id, { parallel: { enabled: false, maxAtOnce: 'auto', splitSections: false } })
+    const three = await r.service.analyze(id, { parallel: { enabled: true, maxAtOnce: 3, splitSections: false } })
+    expect(off.perAgent.translator!.seconds).toBeCloseTo(three.perAgent.translator!.seconds * 3, 6)
   })
 })

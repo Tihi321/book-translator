@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { defaultsSchema } from '../shared/schemas'
 import type { DefaultsConfig } from '../shared/schemas'
+import { modelDefaultsOf } from './models/registry'
+import type { ModelRegistry } from './models/registry'
 
 /** Reads config/defaults.json from the data folder. A missing file gives the schema defaults. */
 export async function loadDefaults(dataDir: string): Promise<DefaultsConfig> {
@@ -22,6 +24,11 @@ export async function loadDefaults(dataDir: string): Promise<DefaultsConfig> {
   const parsed = defaultsSchema.safeParse(json)
   if (!parsed.success) throw new Error(`${file}: ${parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`)
   return parsed.data
+}
+
+/** Gives the registry the group aliases, the group order and the LM Studio load settings of defaults.json. Call `registry.load()` after it. */
+export async function applyModelDefaults(registry: ModelRegistry, dataDir: string): Promise<void> {
+  registry.setDefaults(modelDefaultsOf(await loadDefaults(dataDir)))
 }
 
 export interface LanguageInfo {

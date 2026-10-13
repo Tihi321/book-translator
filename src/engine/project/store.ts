@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { DocumentIR } from '../../shared/ir'
+import { DEFAULT_PARALLEL } from '../../shared/project'
 import type { ChunkRecord, GlossaryEntry, ProjectFile, ProjectSettings } from '../../shared/project'
 import { atomicWrite } from '../store/atomic'
 import { parseGlossary, serializeGlossary } from '../pipeline/glossary'
@@ -107,6 +108,8 @@ export class ProjectStore {
   async load(id: string): Promise<ProjectFile> {
     const p = JSON.parse(await fs.readFile(this.file(id, 'project.json'), 'utf8')) as ProjectFile
     if (!p || p.id !== id) throw new Error(`bad project.json in ${id}`)
+    // a project.json from before parallel translation: today's behavior
+    p.settings.parallel = { ...DEFAULT_PARALLEL, ...p.settings.parallel }
     return p
   }
 
@@ -197,6 +200,7 @@ export function mergeSettings(base: ProjectSettings, patch: Partial<ProjectSetti
     ...base,
     ...defined,
     agentModels: { ...base.agentModels, ...(patch.agentModels ?? {}) },
-    enabled: { ...base.enabled, ...(patch.enabled ?? {}) }
+    enabled: { ...base.enabled, ...(patch.enabled ?? {}) },
+    parallel: { ...DEFAULT_PARALLEL, ...base.parallel, ...(patch.parallel ?? {}) }
   }
 }

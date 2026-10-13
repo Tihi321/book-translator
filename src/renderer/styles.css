@@ -663,3 +663,80 @@ details > summary {
   padding: 10px;
   overflow-x: auto;
 }
+
+/* models dialog */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dialog {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 90vh;
+}
+.dialog.models {
+  width: min(900px, 94vw);
+  height: min(680px, 90vh);
+}
+.models-body {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+.models-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+.models-providers button {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+}
+.models-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.models-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.model-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 60px 110px 80px;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.model-row:hover {
+  background: var(--panel2);
+}
+.model-row.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.model-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

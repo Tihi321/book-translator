@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { parseSse } from './sse'
 import { httpError, ProviderError } from './types'
 import type { ChatEvent, ChatRequest, ProviderClient, Usage } from './types'
@@ -13,7 +14,13 @@ export interface OpenAiCompatOptions {
   jsonSchema?: boolean
   /** Prefixes added to embedding inputs (nomic wants these). */
   embedPrefixes?: { document: string; query: string }
+  /** LM Studio: before a chat request, load the model if it isn't loaded yet, with these settings. */
+  loadConfig?: (model: string) => { parallel: number; context: number; ttlMinutes: number }
+  /** LM Studio's `lms` command line. It loads with an idle time (`--ttl`), which the REST load can't; without it the REST API is used. */
+  lmsPath?: string
 }
+
+const LOAD_TIMEOUT_MS = 10 * 60_000
 
 function headers(apiKey?: string): Record<string, string> {
   const h: Record<string, string> = { 'content-type': 'application/json' }
@@ -26,20 +33,26 @@ function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
   return signal ? AbortSignal.any([signal, t]) : t
 }
 
+/** Connection errors that mean nothing listens there (the server is not started), not a hiccup of a running one. */
+const UNREACHABLE = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'EADDRNOTAVAIL'])
+
 /** Converts network failures and timeouts to retryable ProviderErrors. Aborts by the caller pass through. */
 function wrapFetchError(err: unknown, caller?: AbortSignal): never {
   if (caller?.aborted) throw err
   if (err instanceof ProviderError) throw err
-  const e = err as Error
+  const e = err as Error & { cause?: { code?: string } }
   if (e?.name === 'TimeoutError') throw new ProviderError('request timed out', undefined, true)
   if (e?.name === 'AbortError') throw err
-  throw new ProviderError(`network error: ${e?.message ?? String(err)}`, undefined, true)
+  const code = e?.cause?.code
+  throw new ProviderError(`network error: ${e?.message ?? String(err)}${code ? ` (${code})` : ''}`, undefined, true, undefined, !!code && UNREACHABLE.has(code))
 }
 
 export class OpenAiCompatClient implements ProviderClient {
   readonly id: string
   private readonly base: string
   private readonly f: typeof fetch
+  /** Loads in progress, so parallel requests for one model load it once. */
+  private loading = new Map<string, Promise<void>>()
 
   constructor(private readonly opts: OpenAiCompatOptions) {
     this.id = opts.id
@@ -48,6 +61,7 @@ export class OpenAiCompatClient implements ProviderClient {
   }
 
   async *chat(req: ChatRequest): AsyncGenerator<ChatEvent, void, void> {
+    if (this.opts.loadConfig) await this.ensureLoaded(req.model, req.signal)
     const body: Record<string, unknown> = {
       model: req.model,
       messages: req.messages,
@@ -107,6 +121,46 @@ export class OpenAiCompatClient implements ProviderClient {
     if (usage) yield { type: 'usage', usage }
   }
 
+  /** LM Studio: loads `model` with `loadConfig` unless it is loaded already. A model LM Studio doesn't have fails at once (not retryable). */
+  private async ensureLoaded(model: string, signal?: AbortSignal): Promise<void> {
+    let p = this.loading.get(model)
+    if (!p) {
+      p = this.loadIfNeeded(model, this.opts.loadConfig!(model)).finally(() => this.loading.delete(model))
+      this.loading.set(model, p)
+    }
+    try {
+      await p
+    } catch (err) {
+      wrapFetchError(err, signal)
+    }
+  }
+
+  private async loadIfNeeded(model: string, cfg: { parallel: number; context: number; ttlMinutes: number }): Promise<void> {
+    const root = this.base.replace(/\/v1$/, '')
+    const res = await this.f(`${root}/api/v1/models`, { signal: AbortSignal.timeout(10_000) })
+    if (!res.ok) return // not LM Studio's API: send the request as it is
+    const json = (await res.json()) as { models?: { key: string; type?: string; loaded_instances?: { id: string }[] }[] }
+    const m = json.models?.find((x) => x.key === model || x.loaded_instances?.some((i) => i.id === model))
+    if (!m) throw new ProviderError(`LM Studio has no model "${model}": download it first (lms get ${model})`)
+    if (m.loaded_instances?.length) return
+    if (this.opts.lmsPath) {
+      const args = ['load', model, '-c', String(cfg.context), '--parallel', String(cfg.parallel), '--ttl', String(cfg.ttlMinutes * 60), '-y']
+      await new Promise<void>((resolve, reject) =>
+        execFile(this.opts.lmsPath!, args, { timeout: LOAD_TIMEOUT_MS, windowsHide: true }, (err, _out, stderr) =>
+          err ? reject(new ProviderError(`LM Studio could not load ${model}: ${(String(stderr).trim() || err.message).slice(0, 300)}`)) : resolve()
+        )
+      )
+      return
+    }
+    const load = await this.f(`${root}/api/v1/models/load`, {
+      method: 'POST',
+      headers: headers(this.opts.apiKey),
+      body: JSON.stringify({ model, context_length: cfg.context, parallel: cfg.parallel }),
+      signal: AbortSignal.timeout(LOAD_TIMEOUT_MS)
+    })
+    if (!load.ok) throw new ProviderError(`LM Studio could not load ${model}: HTTP ${load.status} ${(await load.text().catch(() => '')).slice(0, 300)}`, load.status)
+  }
+
   async embed(model: string, inputs: string[], signal?: AbortSignal): Promise<number[][]> {
     let res: Response
     try {
@@ -148,10 +202,50 @@ export class OpenAiCompatClient implements ProviderClient {
 
   /** Lists the model ids the server offers (`GET /models`). */
   async listModels(signal?: AbortSignal): Promise<string[]> {
-    const res = await this.f(`${this.base}/models`, { headers: headers(this.opts.apiKey), signal: withTimeout(signal, 5000) })
+    return (await this.listModelInfo(signal)).map((m) => m.id)
+  }
+
+  /** The models the server offers, with the context, output limit and prices when it lists them (OpenRouter does, LM Studio doesn't). */
+  async listModelInfo(signal?: AbortSignal): Promise<ListedModel[]> {
+    const res = await this.f(`${this.base}/models`, { headers: headers(this.opts.apiKey), signal: withTimeout(signal, 15000) })
     if (!res.ok) throw httpError(res.status, await res.text().catch(() => ''))
-    const json = (await res.json()) as { data?: { id: string }[] }
-    return (json.data ?? []).map((m) => m.id)
+    const json = (await res.json()) as { data?: OpenAiModelEntry[] }
+    return (json.data ?? []).filter((m) => typeof m?.id === 'string').map(listedModel)
+  }
+}
+
+/** One model of a `GET /models` answer. Only `id` is standard; OpenRouter adds the rest. */
+interface OpenAiModelEntry {
+  id: string
+  context_length?: number
+  top_provider?: { max_completion_tokens?: number | null } | null
+  /** USD per token, as strings. */
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string } | null
+  architecture?: { output_modalities?: string[] } | null
+}
+
+export interface ListedModel {
+  id: string
+  context?: number
+  maxOutput?: number
+  /** USD per 1M tokens, when the server lists prices. */
+  price?: { in: number; out: number; cachedIn?: number }
+  /** False when the server says the model answers with something besides text (music, images). */
+  textOnly: boolean
+}
+
+export function listedModel(m: OpenAiModelEntry): ListedModel {
+  const perM = (v: string | undefined) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v) * 1_000_000)
+  const pIn = perM(m.pricing?.prompt)
+  const pOut = perM(m.pricing?.completion)
+  const out = m.architecture?.output_modalities
+  return {
+    id: m.id,
+    context: typeof m.context_length === 'number' && m.context_length > 0 ? m.context_length : undefined,
+    maxOutput: m.top_provider?.max_completion_tokens || undefined,
+    // a negative price is OpenRouter's "varies" (its auto router): not a price the budget can use
+    price: pIn !== undefined && pOut !== undefined && pIn >= 0 && pOut >= 0 ? { in: pIn, out: pOut, cachedIn: perM(m.pricing?.input_cache_read) } : undefined,
+    textOnly: !out || (out.length === 1 && out[0] === 'text')
   }
 }
 
