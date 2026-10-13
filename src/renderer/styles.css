@@ -120,6 +120,7 @@ h3 {
 .app {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
 }
 .topbar {
@@ -599,7 +600,9 @@ details > summary {
 .reader {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
+  min-width: 0;
   height: 100%;
 }
 .reader-bar {
@@ -619,6 +622,7 @@ details > summary {
 .reader-body {
   position: relative;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -630,6 +634,7 @@ details > summary {
 .reader-pdf {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -638,9 +643,12 @@ details > summary {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
+/* epub.js lays the pages out as one very wide row of columns; keep that from widening the page */
 .reader-epub-host {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 .reader-scroll {
   flex: 1;
