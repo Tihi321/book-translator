@@ -19,6 +19,7 @@ Books are larger than any model's context, so the text is split into chunks that
 - Review: source and translation side by side per chunk, QA flags, edit text, retranslate a chunk with another model, accept flags. An editable glossary that applies to the chunks that follow.
 - Export works with partial progress (untranslated parts keep the source text), for previewing.
 - Headless CLI for scripting and tests.
+- An MCP server, so another LLM (Claude Code ...) can drive the app or translate with it, with or without a window.
 
 ## Setup
 
@@ -29,7 +30,7 @@ npm install
 npm run dev        # builds the engine and starts the app with hot reload
 ```
 
-Other scripts: `npm run build`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run dist` (NSIS installer in `dist/`), `npm run dist:dir` (unpacked app in `dist/win-unpacked/`).
+Other scripts: `npm run build`, `npm run headless`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run dist` (NSIS installer in `dist/`), `npm run dist:dir` (unpacked app in `dist/win-unpacked/`).
 
 ## Providers and API keys
 
@@ -71,6 +72,7 @@ translate <file> --to <language> [--from <language>] [--model <provider/model>[,
 export <projectId> [--out <file>]           write the document from what is translated so far
 status <projectId>                          chunk states, spend, failed chunks and major QA issues
 key-set <ENV_NAME>                          store an API key (npm run key:set <ENV_NAME>)
+headless [--data <dir>] [--port <n>]        run with no window and the MCP server on (npm run headless)
 ```
 
 `--to` takes a language name or code (`Croatian`, `hr`). The same file and language always give the same project, so running `translate` again resumes it (Ctrl+C stops cleanly). `--data <dir>` (or `BOOK_TRANSLATOR_DATA`) selects the data folder. Errors print one line and exit with code 1.
@@ -78,6 +80,51 @@ key-set <ENV_NAME>                          store an API key (npm run key:set <E
 Example: `npm run engine -- translate book.epub --to hr --model lmstudio/qwen3.6-35b-a3b --qa-model deepseek/deepseek-flash`
 
 With no `--model` flags the defaults from `config/defaults.json` apply (Strata first, then DeepSeek).
+
+## MCP (use it from another LLM)
+
+The app can act as an MCP server, so an outside LLM client (Claude Code, Claude Desktop, Cursor, Codex ...) can work with your books. It runs inside the app's engine, so projects and progress that the client starts show up live in the window.
+
+Turn it on in Settings, card "MCP server": tick Enable, set the port (default 47811) and press Save. The card shows the URL (`http://127.0.0.1:47811/mcp`), the token and two ready snippets with Copy buttons. The same works [headless](#headless).
+
+Claude Code:
+
+```powershell
+claude mcp add --transport http book-translator http://127.0.0.1:47811/mcp --header "Authorization: Bearer <token>"
+```
+
+Clients with a JSON config (url + headers):
+
+```json
+{ "mcpServers": { "book-translator": { "type": "http", "url": "http://127.0.0.1:47811/mcp", "headers": { "Authorization": "Bearer <token>" } } } }
+```
+
+Two ways to work:
+
+- **Operator.** The client drives the app's own pipeline: analyze a file, create a project, pick models, start, pause, resume, watch progress, review flagged chunks, fix text, export. The app's models (Strata, DeepSeek ...) do the translating.
+- **Translator.** The client translates the book itself. `prepare_chunks` makes the chunks, `get_translation_task` returns the same prompt the app's translator would get (rules, brief, glossary terms, the previous passage, `<seg>` segments), and `submit_translation` checks segment ids and inline tags and stores the text. Nothing is spent on the app's models. The app's QA and proofreader can still run on this work later: start the project or use `retry_chunk`. The `translate_book_yourself` prompt gives the client the steps.
+
+Tools:
+
+- Info: `get_info`, `list_models`, `get_defaults`, `list_languages`
+- Projects: `list_projects`, `analyze_file`, `create_project`, `get_project`, `update_project_settings`
+- Running: `start_translation`, `pause_translation`, `cancel_translation`, `wait_for_progress`
+- Review: `get_chunk`, `edit_chunk`, `retry_chunk`, `update_glossary`, `set_brief`, `export_project`
+- Translator role: `prepare_chunks`, `get_translation_task`, `submit_translation`
+- Prompt: `translate_book_yourself`
+
+Safety:
+
+- The server listens on 127.0.0.1 only and checks the Host and Origin headers.
+- Every request needs the bearer token. It is made on first use and kept in the Windows credential store (`BOOK_TRANSLATOR_MCP_TOKEN`; an environment variable with that name takes priority).
+- API keys, provider settings and project deletion are not available over MCP.
+- One engine uses a data folder at a time (`engine.lock` in the folder). A second app or `headless` on the same folder is refused with a message. If no Book Translator is running and the message stays, delete `engine.lock`.
+
+## Headless
+
+`"Book Translator.exe" --headless` starts the app with no window and with MCP on (it overrides the Settings switch for that run). The packaged exe prints nothing to a terminal on Windows, so get the token from Settings: start Book Translator normally. The window opens on the running instance and shows the URL and token. Closing that window does not stop the app. To stop it, end the process.
+
+From a terminal, `npm run headless -- [--data <dir>] [--port <n>]` prints the URL and token and logs events. Ctrl+C pauses the running projects and stops. It uses the same data folder as the app, so close the app first.
 
 ## Data folder
 

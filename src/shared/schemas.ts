@@ -120,7 +120,14 @@ export const defaultsSchema = z.looseObject({
       maxAtOnce: z.union([z.literal('auto'), z.number().int().min(1).max(16)]).default('auto'),
       splitSections: z.boolean().default(false)
     })
-    .default({ enabled: true, maxAtOnce: 'auto', splitSections: false })
+    .default({ enabled: true, maxAtOnce: 'auto', splitSections: false }),
+  /** The MCP server (lets another LLM client drive the app): off by default, on 127.0.0.1 at `port`. */
+  mcp: z
+    .object({
+      enabled: z.boolean().default(false),
+      port: z.number().int().min(1024).max(65535).default(47811)
+    })
+    .default({ enabled: false, port: 47811 })
 })
 
 export type ProvidersConfig = z.output<typeof providersSchema>

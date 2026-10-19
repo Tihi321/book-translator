@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ParallelSettings } from '../../shared/project'
-import type { ModelSummary, ProviderSummary } from '../../shared/protocol'
+import type { McpStatus, ModelSummary, ProviderSummary } from '../../shared/protocol'
 import { AGENTS } from '../../shared/agents'
 import type { AgentName } from '../../shared/agents'
 import { getApi } from '../api'
@@ -135,6 +135,103 @@ interface Draft {
   lm: Partial<{ parallel: number; context: number; ttlMinutes: number }>
 }
 const EMPTY_DRAFT: Draft = { agents: {}, groups: {}, lm: {} }
+
+/** The MCP server card: switch, port, status, the token and copy-ready client setups. */
+function McpCard() {
+  const defaults = useStore((s) => s.defaults)
+  const setDefaults = useStore((s) => s.setDefaults)
+  const toast = useStore((s) => s.toast)
+  const [status, setStatus] = useState<McpStatus | null>(null)
+  const [enabled, setEnabled] = useState<boolean | undefined>()
+  const [port, setPort] = useState<number | undefined>()
+  const [showToken, setShowToken] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const saved = defaults?.mcp ?? { enabled: false, port: 47811 }
+  const on = enabled ?? saved.enabled
+  const portValue = port ?? saved.port
+  const dirty = on !== saved.enabled || portValue !== saved.port
+
+  async function loadStatus() {
+    const st = await attempt(getApi().request<'getMcpStatus'>({ type: 'getMcpStatus' }))
+    if (st) setStatus(st)
+  }
+
+  useEffect(() => {
+    void loadStatus()
+  }, [])
+
+  async function save() {
+    setSaving(true)
+    const next = await attempt(getApi().request<'setDefaults'>({ type: 'setDefaults', patch: { mcp: { enabled: on, port: portValue } } }))
+    if (next) {
+      setDefaults(next)
+      setEnabled(undefined)
+      setPort(undefined)
+      await loadStatus()
+    }
+    setSaving(false)
+  }
+
+  async function copy(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast(`${what} copied`, 'info')
+    } catch (err) {
+      toast((err as Error).message)
+    }
+  }
+
+  const url = status?.url
+  const token = status?.token
+  const snippets = status?.running && url && token
+    ? [
+        { id: 'claude', title: 'Claude Code', text: `claude mcp add --transport http book-translator ${url} --header "Authorization: Bearer ${token}"` },
+        { id: 'json', title: 'Clients with a JSON config (url + headers)', text: JSON.stringify({ mcpServers: { 'book-translator': { type: 'http', url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2) }
+      ]
+    : []
+
+  return (
+    <div className="card stack">
+      <div className="row spread">
+        <h3>MCP server (use it from another LLM)</h3>
+        <button className="primary" disabled={!dirty || saving} onClick={() => void save()} data-testid="mcp-save">{saving ? 'Saving...' : 'Save'}</button>
+      </div>
+      <div className="form">
+        <label>Enable</label>
+        <label className="row small">
+          <input type="checkbox" checked={on} onChange={(e) => setEnabled(e.target.checked)} data-testid="mcp-enabled" />
+          Let other programs use Book Translator over MCP
+        </label>
+        <label>Port</label>
+        <input type="number" min={1024} max={65535} style={{ width: 100 }} value={portValue} onChange={(e) => setPort(Number(e.target.value))} data-testid="mcp-port" />
+      </div>
+      <div className="small" data-testid="mcp-status">
+        {status?.running ? <span className="good">running at {url}</span> : status?.error ? <span className="warn">{status.error}</span> : <span className="dim">off</span>}
+        {status?.enabled && !saved.enabled && <div className="dim">On for this run only (the app was started with --headless or --mcp).</div>}
+      </div>
+      {token && (
+        <div className="row small" style={{ flexWrap: 'nowrap' }}>
+          <span style={{ width: 50 }}>Token</span>
+          <input readOnly className="grow" type={showToken ? 'text' : 'password'} value={token} data-testid="mcp-token" />
+          <button onClick={() => setShowToken((v) => !v)}>{showToken ? 'Hide' : 'Show'}</button>
+          <button onClick={() => void copy(token, 'Token')} data-testid="mcp-copy-token">Copy</button>
+        </div>
+      )}
+      {snippets.map((sn) => (
+        <div key={sn.id} className="stack" style={{ gap: 4 }}>
+          <div className="row spread small">
+            <span>{sn.title}</span>
+            <button onClick={() => void copy(sn.text, sn.title)} data-testid={`mcp-copy-${sn.id}`}>Copy</button>
+          </div>
+          <pre className="small" style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{showToken ? sn.text : sn.text.split(token!).join('********')}</pre>
+        </div>
+      ))}
+      <div className="dim small">
+        The client can work as an operator (it starts and watches the app's own translation, then reviews and exports) or as the translator (it translates the chunks itself and sends them back). It listens on 127.0.0.1 only and needs the token. The token is kept in the Windows credential store. Copy always copies the full text.
+      </div>
+    </div>
+  )
+}
 
 export function Settings() {
   const models = useStore((s) => s.models)
@@ -342,6 +439,8 @@ export function Settings() {
         </div>
         <div className="dim small">When a model is not loaded yet, the engine loads it with these values. A model LM Studio has loaded already keeps its own settings.</div>
       </div>
+
+      <McpCard />
 
       <div className="card stack">
         <h3>Files</h3>

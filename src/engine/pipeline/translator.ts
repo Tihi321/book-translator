@@ -46,7 +46,8 @@ export function fitEdges(source: string, text: string): string {
   return lead + text.trim()
 }
 
-function userContent(env: AgentEnv, segs: readonly SegmentRec[], prev: PrevContext | undefined, note: string | undefined): string {
+/** The user message of a translator request: glossary slice, previous passage, a note about the last answer, the segments. */
+export function translatorUserContent(env: Pick<AgentEnv, 'glossary' | 'targetLanguage'>, segs: readonly SegmentRec[], prev: PrevContext | undefined, note: string | undefined): string {
   const parts: string[] = []
   const gl = relevantEntries(env.glossary, segs.map((s) => s.text).join('\n'))
   if (gl.length > 0) parts.push(`## Glossary (use these translations)\n${formatEntries(gl)}`)
@@ -62,13 +63,14 @@ async function ask(env: AgentEnv, segs: readonly SegmentRec[], opts: TranslateOp
     env.dataDir,
     'translator',
     { sourceLanguage: env.sourceLanguage, targetLanguage: env.targetLanguage, brief: env.brief },
-    userContent(env, segs, opts.prev, note)
+    translatorUserContent(env, segs, opts.prev, note)
   )
   const r = await env.call('translator', { messages, temperature: 0.3, task, unit: opts.unit }, { onDelta: opts.onDelta })
   return parseSegments(r.text, segs.map((s) => s.id))
 }
 
-function tagIssue(seg: SegmentRec, text: string): QaIssue | undefined {
+/** The inline-tag problem of a translated segment, if it has one. */
+export function tagIssue(seg: SegmentRec, text: string): QaIssue | undefined {
   const c = validateTags(seg.text, text)
   if (c.ok) return undefined
   const bits = [c.missing.length ? `missing ${c.missing.join(' ')}` : '', c.extra.length ? `unexpected ${c.extra.join(' ')}` : '', c.misnested ? 'tags not nested' : ''].filter(Boolean)

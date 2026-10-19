@@ -16,7 +16,7 @@ import { parseMd, serializeMd, splitFrontmatter } from '../shared/md'
 import type { DocumentIR } from '../shared/ir'
 import { defaultsSchema, providersSchema } from '../shared/schemas'
 import type { DefaultsConfig } from '../shared/schemas'
-import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineInfo, EngineTransport, FileInfo, ModelsInfo, ProviderPatch } from '../shared/protocol'
+import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineInfo, EngineTransport, FileInfo, McpStatus, ModelsInfo, ProviderPatch } from '../shared/protocol'
 import { isRequest } from '../shared/protocol'
 
 export interface DispatcherOptions {
@@ -28,6 +28,10 @@ export interface DispatcherOptions {
   storeKey?: (name: string, value: string) => void
   /** Show the scripted `mock` provider's models (development and tests). */
   showMock?: boolean
+  /** The MCP server's state, for `getMcpStatus`. Without it the answer is `running: false`. */
+  mcpStatus?: () => McpStatus
+  /** Called after `setDefaults` saved the file, with the defaults from before and after (serve restarts the MCP server when `mcp` changed). */
+  onDefaultsSaved?: (before: DefaultsConfig, after: DefaultsConfig) => void | Promise<void>
 }
 
 /** How often the `concurrency: auto` servers are asked for their slots. */
@@ -392,7 +396,8 @@ export class CommandDispatcher {
       groupDefaults,
       modelOrder: patch.modelOrder ?? current.modelOrder,
       lmstudio: { ...current.lmstudio, ...(patch.lmstudio ?? {}) },
-      parallel: { ...current.parallel, ...(patch.parallel ?? {}) }
+      parallel: { ...current.parallel, ...(patch.parallel ?? {}) },
+      mcp: { ...current.mcp, ...(patch.mcp ?? {}) }
     }
     const check = defaultsSchema.safeParse(next)
     if (!check.success) throw new Error(`defaults would be invalid: ${check.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
@@ -401,7 +406,13 @@ export class CommandDispatcher {
     // the aliases, the order and the LM Studio load settings follow at once (context windows of models LM Studio loads too)
     await applyModelDefaults(this.registry, this.dataDir)
     await this.registry.load()
+    await this.opts.onDefaultsSaved?.(current, saved)
     return saved
+  }
+
+  private async mcpStatus(): Promise<McpStatus> {
+    if (this.opts.mcpStatus) return this.opts.mcpStatus()
+    return { enabled: (await loadDefaults(this.dataDir)).mcp.enabled, running: false }
   }
 
   private exportRel(out: string): string | null {
@@ -494,6 +505,17 @@ export class CommandDispatcher {
         await s.store.save(project)
         return s.detail(cmd.projectId)
       }
+      case 'prepareChunks':
+        return s.prepareChunks(cmd.projectId, cmd.maxChunkTokens)
+      case 'getTranslationTask':
+        return s.translationTask(cmd.projectId, cmd.index)
+      case 'submitTranslation':
+        return s.submitTranslation(cmd.projectId, cmd.index, { reply: cmd.reply, segments: cmd.segments, model: cmd.model })
+      case 'setBrief':
+        await s.setBrief(cmd.projectId, cmd.brief)
+        return undefined
+      case 'getMcpStatus':
+        return this.mcpStatus()
       default: {
         const never: never = cmd
         throw new Error(`unknown command: ${(never as { type?: string }).type}`)

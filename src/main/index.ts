@@ -12,19 +12,24 @@ let win: BrowserWindow | null = null
 let engine: EngineClient | null = null
 let info: EngineInfo | null = null
 let blockerId: number | null = null
+let quitting = false
 const running = new Set<string>()
 /** Files the user picked for the reader (resolved paths). */
 const granted = new Set<string>()
 const BOOK_EXTS = ['.epub', '.pdf', '.txt', '.md', '.markdown']
 const BOOK_MAX = 300 * 1024 * 1024
 
-// BOOK_TRANSLATOR_NO_WINDOW=1 runs the engine without the window (scripted checks).
-const noWindow = process.env.BOOK_TRANSLATOR_NO_WINDOW === '1'
+// No window: --headless, or BOOK_TRANSLATOR_NO_WINDOW=1 (scripted checks). Only --headless also turns the MCP server on for the run.
+const headlessFlag = process.argv.includes('--headless')
+const headless = headlessFlag || process.env.BOOK_TRANSLATOR_NO_WINDOW === '1'
+/** A window opened later on a headless run: closing it does not end the app. */
+let openedFromHeadless = false
 
 function forwardedEngineArgs(): string[] {
   const i = process.argv.findIndex((a) => a === '--data')
   const value = i >= 0 ? process.argv[i + 1] : undefined
   const args = value ? ['--data', value] : []
+  if (headlessFlag) args.push('--mcp')
   // The engine cannot find `seed/` from the built app, so a packaged app hands it the copy in resources.
   if (app.isPackaged) args.push('--seed', path.join(process.resourcesPath, 'seed'))
   return args
@@ -93,11 +98,32 @@ async function listDocuments(dir: unknown): Promise<FolderListing> {
   return { folder, files: names.map((n) => path.join(folder, n)) }
 }
 
+/** The engine did not start (the data folder is in use, a bad data folder ...): say why and quit. */
+function engineFailed(stderr: string): void {
+  const last = stderr.split(/\r?\n/).filter((l) => l.trim()).pop() ?? 'the engine stopped before it was ready'
+  const message = `${last.replace(/^error:\s*/i, '')}\nIf no other Book Translator is running, delete engine.lock in the data folder and start again.`
+  if (headless) {
+    process.stderr.write(`error: ${message}\n`)
+    app.exit(1)
+    return
+  }
+  dialog.showErrorBox('Book Translator', message)
+  app.quit()
+}
+
 if (!app.requestSingleInstanceLock()) {
+  if (process.argv.includes('--headless')) process.stderr.write('Book Translator is already running. MCP can be enabled in its Settings.\n')
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    if (!win || win.isDestroyed()) return
+  app.on('second-instance', (_e, argv) => {
+    if (!win || win.isDestroyed()) {
+      // running with no window: a normal launch opens the UI on this engine
+      if (!argv.includes('--headless') && app.isReady()) {
+        openedFromHeadless = headless
+        win = createWindow()
+      }
+      return
+    }
     if (win.isMinimized()) win.restore()
     win.focus()
   })
@@ -108,6 +134,9 @@ if (!app.requestSingleInstanceLock()) {
       if (event.type === 'engine.ready') info = event.info
       trackRunning(event)
       if (win && !win.isDestroyed()) win.webContents.send(EVENT_CHANNEL, event)
+    })
+    engine.onExit(({ ready, stderr }) => {
+      if (!ready && !quitting) engineFailed(stderr)
     })
 
     ipcMain.handle('engine:request', (_e, command: unknown) => {
@@ -180,19 +209,20 @@ if (!app.requestSingleInstanceLock()) {
       return true
     })
 
-    if (!noWindow) win = createWindow()
+    if (!headless) win = createWindow()
 
     app.on('before-quit', () => {
+      quitting = true
       // In-progress chunks go back to pending when the project is started again (every chunk file is written atomically).
       engine?.close()
       if (blockerId !== null) powerSaveBlocker.stop(blockerId)
     })
     app.on('activate', () => {
-      if (!noWindow && BrowserWindow.getAllWindows().length === 0) win = createWindow()
+      if (!headless && BrowserWindow.getAllWindows().length === 0) win = createWindow()
     })
   })
 
   app.on('window-all-closed', () => {
-    if (!noWindow) app.quit()
+    if (!headless && !openedFromHeadless) app.quit()
   })
 }

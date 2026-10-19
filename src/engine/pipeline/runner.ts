@@ -6,6 +6,7 @@ import { emptyChunk } from '../project/store'
 import type { ProjectStore } from '../project/store'
 import { countStates, summarize } from '../project/summary'
 import { DEFAULT_PARALLEL, IN_PROGRESS_STATES } from '../../shared/project'
+import type { DocumentIR } from '../../shared/ir'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
 import type { AgentEnv, CallFn } from './env'
@@ -55,6 +56,22 @@ export function workerCount(router: ModelRouter, settings: ProjectSettings): num
   if (!par.enabled) return 1
   if (par.maxAtOnce === 'auto') return Math.max(1, router.resolve(settings.agentModels.translator ?? [])[0]?.provider.concurrency ?? 1)
   return Math.min(16, Math.max(1, Math.floor(Number(par.maxAtOnce)) || 1))
+}
+
+/**
+ * Makes the chunk files of a project when there are none, or when every chunk is still pending and the budget changed (and `replan`).
+ * Returns the chunks as they are on disk afterwards. Used by the runner and by `prepareChunks` (an outside translator).
+ */
+export async function planProjectChunks(store: ProjectStore, project: ProjectFile, ir: DocumentIR, budget: number, replan = true): Promise<{ chunks: ChunkRecord[]; planned: boolean }> {
+  let chunks = await store.listChunks(project.id)
+  const untouched = chunks.every((c) => c.state === 'pending')
+  if (chunks.length > 0 && !(untouched && project.chunking?.budget !== budget && replan)) return { chunks, planned: false }
+  await store.clearChunks(project.id)
+  chunks = planChunks(ir, budget).map(emptyChunk)
+  for (const c of chunks) await store.writeChunk(project.id, c)
+  project.chunking = { budget, chunks: chunks.length }
+  await store.save(project)
+  return { chunks, planned: true }
 }
 
 const isMajor = (i: { severity: string }) => i.severity === 'major'
@@ -163,17 +180,9 @@ export class ProjectRunner {
     const { store, registry, router } = this.deps
     const project = this.project
     if (!router.resolve(project.settings.agentModels.translator ?? [])[0]) throw new Error(`no usable translator model in: ${(project.settings.agentModels.translator ?? []).join(', ') || '(none)'}`)
-    let chunks = await store.listChunks(project.id)
-    const untouched = chunks.every((c) => c.state === 'pending')
     const budget = budgetFor(registry, router, project.settings)
-    if (chunks.length === 0 || (untouched && project.chunking?.budget !== budget && !opts.only)) {
-      await store.clearChunks(project.id)
-      chunks = planChunks(ir, budget).map(emptyChunk)
-      for (const c of chunks) await store.writeChunk(project.id, c)
-      project.chunking = { budget, chunks: chunks.length }
-      await store.save(project)
-      this.log('info', `${chunks.length} chunks of up to ${budget} tokens`)
-    }
+    const { chunks, planned } = await planProjectChunks(store, project, ir, budget, !opts.only)
+    if (planned) this.log('info', `${chunks.length} chunks of up to ${budget} tokens`)
     for (const c of chunks) {
       const retry = opts.only ? opts.only.includes(c.index) : c.state === 'failed' || IN_PROGRESS_STATES.includes(c.state)
       if (retry) {

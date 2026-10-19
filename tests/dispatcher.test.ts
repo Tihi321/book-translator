@@ -5,7 +5,7 @@ import { CommandDispatcher, serveEngine } from '../src/engine/dispatcher'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { ProviderError } from '../src/engine/models/types'
 import type { DefaultsConfig } from '../src/shared/schemas'
-import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineTransport, ModelsInfo, ProjectDetail, Request } from '../src/shared/protocol'
+import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineTransport, ModelsInfo, PrepareChunksResult, ProjectDetail, Request, SubmitResult, TranslationTask } from '../src/shared/protocol'
 import type { ChunkRecord, ProjectSummary } from '../src/shared/project'
 import { asSegs, lastUser, MODEL, QA_MODEL, rig, segsIn } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
@@ -466,5 +466,198 @@ describe('updateProjectSettings', () => {
     const detail = await run<ProjectDetail>({ type: 'updateProjectSettings', projectId: p.id, patch: { pauseAfterGlossary: true } })
     expect(detail.project.settings.pauseAfterGlossary).toBe(true)
     expect(detail.running).toBe(false)
+  })
+})
+
+describe('external translator commands (prepareChunks, getTranslationTask, submitTranslation, setBrief)', () => {
+  const NO_AGENTS = { glossary: false, proofreader: false, qa: false }
+
+  async function project(opts: { content?: string } = {}) {
+    const s = await setup()
+    if (opts.content) await fs.writeFile(s.r.file, opts.content, 'utf8')
+    // no translator model at all: nothing here may need one
+    const p = await s.run<ProjectSummary>({ type: 'createProject', sourcePath: s.r.file, targetLanguage: 'Croatian', sourceLanguage: 'English', settings: { agentModels: { ...MODELS, translator: [] }, maxChunkTokens: 100, enabled: NO_AGENTS } })
+    return { ...s, id: p.id }
+  }
+
+  /** The first chunk that follows another chunk of its own section (it has a paragraph text and a previous passage to carry). */
+  const follower = (chunks: { index: number; sectionId: string }[]) => chunks.find((c, i) => i > 0 && chunks[i - 1]!.sectionId === c.sectionId)!
+
+  it('prepareChunks makes the chunks without a model, keeps them, and plans again only while all are pending', async () => {
+    const { r, run, id } = await project()
+    const first = await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id })
+    expect(first.chunks.length).toBeGreaterThan(3)
+    expect(first.chunks.every((c) => c.state === 'pending')).toBe(true)
+    expect(r.mock.calls).toHaveLength(0)
+    expect((await r.service.store.listChunks(id)).length).toBe(first.chunks.length)
+    expect((await r.service.getProject(id)).chunking).toEqual({ budget: first.budget, chunks: first.chunks.length })
+    expect(r.events.some((e) => e.type === 'project.updated' && e.project.id === id && e.project.chunks === first.chunks.length)).toBe(true)
+    // the same call keeps the chunks
+    expect((await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id })).chunks).toHaveLength(first.chunks.length)
+    // a bigger chunk size while all are pending makes fewer chunks
+    const bigger = await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id, maxChunkTokens: 400 })
+    expect(bigger.budget).toBeGreaterThan(first.budget)
+    expect(bigger.chunks.length).toBeLessThan(first.chunks.length)
+    // once a chunk is translated the chunks stay
+    const task = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id })
+    await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, reply: asSegs(task.segmentIds.map((sid) => ({ id: sid, text: 'x' }))) })
+    expect((await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id, maxChunkTokens: 100 })).chunks).toHaveLength(bigger.chunks.length)
+    await expect(run({ type: 'prepareChunks', projectId: id, maxChunkTokens: 5 })).rejects.toThrow(/at least 100/)
+  })
+
+  it('getTranslationTask gives the translator messages: rules, brief, glossary slice, previous passage and the segments', async () => {
+    const { r, run, id } = await project()
+    await expect(run({ type: 'getTranslationTask', projectId: id })).rejects.toThrow(/prepareChunks/)
+    const { chunks } = await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id })
+    const f = follower(chunks).index
+    await run({ type: 'updateGlossary', projectId: id, entries: [{ source: 'Alice', target: 'Alisa', type: 'person' }, { source: 'unicorn', target: 'jednorog', type: 'term' }] })
+    await run({ type: 'setBrief', projectId: id, brief: 'Genre: light fiction\nTone: playful' })
+    expect(await fs.readFile(path.join(r.dir, 'projects', id, 'brief.md'), 'utf8')).toContain('Tone: playful')
+
+    const first = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id })
+    expect(first.index).toBe(1)
+    const one = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index: f - 1 })
+    expect(one.index).toBe(f - 1)
+    expect(one.messages.map((m) => m.role)).toEqual(['system', 'user'])
+    const user = one.messages[1]!.content
+    expect(segsIn(user).map((s) => s.id)).toEqual(one.segmentIds)
+    expect(user).toContain('## Glossary')
+    expect(user).toContain('Alisa')
+    expect(user).not.toContain('jednorog')
+    expect(one.messages[0]!.content).toContain('Tone: playful')
+    expect(one.messages[0]!.content).toContain('Croatian')
+    expect(one.remaining).toBe((await r.service.store.listChunks(id)).length)
+
+    expect(user).not.toContain('Previous passage')
+    await run({ type: 'submitTranslation', projectId: id, index: f - 1, reply: asSegs(one.segmentIds.map((sid) => ({ id: sid, text: `[hr] ${sid}` }))) })
+    const two = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index: f })
+    expect(two.index).toBe(f)
+    expect(two.remaining).toBe(one.remaining - 1)
+    // chunk 2 follows chunk 1 in the same section: its translated end comes as context
+    expect(two.sectionId).toBe(one.sectionId)
+    expect(two.messages[1]!.content).toContain('## Previous passage')
+    expect(two.messages[1]!.content).toContain('[hr] ')
+    // a given index works for any chunk, even a finished one; without an index the first unfinished chunk comes
+    expect((await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index: f - 1 })).index).toBe(f - 1)
+    expect((await run<TranslationTask>({ type: 'getTranslationTask', projectId: id })).index).toBe(1)
+    await expect(run({ type: 'getTranslationTask', projectId: id, index: 999 })).rejects.toThrow(/no chunk 999/)
+  })
+
+  it('submitTranslation rejects wrong ids and saves nothing, accepts a good reply or map, and finishes the project', async () => {
+    const { r, run, id } = await project()
+    const prepared = await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id })
+    const total = prepared.chunks.length
+    const task = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index: follower(prepared.chunks).index })
+    expect(task.segmentIds.length).toBeGreaterThan(1)
+    const good = task.segmentIds.map((sid) => ({ id: sid, text: `[hr] ${sid}` }))
+
+    const missing = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, reply: asSegs(good.slice(1)) })
+    expect(missing).toMatchObject({ ok: false, state: 'pending', remaining: total })
+    expect(missing.problems.join(' ')).toMatch(/missing or empty segments/)
+    const extra = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, reply: asSegs([...good, { id: 'zzz', text: 'x' }]) })
+    expect(extra.problems.join(' ')).toMatch(/not asked for: zzz/)
+    const dup = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, reply: asSegs([...good, good[0]!]) })
+    expect(dup.problems.join(' ')).toMatch(/repeated/)
+    const mapMissing = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, segments: { [good[0]!.id]: 'only one' } })
+    expect(mapMissing.ok).toBe(false)
+    expect((await r.service.store.readChunk(id, task.index)).state).toBe('pending')
+    await expect(run({ type: 'submitTranslation', projectId: id, index: task.index })).rejects.toThrow(/reply or a segments/)
+
+    // a reply with chatter around the seg elements is fine
+    const ok = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, reply: `Here you go:\n${asSegs(good)}\nDone.`, model: 'claude/test' })
+    expect(ok).toEqual({ ok: true, state: 'done', problems: [], remaining: total - 1 })
+    const saved = await r.service.store.readChunk(id, task.index)
+    expect(saved).toMatchObject({ state: 'done', model: 'claude/test' })
+    expect(saved.final).toEqual(Object.fromEntries(good.map((g) => [g.id, g.text])))
+    expect(saved.translation).toEqual(saved.final)
+    expect((await r.service.getProject(id)).status).toBe('incomplete')
+    expect(r.events.some((e) => e.type === 'chunk.state' && e.projectId === id && e.index === task.index && e.state === 'done')).toBe(true)
+
+    // the rest by id map, with the default model name
+    for (;;) {
+      const t = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id }).catch((e: Error) => e)
+      if (t instanceof Error) {
+        expect(t.message).toMatch(/nothing left/)
+        break
+      }
+      const res = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: t.index, segments: Object.fromEntries(t.segmentIds.map((sid) => [sid, `[hr] ${sid}`])) })
+      expect(res.ok).toBe(true)
+    }
+    expect((await r.service.getProject(id)).status).toBe('done')
+    expect((await r.service.store.readChunk(id, 1)).model).toBe('external/mcp')
+    expect(r.mock.calls).toHaveLength(0)
+    const out = await run<{ path: string }>({ type: 'export', projectId: id })
+    const text = await fs.readFile(out.path, 'utf8')
+    expect(text).toContain('[hr] ')
+    expect(text).not.toContain('Alice met Bob')
+  })
+
+  it('submitTranslation checks inline tags and says which segment is wrong', async () => {
+    const { r, run, id } = await project({ content: '# Tagged\n\nThe <1>bold</1> word and one<2/> more.\n' })
+    await run({ type: 'prepareChunks', projectId: id })
+    const task = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id })
+    const source = segsIn(task.messages[1]!.content)
+    const tagged = source.find((s) => /<\d+>/.test(s.text))!
+    expect(tagged).toBeDefined()
+    const bad = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, segments: Object.fromEntries(source.map((s) => [s.id, s === tagged ? 'no tags at all' : s.text])) })
+    expect(bad.ok).toBe(false)
+    expect(bad.problems.join(' ')).toContain(`segment ${tagged.id}`)
+    expect(bad.problems.join(' ')).toMatch(/Inline tags do not match/)
+    expect((await r.service.store.readChunk(id, task.index)).state).toBe('pending')
+    const good = await run<SubmitResult>({ type: 'submitTranslation', projectId: id, index: task.index, segments: Object.fromEntries(source.map((s) => [s.id, `[hr] ${s.text}`])) })
+    expect(good.ok).toBe(true)
+  })
+
+  it('is refused while the project runs in the app', async () => {
+    const { r, run, id, waitFor } = await project()
+    await run({ type: 'prepareChunks', projectId: id })
+    r.mock.on({ role: 'translator' }, async (req) => {
+      await new Promise((res) => setTimeout(res, 30))
+      return asSegs(segsIn(lastUser(req)).map((s) => ({ id: s.id, text: s.text })))
+    })
+    await run({ type: 'updateProjectSettings', projectId: id, patch: { agentModels: MODELS as never } })
+    await run({ type: 'start', projectId: id })
+    await waitFor(() => r.service.isRunning(id))
+    await expect(run({ type: 'getTranslationTask', projectId: id })).rejects.toThrow(/pause/)
+    await expect(run({ type: 'submitTranslation', projectId: id, index: 1, segments: {} })).rejects.toThrow(/pause/)
+    await expect(run({ type: 'prepareChunks', projectId: id })).rejects.toThrow(/pause/)
+    await run({ type: 'pause', projectId: id })
+    expect((await run<TranslationTask>({ type: 'getTranslationTask', projectId: id })).index).toBeGreaterThan(0)
+  })
+
+  it('setBrief rejects an unknown project', async () => {
+    const { run } = await setup()
+    await expect(run({ type: 'setBrief', projectId: 'missing', brief: 'x' })).rejects.toThrow()
+  })
+})
+
+describe('MCP settings and status', () => {
+  it('defaults have mcp off on port 47811; setDefaults merges and validates it and calls the hook', async () => {
+    const { r } = await setup()
+    const calls: { before: DefaultsConfig; after: DefaultsConfig }[] = []
+    const dispatcher = new CommandDispatcher({ service: r.service, emit: () => undefined, showMock: true, onDefaultsSaved: (before, after) => void calls.push({ before, after }) })
+    const defaults = (await dispatcher.handle({ type: 'getDefaults' })) as DefaultsConfig
+    expect(defaults.mcp).toEqual({ enabled: false, port: 47811 })
+    expect(await dispatcher.handle({ type: 'getMcpStatus' })).toEqual({ enabled: false, running: false })
+    const saved = (await dispatcher.handle({ type: 'setDefaults', patch: { mcp: { enabled: true } } })) as DefaultsConfig
+    expect(saved.mcp).toEqual({ enabled: true, port: 47811 })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.before.mcp.enabled).toBe(false)
+    expect(calls[0]!.after.mcp.enabled).toBe(true)
+    expect(await dispatcher.handle({ type: 'getMcpStatus' })).toEqual({ enabled: true, running: false })
+    expect(((await dispatcher.handle({ type: 'setDefaults', patch: { mcp: { port: 50000 } } })) as DefaultsConfig).mcp).toEqual({ enabled: true, port: 50000 })
+    await expect(dispatcher.handle({ type: 'setDefaults', patch: { mcp: { port: 80 } } })).rejects.toThrow(/mcp\.port/)
+    // an old defaults.json without `mcp` still loads
+    const file = path.join(r.dir, 'config', 'defaults.json')
+    const old = JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>
+    delete old.mcp
+    await fs.writeFile(file, JSON.stringify(old), 'utf8')
+    expect(((await dispatcher.handle({ type: 'getDefaults' })) as DefaultsConfig).mcp).toEqual({ enabled: false, port: 47811 })
+  })
+
+  it('getMcpStatus asks the mcpStatus hook', async () => {
+    const { r } = await setup()
+    const dispatcher = new CommandDispatcher({ service: r.service, emit: () => undefined, mcpStatus: () => ({ enabled: true, running: true, url: 'http://127.0.0.1:1/mcp', token: 't' }) })
+    expect(await dispatcher.handle({ type: 'getMcpStatus' })).toEqual({ enabled: true, running: true, url: 'http://127.0.0.1:1/mcp', token: 't' })
   })
 })

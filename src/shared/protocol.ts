@@ -150,6 +150,43 @@ export interface ProjectDetail {
   outputRel: string
 }
 
+/** The answer to `prepareChunks`: the chunks that were made (or kept) and the token budget they were planned with. */
+export interface PrepareChunksResult {
+  chunks: ChunkBrief[]
+  budget: number
+}
+
+/** One chunk for an outside translator (an MCP client): the same messages the app's translator agent would send. */
+export interface TranslationTask {
+  /** Chunk index, 1-based. */
+  index: number
+  sectionId: string
+  /** Chunks of the project that are still pending or failed (this one included). */
+  remaining: number
+  /** The ids the reply must contain, each exactly once. */
+  segmentIds: string[]
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+  /** What to send back with `submitTranslation`. */
+  instructions: string
+}
+
+/** The answer to `submitTranslation`. `ok: false` means nothing was saved: fix `problems` and submit again. */
+export interface SubmitResult {
+  ok: boolean
+  state: ChunkState
+  problems: string[]
+  remaining: number
+}
+
+/** The MCP server (src/engine/mcp). `token` is the bearer token: the UI shows it, `serve` never prints it. */
+export interface McpStatus {
+  enabled: boolean
+  running: boolean
+  url?: string
+  error?: string
+  token?: string
+}
+
 export interface EngineInfo {
   dataDir: string
   extensions: string[]
@@ -173,6 +210,7 @@ export interface DefaultsPatch {
   modelOrder?: ('paid' | 'strata' | 'lmstudio')[]
   lmstudio?: Partial<{ parallel: number; context: number; ttlMinutes: number }>
   parallel?: Partial<{ enabled: boolean; maxAtOnce: 'auto' | number; splitSections: boolean }>
+  mcp?: Partial<{ enabled: boolean; port: number }>
 }
 
 // ---- events ----
@@ -229,6 +267,16 @@ export type Command =
   | { type: 'checkServers' }
   /** Changes a project's settings (models, agents on or off, parallel, chunk size ...). Refused while the project runs. */
   | { type: 'updateProjectSettings'; projectId: string; patch: Partial<ProjectSettings> }
+  /** Makes the chunk files without running anything (no translator model needed), for an outside translator. Chunks are planned again only while all of them are pending. */
+  | { type: 'prepareChunks'; projectId: string; maxChunkTokens?: number }
+  /** The next chunk to translate (or chunk `index`) as the messages the app's translator would send. Refused while the project runs. */
+  | { type: 'getTranslationTask'; projectId: string; index?: number }
+  /** Saves an outside translation of a chunk: a raw `<seg id>` reply, or an id to text map. All or nothing. Refused while the project runs. */
+  | { type: 'submitTranslation'; projectId: string; index: number; reply?: string; segments?: Record<string, string>; model?: string }
+  /** Writes brief.md (tone, characters ...) of a project. */
+  | { type: 'setBrief'; projectId: string; brief: string }
+  /** The MCP server's state, and its token once enabled. */
+  | { type: 'getMcpStatus' }
 
 export type CommandType = Command['type']
 
@@ -261,6 +309,11 @@ export interface CommandResults {
   setProviderLimits: ModelsInfo
   checkServers: ModelsInfo
   updateProjectSettings: ProjectDetail
+  prepareChunks: PrepareChunksResult
+  getTranslationTask: TranslationTask
+  submitTranslation: SubmitResult
+  setBrief: undefined
+  getMcpStatus: McpStatus
 }
 
 export type CommandOf<K extends CommandType> = Extract<Command, { type: K }>

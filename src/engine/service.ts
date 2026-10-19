@@ -7,13 +7,18 @@ import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
 import { computeCost, isPaidModel } from './models/registry'
 import type { ModelRegistry } from './models/registry'
-import { budgetFor, ProjectRunner, workerCount } from './pipeline/runner'
+import { budgetFor, planProjectChunks, ProjectRunner, workerCount } from './pipeline/runner'
 import type { RunResult } from './pipeline/runner'
 import { hashFile, mergeSettings, ProjectStore, projectIdFor } from './project/store'
-import { summarize } from './project/summary'
+import { countStates, summarize } from './project/summary'
+import { buildMessages } from './pipeline/prompts'
+import { describeParse, parseSegments } from './pipeline/segments'
+import type { SegmentParse } from './pipeline/segments'
+import { fitEdges, prevTail, tagIssue, translatorUserContent } from './pipeline/translator'
 import type { DocumentIR } from '../shared/ir'
+import { IN_PROGRESS_STATES } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
-import type { EngineEvent, ProjectDetail } from '../shared/protocol'
+import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, SubmitResult, TranslationTask } from '../shared/protocol'
 import { AGENTS } from '../shared/schemas'
 import type { AgentName } from '../shared/schemas'
 
@@ -32,6 +37,28 @@ export interface CreateProjectRequest {
   settings?: Partial<ProjectSettings>
   id?: string
 }
+
+/** The model name saved with a chunk that an outside translator (an MCP client) translated, when it gave none. */
+export const EXTERNAL_MODEL = 'external/mcp'
+
+/** The error of `translationTask` when every chunk is translated (the MCP tool turns it into a plain answer). */
+export const NOTHING_LEFT = 'nothing left to translate: every chunk is translated'
+
+/** Chunk states that still need a translation. */
+const TODO_STATES: readonly ChunkRecord['state'][] = ['pending', 'failed']
+
+const chunkBrief = (c: ChunkRecord): ChunkBrief => ({
+  index: c.index,
+  sectionId: c.sectionId,
+  state: c.state,
+  issues: c.qa.issues.length,
+  majorIssues: c.qa.issues.filter((i) => i.severity === 'major').length,
+  model: c.model,
+  tokensIn: c.tokens.in,
+  tokensOut: c.tokens.out,
+  edited: c.edited,
+  error: c.error
+})
 
 /** Output speed assumed for the time estimate, tokens per second. */
 const LOCAL_TPS = 30
@@ -214,18 +241,7 @@ export class EngineService {
     }
     return {
       project,
-      chunks: chunks.map((c) => ({
-        index: c.index,
-        sectionId: c.sectionId,
-        state: c.state,
-        issues: c.qa.issues.length,
-        majorIssues: c.qa.issues.filter((i) => i.severity === 'major').length,
-        model: c.model,
-        tokensIn: c.tokens.in,
-        tokensOut: c.tokens.out,
-        edited: c.edited,
-        error: c.error
-      })),
+      chunks: chunks.map(chunkBrief),
       sections: ir.sections.map((s) => ({ id: s.id, title: s.title })),
       glossary,
       brief,
@@ -310,6 +326,117 @@ export class EngineService {
   /** Replaces glossary.md. Chunks that start after this see the new entries. */
   async updateGlossary(id: string, entries: GlossaryEntry[]): Promise<void> {
     await this.store.writeGlossary(id, entries)
+  }
+
+  // ---- an outside translator (MCP) ----
+
+  private refuseWhileRunning(id: string, what: string): void {
+    if (this.runs.has(id)) throw new Error(`pause the project before ${what} (it runs in the app)`)
+  }
+
+  /** Makes the chunk files without running anything, so no translator model is needed. `maxChunkTokens` changes the project's chunk size. */
+  async prepareChunks(id: string, maxChunkTokens?: number): Promise<PrepareChunksResult> {
+    this.refuseWhileRunning(id, 'preparing chunks')
+    const project = await this.store.load(id)
+    if (maxChunkTokens !== undefined) {
+      if (!Number.isInteger(maxChunkTokens) || maxChunkTokens < 100) throw new Error('maxChunkTokens must be a whole number of at least 100')
+      project.settings.maxChunkTokens = maxChunkTokens
+    }
+    const budget = chunkBudget({ contexts: [], userMax: project.settings.maxChunkTokens })
+    const { chunks, planned } = await planProjectChunks(this.store, project, await this.store.readIr(id), budget)
+    if (planned) {
+      await this.store.log(id, `info: ${chunks.length} chunks of up to ${budget} tokens (prepared for an outside translator)`)
+      this.emit({ type: 'project.updated', project: summarize(project, chunks) })
+    }
+    return { chunks: chunks.map(chunkBrief), budget: project.chunking?.budget ?? budget }
+  }
+
+  /** The chunk to translate next (or `index`) as the messages the app's translator would send: rules, brief, glossary slice, previous passage, segments. */
+  async translationTask(id: string, index?: number): Promise<TranslationTask> {
+    this.refuseWhileRunning(id, 'asking for a translation task')
+    const project = await this.store.load(id)
+    const chunks = await this.store.listChunks(id)
+    if (chunks.length === 0) throw new Error('the project has no chunks yet: run prepareChunks first')
+    const remaining = chunks.filter((c) => TODO_STATES.includes(c.state)).length
+    const chunk = index === undefined ? chunks.find((c) => TODO_STATES.includes(c.state)) : chunks.find((c) => c.index === index)
+    if (!chunk) {
+      if (index !== undefined) throw new Error(`the project has no chunk ${index} (1-${chunks.length})`)
+      throw new Error(NOTHING_LEFT)
+    }
+    const before = chunks.find((c) => c.index === chunk.index - 1)
+    const prev = before && before.sectionId === chunk.sectionId && (before.state === 'done' || before.state === 'flagged') ? prevTail(before.segments, before.final) : undefined
+    const [glossary, brief] = await Promise.all([this.store.readGlossary(id), this.store.readBrief(id)])
+    const s = project.settings
+    const messages = await buildMessages(
+      this.opts.dataDir,
+      'translator',
+      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief },
+      translatorUserContent({ glossary, targetLanguage: s.targetLanguage }, chunk.segments, prev, undefined)
+    )
+    return {
+      index: chunk.index,
+      sectionId: chunk.sectionId,
+      remaining,
+      segmentIds: chunk.segments.map((x) => x.id),
+      messages,
+      instructions: 'Translate every <seg> element as the messages ask. Send the reply to submitTranslation as a string of <seg id="..">text</seg> elements (every id exactly once), or as an id to text map. Copy inline tags such as <1>, </1> and <2/> exactly.'
+    }
+  }
+
+  /** Checks and saves an outside translation of one chunk. All or nothing: a problem (wrong ids, tags that do not match) saves nothing. */
+  async submitTranslation(id: string, index: number, input: { reply?: string; segments?: Record<string, string>; model?: string }): Promise<SubmitResult> {
+    this.refuseWhileRunning(id, 'submitting a translation')
+    if (input.reply === undefined && input.segments === undefined) throw new Error('submitTranslation needs a reply or a segments map')
+    const chunk = await this.store.readChunk(id, index)
+    const ids = chunk.segments.map((x) => x.id)
+    let parsed: SegmentParse
+    if (input.reply !== undefined) parsed = parseSegments(input.reply, ids)
+    else {
+      const map = input.segments!
+      const known = new Set(ids)
+      const found = new Map<string, string>()
+      for (const sid of ids) if (typeof map[sid] === 'string' && map[sid].trim()) found.set(sid, map[sid].trim())
+      const missing = ids.filter((sid) => !found.has(sid))
+      const extra = Object.keys(map).filter((k) => !known.has(k))
+      parsed = { segments: found, missing, extra, duplicate: [], ok: missing.length === 0 && extra.length === 0 }
+    }
+    const todo = async () => (await this.store.listChunks(id)).filter((c) => TODO_STATES.includes(c.state)).length
+    const problems: string[] = []
+    const text: Record<string, string> = {}
+    if (!parsed.ok) problems.push(describeParse(parsed))
+    else {
+      for (const seg of chunk.segments) {
+        text[seg.id] = fitEdges(seg.text, parsed.segments.get(seg.id)!)
+        const issue = tagIssue(seg, text[seg.id]!)
+        if (issue) problems.push(`segment ${seg.id}: ${issue.comment.replace('; plain text kept.', '.')}`)
+      }
+    }
+    if (problems.length > 0) return { ok: false, state: chunk.state, problems, remaining: await todo() }
+    chunk.translation = { ...text }
+    chunk.proofread = {}
+    chunk.final = { ...text }
+    chunk.qa = { issues: [] }
+    chunk.error = undefined
+    chunk.edited = undefined
+    chunk.model = input.model?.trim() || EXTERNAL_MODEL
+    chunk.state = 'done'
+    await this.store.writeChunk(id, chunk)
+    this.emit({ type: 'chunk.state', projectId: id, index, state: 'done', model: chunk.model, tokens: chunk.tokens, issues: 0 })
+    const chunks = await this.store.listChunks(id)
+    const remaining = chunks.filter((c) => TODO_STATES.includes(c.state) || IN_PROGRESS_STATES.includes(c.state)).length
+    const project = await this.store.load(id)
+    project.status = remaining === 0 ? 'done' : 'incomplete'
+    await this.store.save(project)
+    const perStage = countStates(chunks)
+    this.emit({ type: 'progress', projectId: id, done: perStage.done + perStage.flagged, total: chunks.length, perStage, tokensIn: project.spend.tokensIn, tokensOut: project.spend.tokensOut, costUsd: project.spend.costUsd, etaSec: null })
+    this.emit({ type: 'project.updated', project: summarize(project, chunks) })
+    return { ok: true, state: 'done', problems: [], remaining }
+  }
+
+  /** Writes brief.md: the tone, characters and register the translator prompt carries. */
+  async setBrief(id: string, brief: string): Promise<void> {
+    await this.store.load(id)
+    await this.store.writeBrief(id, brief.trim() ? `${brief.trim()}\n` : '')
   }
 
   // ---- export ----
