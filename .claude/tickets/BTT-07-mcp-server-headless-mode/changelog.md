@@ -105,4 +105,4 @@ An outside LLM client can drive Book Translator over MCP (Streamable HTTP on `12
 - The Electron `--headless` smoke stored a real `BOOK_TRANSLATOR_MCP_TOKEN` entry in the Windows credential store (service `book-translator`). That is the intended behaviour.
 
 ### Commit status
-Uncommitted on `BTT-07_mcp-server-headless`.
+Committed as 401791b on `BTT-07_mcp-server-headless` (not pushed).
