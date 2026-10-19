@@ -10,6 +10,7 @@
   "modelOrder": [],
   "lmstudio": { "parallel": 4, "context": 131072, "ttlMinutes": 60 },
   "parallel": { "enabled": true, "maxAtOnce": "auto", "splitSections": false },
+  "mcp": { "enabled": false, "port": 47811 },
   "languages": [
     { "code": "en", "name": "English" },
     { "code": "hr", "name": "Croatian" },

@@ -1,5 +1,5 @@
 import { exportProject, keySet, listModels, parseFile, projectStatus, translate } from './cli'
-import { serve } from './serve'
+import { headless, serve } from './serve'
 
 const USAGE = `Book Translator engine
 
@@ -12,7 +12,8 @@ Usage:
                                                  Translate a document (creates the project or resumes it) and export it
   npm run engine -- export <projectId> [--out <file>]   Write the document from the chunks translated so far
   npm run engine -- status <projectId>           Show chunk states, spend and flagged chunks
-  node out/engine/index.js serve [--data <dir>]  Run as the app's engine process (Electron utilityProcess or a Node child with IPC)
+  node out/engine/index.js serve [--data <dir>] [--mcp]  Run as the app's engine process (Electron utilityProcess or a Node child with IPC); --mcp turns the MCP server on for this run
+  npm run headless -- [--data <dir>] [--port <n>]  Engine without a window: the MCP server is on, its URL and token are printed once (Ctrl+C pauses running projects and stops)
   npm run key:set <ENV_NAME>                     Store an API key in the Windows credential store (hidden prompt or stdin)
 
   --data <dir>   Data folder. Default: BOOK_TRANSLATOR_DATA, else %USERPROFILE%\\BookTranslator
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   else if (cmd === 'export') process.exitCode = await exportProject(rest)
   else if (cmd === 'status') process.exitCode = await projectStatus(rest)
   else if (cmd === 'serve') await serve(rest)
+  else if (cmd === 'headless') await headless(rest)
   else if (cmd === 'key-set') process.exitCode = await keySet(rest)
   else {
     process.stderr.write(`unknown command: ${cmd}\n\n${USAGE}`)
