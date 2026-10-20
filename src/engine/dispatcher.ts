@@ -182,6 +182,8 @@ export class CommandDispatcher {
   private async readSource(file: string): Promise<DocumentIR> {
     const abs = path.resolve(file)
     const stat = await fs.stat(abs)
+    // a folder's time does not change when a file in it is edited: read it every time
+    if (stat.isDirectory()) return adapterFor(abs).read(abs)
     const key = `${abs}|${stat.mtimeMs}|${stat.size}`
     const cached = this.irCache.get(key)
     if (cached) return cached
