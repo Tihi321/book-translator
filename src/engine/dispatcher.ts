@@ -6,6 +6,7 @@ import { adapterFor, supportedExtensions } from './formats'
 import { resolveKey, setStoredKey } from './models/keys'
 import type { KeyResolver } from './models/keys'
 import type { ListedModel } from './models/openaiCompat'
+import { clientTaskResult } from './models/client'
 import { guessFamily } from './models/registry'
 import type { ModelRegistry } from './models/registry'
 import { mergeSettings } from './project/store'
@@ -518,6 +519,16 @@ export class CommandDispatcher {
         return undefined
       case 'getMcpStatus':
         return this.mcpStatus()
+      case 'listClientTasks':
+        return { ...s.clientQueue.counts(), tasks: s.clientQueue.list() }
+      case 'getClientTask': {
+        const t = s.clientQueue.lease({ role: cmd.role, project: cmd.project, task: cmd.task })
+        return t ? clientTaskResult(t) : { none: true as const, waiting: s.clientQueue.counts().waiting }
+      }
+      case 'submitClientTask':
+        return s.clientQueue.submit(cmd.taskId, cmd.text)
+      case 'releaseClientTask':
+        return { released: s.clientQueue.release(cmd.taskId) }
       default: {
         const never: never = cmd
         throw new Error(`unknown command: ${(never as { type?: string }).type}`)

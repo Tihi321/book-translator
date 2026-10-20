@@ -23,6 +23,8 @@ export const providerModelSchema = z.looseObject({
   /** USD per 1M cached input tokens. Falls back to price_in when missing. */
   price_cached_in: z.number().nonnegative().optional(),
   embedding: z.boolean().default(false),
+  /** `client` provider: the answering client can look at images. */
+  vision: z.boolean().optional(),
   /** Extra JSON fields merged into the request body for this model (for example to switch thinking off). */
   extra_body: z.record(z.string(), z.unknown()).nullable().optional(),
   /** `load_models` providers (LM Studio): load this model with this context window and parallel count instead of the defaults' ones. */
@@ -32,7 +34,7 @@ export const providerModelSchema = z.looseObject({
 
 export const providerEntrySchema = z.looseObject({
   id: z.string().min(1),
-  kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock']),
+  kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock', 'client']),
   enabled: z.boolean().default(true),
   local: z.boolean().default(false),
   base_url: z.string().optional(),

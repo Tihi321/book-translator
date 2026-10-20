@@ -131,6 +131,17 @@ export async function translate(argv: string[]): Promise<number> {
   }
   const projectId = argValue(argv, 'project')
   const summary = await service.createProject({ sourcePath: file, targetLanguage: to, sourceLanguage: argValue(argv, 'from'), settings, id: projectId })
+  // a `client` model is answered by an MCP client: the CLI has none, so the run would wait for ever
+  const saved = await service.store.load(summary.id)
+  const clientRefs = AGENTS.filter((a) => a === 'translator' || saved.settings.enabled[a as 'glossary' | 'proofreader' | 'qa'])
+    .flatMap((a) => saved.settings.agentModels[a] ?? [])
+    .filter((ref) => registry.providers.get(registry.resolve(ref).split('/')[0]!)?.kind === 'client')
+  if (clientRefs.length > 0) {
+    process.stderr.write(`error: project ${summary.id} uses ${[...new Set(clientRefs)].join(', ')}, a model that an MCP client answers, and the CLI has no client: nothing would ever answer it.
+Choose other models (--model ...), or run the project from an MCP client: start_translation, then get_client_task and submit_client_task.
+`)
+    return 2
+  }
   out(`project ${summary.id} (${summary.format}, ${summary.chunks > 0 ? summary.chunks + ' chunks, resuming' : 'new'})`)
   const est = await service.analyze(summary.id)
   out(`estimate: ${est.chunks} chunks of up to ${est.budget} tokens, ${est.sourceTokens} source tokens, ~${est.estTokensIn}/${est.estTokensOut} tokens in/out, ~$${est.estCostUsd.toFixed(3)}, ~${fmtDuration(est.estSeconds)}`)

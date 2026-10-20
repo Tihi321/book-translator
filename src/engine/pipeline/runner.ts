@@ -314,7 +314,7 @@ export class ProjectRunner {
       const refs = agent === 'translator' && this.translatorModel ? [this.translatorModel, ...base.filter((r) => r !== this.translatorModel)] : base
       const r = await this.deps.router.complete(
         refs,
-        { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit } },
+        { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit, job: [this.projectId, req.unit ?? 'run', req.task ?? 'call'].join('--') } },
         {
           onDelta: (t) => {
             hooks?.onDelta?.(t)

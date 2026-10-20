@@ -18,11 +18,13 @@ const LOG_LINES = 40
 
 const INSTRUCTIONS = `Book Translator translates books (EPUB, DOCX, TXT, MD, PDF, and Scriptorium visual-novel book folders) chunk by chunk, with a glossary and a brief for consistency.
 
-Two ways to work:
+Three ways to work:
 
 1. Operator: the app's own models translate. analyze_file, create_project (pick models with list_models and agentModels), start_translation, then wait_for_progress until the status is done (paused: start_translation again to resume), look at chunks that came back flagged or failed (get_project, get_chunk, edit_chunk, retry_chunk), then export_project. Models of paid providers cost money: check analyze_file's estimate first.
 
-2. Translator: you translate, the app's models are not used and nothing is spent. create_project with enabledAgents all false, then prepare_chunks. Optionally write a glossary (update_glossary) and a brief (set_brief) first. Then repeat get_translation_task and submit_translation until get_translation_task says nothing is left. A submission whose segment ids or inline tags (<1>, </1>, <2/>) do not match is rejected with the reason: fix it and submit again. Finish with export_project. The prompt translate_book_yourself has the full loop.
+2. Translator: you translate, the app's models are not used and nothing is spent. create_project with enabledAgents all false, then prepare_chunks. Optionally write a glossary (update_glossary) and a brief (set_brief) first. Then repeat get_translation_task and submit_translation until get_translation_task says nothing is left. A submission whose segment ids or inline tags (<1>, </1>, <2/>) do not match is rejected with the reason: fix it and submit again. Finish with export_project. The prompt translate_book_yourself has the full loop. This path does the first pass only: no glossary builder, proofreader or QA.
+
+3. Full pipeline, you answer the app's model calls: give agents the model client/claude-code with update_project_settings (agentModels for translator, glossary, proofreader, qa), start_translation, then repeat wait_for_progress (it returns at once when a request waits: clientTasks.waiting) and get_client_task, answer as its output says, and submit_client_task. A JSON answer (glossary, QA) is checked against its schema when submitted. Nothing is spent. The client provider is in config/providers.md, disabled in the seed; a data folder that already exists needs it added by hand (see the README). Put the agents back on real models afterwards, or the project waits for a client for ever. The prompt translate_with_full_pipeline has the loop.
 
 Visual-novel book folder: give the folder (book.md, outline.md, chapters/, bible/bible.md, cover-brief.md) as sourcePath. Every script line is one segment and the export is a folder of the same layout with the same lines: SCENE:, ON SCREEN: and speaker tags stay, a spoken line comes as <1>NAME (expression):</1> text (keep the tag, translate the text), the bible and cover brief are copied. VN Studio can add the exported folder as an edition (vno_add_edition).
 
@@ -113,11 +115,11 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'get_project',
-    `The project's settings, status, chunk list (state, issues), glossary, brief and the last ${LOG_LINES} log lines.`,
+    `The project's settings, status, chunk list (state, issues), glossary, brief and the last ${LOG_LINES} log lines, and clientTasks: how many requests of this project wait for you (waiting) or are leased (leased) on the client provider.`,
     { projectId },
     async (a) => {
       const detail = (await run({ type: 'getProject', projectId: a.projectId })) as { log: string }
-      return { ...detail, log: detail.log.split('\n').slice(-LOG_LINES).join('\n') }
+      return { ...detail, clientTasks: clientCounts(service, a.projectId), log: detail.log.split('\n').slice(-LOG_LINES).join('\n') }
     },
     true
   )
@@ -166,7 +168,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   })
   tool(
     'wait_for_progress',
-    `Waits until a chunk finishes or the project's status changes, or for timeoutSec (at most ${MAX_WAIT_SEC}), then returns the status and progress. Returns at once when the project does not run. Call it again until status is done.`,
+    `Waits until a chunk finishes or the project's status changes, or for timeoutSec (at most ${MAX_WAIT_SEC}), then returns the status and progress. Returns at once when the project does not run, or when a request of this project waits for you on the client provider (clientTasks.waiting > 0: take it with get_client_task). Call it again until status is done.`,
     { projectId, timeoutSec: z.number().min(1).max(MAX_WAIT_SEC).optional().describe(`Default ${DEFAULT_WAIT_SEC}`) },
     (a) => waitForProgress(service, bus, a.projectId, Math.min(MAX_WAIT_SEC, a.timeoutSec ?? DEFAULT_WAIT_SEC)),
     true
@@ -207,6 +209,29 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     return { saved: true }
   })
   tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath }))
+
+  // ---- the client provider: you answer the app's model calls ----
+
+  tool(
+    'list_client_tasks',
+    'The requests the app made to the client provider (model client/claude-code) that wait for you or are leased: waiting, leased and the tasks with job, role, task, project, unit, state and age.',
+    {},
+    () => run({ type: 'listClientTasks' }),
+    true
+  )
+  tool(
+    'get_client_task',
+    'Leases the oldest waiting request of the client provider (for 30 minutes) and returns taskId, meta, system, user, schema (when the answer is JSON), output (what to reply with) and leaseMinutes, or {none: true, waiting}. Answer it with submit_client_task. A lease that runs out puts the task back in the queue.',
+    { role: z.string().optional().describe('glossary, translator, proofreader or qa'), project: z.string().optional(), task: z.string().optional().describe('For example translate, retry, retry-tags, fix, proofread, glossary, review, recheck') },
+    (a) => run({ type: 'getClientTask', role: a.role, project: a.project, task: a.task })
+  )
+  tool(
+    'submit_client_task',
+    'Answers a leased request with text, as `output` of get_client_task says. A JSON answer is checked against the schema: if it fails, {accepted: false, problems} and the task stays leased, so fix it and submit again. A task that is gone (the project was paused, cancelled or the engine restarted) says so.',
+    { taskId: z.string().min(1), text: z.string() },
+    (a) => run({ type: 'submitClientTask', taskId: a.taskId, text: a.text })
+  )
+  tool('release_client_task', 'Gives a leased request back to the queue, for another client to take.', { taskId: z.string().min(1) }, (a) => run({ type: 'releaseClientTask', taskId: a.taskId }))
 
   // ---- translate it yourself ----
 
@@ -274,6 +299,33 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     })
   )
 
+  server.registerPrompt(
+    'translate_with_full_pipeline',
+    {
+      title: 'Translate a book with the full pipeline, answering the app models yourself',
+      description: 'The app runs glossary, translation, proofreading and QA; you answer every model call through the client provider. Nothing is spent.',
+      argsSchema: { file: z.string().describe('Absolute path of the book'), targetLanguage: z.string().describe('For example Croatian') }
+    },
+    (a) => ({
+      messages: [
+        {
+          role: 'user' as const,
+          content: {
+            type: 'text' as const,
+            text: `Translate the book "${a.file}" into ${a.targetLanguage} with Book Translator's full pipeline, answering its model calls yourself.
+
+1. list_models: client/claude-code must be there and available. If it is not, tell me: the client provider has to be added to config/providers.md of the data folder (see the README).
+2. create_project with sourcePath "${a.file}", targetLanguage "${a.targetLanguage}" and agentModels { glossary: ["client/claude-code"], translator: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }. Keep the project id.
+3. start_translation with that project id.
+4. Loop: wait_for_progress. While clientTasks.waiting is above 0, call get_client_task (project: the id), do what it says (meta.role and meta.task tell the job) and reply as its output says: JSON that matches the schema for glossary and QA, <seg id> segments with the same ids and inline tags (<1>, </1>, <2/>) for translation, proofreading and fixes. submit_client_task with taskId and text. If it comes back with accepted false, fix the problems and submit again. If it says the task is gone, take the next one.
+5. Stop when wait_for_progress says status done (if it says paused, start_translation again). Then export_project and tell me the file path.
+6. Last, update_project_settings to put the agents back on real models, so the project does not wait for a client again.`
+          }
+        }
+      ]
+    })
+  )
+
   return server
 }
 
@@ -285,7 +337,14 @@ async function snapshotOf(service: EngineService, id: string) {
   return { project, chunks, counts: countStates(chunks), running }
 }
 
-function describe(s: Awaited<ReturnType<typeof snapshotOf>>, p: ProjectFile, errors: string[], timedOut: boolean) {
+/** The client-provider requests of one project: waiting and leased. */
+function clientCounts(service: EngineService, projectId: string): { waiting: number; leased: number } {
+  const mine = service.clientQueue.list().filter((t) => t.project === projectId)
+  const leased = mine.filter((t) => t.state === 'leased').length
+  return { waiting: mine.length - leased, leased }
+}
+
+function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotOf>>, p: ProjectFile, errors: string[], timedOut: boolean) {
   const { counts, chunks } = s
   return {
     status: p.status,
@@ -295,20 +354,26 @@ function describe(s: Awaited<ReturnType<typeof snapshotOf>>, p: ProjectFile, err
     total: chunks.length,
     counts,
     spend: p.spend,
+    clientTasks: clientCounts(service, p.id),
     ...(errors.length > 0 ? { errors } : {})
   }
 }
 
 async function waitForProgress(service: EngineService, bus: EngineBus, id: string, seconds: number) {
   const first = await snapshotOf(service, id)
-  if (!first.running) return describe(first, first.project, [], false)
+  if (!first.running || clientCounts(service, id).waiting > 0) return describe(service, first, first.project, [], false)
   const finished = (c: { done: number; failed: number }) => c.done + c.failed
   const baseline = finished(first.counts)
   const errors: string[] = []
   const timedOut = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => stop(true), seconds * 1000)
+    // a request on the client provider has no event: look for one now and then
+    const poll = setInterval(() => {
+      if (clientCounts(service, id).waiting > 0) stop(false)
+    }, 500)
     const stop = (late: boolean) => {
       clearTimeout(timer)
+      clearInterval(poll)
       off()
       resolve(late)
     }
@@ -324,5 +389,5 @@ async function waitForProgress(service: EngineService, bus: EngineBus, id: strin
     })
   })
   const now = await snapshotOf(service, id)
-  return describe(now, now.project, errors, timedOut)
+  return describe(service, now, now.project, errors, timedOut)
 }

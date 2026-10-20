@@ -5,6 +5,7 @@ import { loadDefaults, resolveLanguage } from './config'
 import { adapterFor, briefWithNote, hashSource } from './formats'
 import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
+import { ClientTaskQueue } from './models/client'
 import { computeCost, isPaidModel } from './models/registry'
 import type { ModelRegistry } from './models/registry'
 import { budgetFor, planProjectChunks, ProjectRunner, workerCount } from './pipeline/runner'
@@ -28,6 +29,8 @@ export interface ServiceOptions {
   emit?: (ev: EngineEvent) => void
   router?: ModelRouter
   routerOptions?: RouterOptions
+  /** Default: a new queue, handed to the registry. */
+  clientQueue?: ClientTaskQueue
 }
 
 export interface CreateProjectRequest {
@@ -81,12 +84,16 @@ export class EngineService {
   readonly store: ProjectStore
   readonly router: ModelRouter
   private readonly emit: (ev: EngineEvent) => void
+  /** The one queue of `client` requests: the registry's `client` providers fill it, the MCP tools drain it. */
+  readonly clientQueue: ClientTaskQueue
   private runs = new Map<string, { controller: AbortController; promise: Promise<RunResult> }>()
 
   constructor(private readonly opts: ServiceOptions) {
     this.store = new ProjectStore(opts.dataDir)
     this.router = opts.router ?? new ModelRouter(opts.registry, opts.routerOptions)
     this.emit = opts.emit ?? (() => undefined)
+    this.clientQueue = opts.clientQueue ?? new ClientTaskQueue()
+    opts.registry.setClientQueue(this.clientQueue)
   }
 
   get registry(): ModelRegistry {

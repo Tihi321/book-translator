@@ -129,6 +129,18 @@ providers:
     concurrency: 1
     discover: true
     models: []
+  # Answered by an MCP client (Claude Code): a request waits in a queue until the client takes it (get_client_task) and answers it (submit_client_task).
+  # Nothing is spent and no key is needed. Enable it, then give agents the model `client/claude-code` (update_project_settings, agentModels).
+  # An agent left on it with no client connected waits for ever: switch the project back when the client is done.
+  - id: client
+    kind: client
+    enabled: false
+    local: true
+    concurrency: 8
+    models:
+      - id: claude-code
+        family: claude
+        vision: true
   - id: mock
     kind: mock
     concurrency: 4
@@ -147,7 +159,7 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 ## Fields of a provider
 
 - `id`: the name used in model references. A model is written `provider/model`, for example `lmstudio/qwen2.5-14b-instruct`.
-- `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini` or `mock` (scripted, for tests).
+- `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `client` (an MCP client answers: see the `client` entry) or `mock` (scripted, for tests).
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
@@ -164,10 +176,17 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 
 One key (`OPENROUTER_API_KEY`, stored in the Settings screen) gives many models. `discover: free` adds every free one OpenRouter lists, with its context and output limit, so they show in the model pickers as `openrouter/<maker>/<model>:free`. Free models cost nothing. OpenRouter limits them to 20 requests a minute and 50 a day, or 1000 a day once the account has bought $10 of credit. A rate-limited request is retried with backoff, then the next model in the list takes it. For a paid OpenRouter model, tick it in the **Models** dialog (Detect models lists them all) or add it there by its id: it is saved in `config/models.md` with the price OpenRouter lists. You can also add it to the list here with its price from openrouter.ai/models, or set `discover: true` to add all of them with the prices OpenRouter lists.
 
+## The client provider
+
+`kind: client` sends no request to a server. The app puts each model call (glossary, translation, proofreading, QA review, QA fix) in a queue and waits, with no time limit, until an MCP client such as Claude Code takes it with `get_client_task` and answers with `submit_client_task`. The model is `client/claude-code`. It costs nothing, needs no key and counts as local. It is switched off in a new data folder.
+
+A data folder that already exists is not changed when the app is updated, so add the entry to `config/providers.md` by hand: copy the `client` entry (the lines from `- id: client` to `vision: true`) from the seed file or from the README, put it before `mock`, set `enabled: true` and restart the app.
+
 ## Fields of a model
 
 - `id`, `family`, `context`, `max_output`.
 - `price_in`, `price_out`, `price_cached_in`: USD per 1M tokens. Cached input falls back to `price_in` when missing.
+- `vision: true`: (`client` provider) the answering client can look at images.
 - `embedding: true` marks an embedding model (never used for translation).
 - `extra_body`: optional JSON fields merged into the request body, for example `{ reasoning_effort: none }` to switch thinking off on models that support it. Thinking models are slow and waste tokens on translation.
 - `load_context`, `load_parallel`: (`load_models` providers) load this model with this context window and parallel count instead of the defaults.
