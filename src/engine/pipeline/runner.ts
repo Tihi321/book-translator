@@ -6,7 +6,7 @@ import { isAbortError } from '../models/types'
 import { emptyChunk } from '../project/store'
 import type { ProjectStore } from '../project/store'
 import { countStates, summarize } from '../project/summary'
-import { DEFAULT_PARALLEL, IN_PROGRESS_STATES } from '../../shared/project'
+import { DEFAULT_PARALLEL, IN_PROGRESS_STATES, isClientRef } from '../../shared/project'
 import type { DocumentIR } from '../../shared/ir'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
@@ -312,6 +312,11 @@ export class ProjectRunner {
     return async (agent, req, hooks) => {
       const base = this.project.settings.agentModels[agent] ?? []
       const refs = agent === 'translator' && this.translatorModel ? [this.translatorModel, ...base.filter((r) => r !== this.translatorModel)] : base
+      // the one place every model call passes: a client-only project never reaches a model that is not the client's
+      if (this.project.settings.clientOnly) {
+        const outside = refs.filter((r) => !isClientRef(r))
+        if (outside.length) throw new Error(`project is client-only: the ${agent} agent may not use ${outside.join(', ')} (only client/ models). Turn clientOnly off with update_project_settings to use it.`)
+      }
       const r = await this.deps.router.complete(
         refs,
         { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit, job: [this.projectId, req.unit ?? 'run', req.task ?? 'call'].join('--') } },

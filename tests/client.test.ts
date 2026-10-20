@@ -34,13 +34,13 @@ afterEach(async () => {
   r = server = mcp = undefined
 })
 
-/** A rig whose providers.md has the client provider switched on (the seed has it disabled). */
+/** A rig whose providers.md has the client provider switched on (the seed has it enabled; an older data folder has it disabled). */
 async function clientRig(): Promise<Rig> {
   const rg = await rig()
   const file = path.join(rg.dir, 'config', 'providers.md')
   const text = await fs.readFile(file, 'utf8')
   const on = text.replace(/(id: client\r?\n\s+kind: client\r?\n\s+)enabled: false/, '$1enabled: true')
-  expect(on).not.toBe(text)
+  expect(/id: client\r?\n\s+kind: client\r?\n\s+enabled: true/.test(on)).toBe(true)
   await fs.writeFile(file, on)
   await rg.service.registry.load()
   return rg

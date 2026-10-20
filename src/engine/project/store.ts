@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { DocumentIR } from '../../shared/ir'
-import { DEFAULT_PARALLEL } from '../../shared/project'
+import { AGENTS } from '../../shared/agents'
+import type { AgentName } from '../../shared/agents'
+import { CLIENT_ONLY_MODEL, DEFAULT_PARALLEL } from '../../shared/project'
 import type { ChunkRecord, GlossaryEntry, ProjectFile, ProjectSettings } from '../../shared/project'
 import { atomicWrite } from '../store/atomic'
 import { parseGlossary, serializeGlossary } from '../pipeline/glossary'
@@ -196,11 +198,14 @@ export class ProjectStore {
 export function mergeSettings(base: ProjectSettings, patch: Partial<ProjectSettings> | undefined): ProjectSettings {
   if (!patch) return base
   const defined = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
-  return {
+  const merged: ProjectSettings = {
     ...base,
     ...defined,
     agentModels: { ...base.agentModels, ...(patch.agentModels ?? {}) },
     enabled: { ...base.enabled, ...(patch.enabled ?? {}) },
     parallel: { ...DEFAULT_PARALLEL, ...base.parallel, ...(patch.parallel ?? {}) }
   }
+  // clientOnly wins over any agentModels given with it or kept from before: every agent sits on the client model
+  if (merged.clientOnly) merged.agentModels = Object.fromEntries(AGENTS.map((a) => [a, [CLIENT_ONLY_MODEL]])) as Record<AgentName, string[]>
+  return merged
 }
