@@ -102,7 +102,8 @@ Clients with a JSON config (url + headers):
 Two ways to work:
 
 - **Operator.** The client drives the app's own pipeline: analyze a file, create a project, pick models, start, pause, resume, watch progress, review flagged chunks, fix text, export. The app's models (Strata, DeepSeek ...) do the translating.
-- **Translator.** The client translates the book itself. `prepare_chunks` makes the chunks, `get_translation_task` returns the same prompt the app's translator would get (rules, brief, glossary terms, the previous passage, `<seg>` segments), and `submit_translation` checks segment ids and inline tags and stores the text. Nothing is spent on the app's models. The app's QA and proofreader can still run on this work later: start the project or use `retry_chunk`. The `translate_book_yourself` prompt gives the client the steps.
+- **Answering the app's models (full pipeline).** Set an agent's model to `client/claude-code` (see [the client provider](#the-client-provider-claude-code-does-the-model-work)) and the app's own pipeline runs, but each model call waits for the client: glossary, translator, proofreader and QA review and fix are all answered by the client, one request at a time, through `get_client_task` and `submit_client_task`.
+- **Translator.** The client translates the book itself, the first pass only. `prepare_chunks` makes the chunks, `get_translation_task` returns the same prompt the app's translator would get (rules, brief, glossary terms, the previous passage, `<seg>` segments), and `submit_translation` checks segment ids and inline tags and stores the text. Nothing is spent on the app's models. The glossary builder, the proofreader and QA are not run by this path: they need a model, so use the full pipeline above (agents on `client/claude-code`) when you want them. The `translate_book_yourself` prompt gives the client the steps.
 
 Tools:
 
@@ -111,7 +112,8 @@ Tools:
 - Running: `start_translation`, `pause_translation`, `cancel_translation`, `wait_for_progress`
 - Review: `get_chunk`, `edit_chunk`, `retry_chunk`, `update_glossary`, `set_brief`, `export_project`
 - Translator role: `prepare_chunks`, `get_translation_task`, `submit_translation`
-- Prompt: `translate_book_yourself`
+- Client provider: `list_client_tasks`, `get_client_task`, `submit_client_task`, `release_client_task`
+- Prompts: `translate_book_yourself`, `translate_with_full_pipeline`
 
 Safety:
 
@@ -119,6 +121,30 @@ Safety:
 - Every request needs the bearer token. It is made on first use and kept in the Windows credential store (`BOOK_TRANSLATOR_MCP_TOKEN`; an environment variable with that name takes priority).
 - API keys, provider settings and project deletion are not available over MCP.
 - One engine uses a data folder at a time (`engine.lock` in the folder). A second app or `headless` on the same folder is refused with a message. If no Book Translator is running and the message stays, delete `engine.lock`.
+
+### The client provider: Claude Code does the model work
+
+The `client` provider (model `client/claude-code`) turns the app's model calls into tasks for an MCP client. Nothing is spent on models.
+
+1. Add the provider once. A new data folder has it disabled in `config/providers.md`; an existing folder needs the entry added by hand (see `seed/config/providers.md`: `id: client`, `kind: client`, `local: true`, `concurrency: 8`, model `claude-code`) and `enabled: true`, then restart the app.
+2. Choose which agents it answers with `update_project_settings`, for example `agentModels: { translator: ["client/claude-code"], glossary: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }`. An agent left on another model keeps using that model.
+3. `start_translation`, then loop: `wait_for_progress` (returns at once when a task waits, with `clientTasks: { waiting, leased }`), `get_client_task` (leases the oldest waiting task for 30 minutes; filter by `role`, `project`, `task`), write the answer as `output` says, `submit_client_task`. A JSON answer (glossary, QA) is checked against the task's schema when you submit: if it fails you get `problems` and the task stays leased. A task whose lease runs out goes back to the queue; `release_client_task` gives one back. Several clients or subagents can each take a task.
+4. When `get_project` shows `clientTasks` at 0 and the status is `done`, `export_project`. Put the agents back on real models afterwards: an agent left on `client` waits for ever when no client is connected.
+
+The entry for `config/providers.md` (before `mock`):
+
+```yaml
+  - id: client
+    kind: client
+    local: true
+    concurrency: 8
+    models:
+      - id: claude-code
+        family: claude
+        vision: true
+```
+
+The `translate` command of the CLI refuses a project with an agent on `client`, since the CLI has nobody to answer. A request is dropped when the project is paused or cancelled or the app restarts (a later `submit_client_task` for it says the task is gone). The run asks again when it is started again.
 
 ## Headless
 

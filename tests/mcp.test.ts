@@ -97,11 +97,12 @@ describe('MCP HTTP endpoint', () => {
     for (const n of [
       'get_info', 'list_models', 'get_defaults', 'list_languages', 'list_projects', 'analyze_file', 'create_project', 'get_project', 'update_project_settings',
       'start_translation', 'pause_translation', 'cancel_translation', 'wait_for_progress', 'get_chunk', 'edit_chunk', 'retry_chunk', 'update_glossary', 'set_brief', 'export_project',
-      'prepare_chunks', 'get_translation_task', 'submit_translation'
+      'prepare_chunks', 'get_translation_task', 'submit_translation',
+      'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task'
     ]) expect(names).toContain(n)
     expect(names.filter((n) => /secret|provider|limit|delete|key|detect|add_model|show_models/.test(n))).toEqual([])
     const prompts = (await c.listPrompts()).prompts
-    expect(prompts.map((p) => p.name)).toEqual(['translate_book_yourself'])
+    expect(prompts.map((p) => p.name)).toEqual(['translate_book_yourself', 'translate_with_full_pipeline'])
     const prompt = await c.getPrompt({ name: 'translate_book_yourself', arguments: { file: 'C:/books/a.epub', targetLanguage: 'Croatian' } })
     const msg = prompt.messages[0]!.content as { text: string }
     expect(msg.text).toContain('C:/books/a.epub')

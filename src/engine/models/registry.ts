@@ -6,6 +6,7 @@ import { defaultsSchema, modelsConfigSchema, providersSchema } from '../../share
 import type { DefaultsConfig, ModelsConfig, ProviderEntry } from '../../shared/schemas'
 import { promises as fs } from 'node:fs'
 import { AnthropicClient } from './anthropic'
+import { ClientProvider, ClientTaskQueue } from './client'
 import { GeminiClient } from './gemini'
 import { resolveKey } from './keys'
 import type { KeyResolver } from './keys'
@@ -71,6 +72,8 @@ export interface ModelInfo {
 export interface RegistryOptions {
   keys?: KeyResolver
   fetchImpl?: typeof fetch
+  /** The queue of the `client` provider. Default: the registry's own; the engine service replaces it with the one it owns. */
+  clientQueue?: ClientTaskQueue
   /** Reuse a mock provider so tests can script it. */
   mock?: MockProvider
   /** LM Studio's `lms` command line, used to load models. Default: `~/.lmstudio/bin/lms(.exe)` when it exists. `null`: use the REST API. */
@@ -116,6 +119,8 @@ export class ModelRegistry {
   /** config/models.md: the models picked in the Models dialog, the refs the pickers leave out, and the limits. */
   modelChoices: ModelsConfig = { kind: 'models', picked: [], hidden: [], limits: {} }
   readonly mock: MockProvider
+  /** Where `client` providers park their requests (the MCP tools read it). */
+  clientQueue: ClientTaskQueue
   /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
   private serverSlots = new Map<string, number>()
   /** Which of them did not answer the last check, kept across config reloads. */
@@ -128,6 +133,13 @@ export class ModelRegistry {
     private readonly opts: RegistryOptions = {}
   ) {
     this.mock = opts.mock ?? new MockProvider('mock')
+    this.clientQueue = opts.clientQueue ?? new ClientTaskQueue()
+  }
+
+  /** Uses this queue for every `client` provider, now and after a reload. */
+  setClientQueue(queue: ClientTaskQueue): void {
+    this.clientQueue = queue
+    for (const p of this.providers.values()) if (p.client instanceof ClientProvider) p.client.queue = queue
   }
 
   /** (Re)reads config/providers.md and config/models.md. Keeps the previous state if a file is invalid. */
@@ -148,7 +160,7 @@ export class ModelRegistry {
         id: p.id,
         kind: p.kind,
         enabled: p.enabled,
-        local: p.local,
+        local: p.local || p.kind === 'client', // answered by an MCP client: no key, never paid
         baseUrl: p.base_url,
         apiKeyEnv: p.api_key_env,
         concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : (set.concurrency ?? p.concurrency),
@@ -253,6 +265,11 @@ export class ModelRegistry {
     }
     if (info.kind === 'mock') {
       info.client = this.mock
+      info.available = true
+      return
+    }
+    if (info.kind === 'client') {
+      info.client = new ClientProvider(info.id, this.clientQueue)
       info.available = true
       return
     }

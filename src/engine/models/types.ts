@@ -11,6 +11,8 @@ export interface RequestMeta {
   /** The project id. */
   project?: string
   unit?: string
+  /** The job the call belongs to, `<project>--<unit>--<task>`. The `client` provider names its tasks after it. */
+  job?: string
 }
 
 export interface ChatRequest {

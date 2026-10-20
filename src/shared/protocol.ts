@@ -2,6 +2,7 @@ import type { DocFormat } from './ir'
 import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from './project'
 import type { AgentName } from './agents'
 import type { DefaultsConfig } from './schemas'
+import type { ClientTaskSummary } from '../engine/models/client'
 
 /**
  * Engine <-> UI protocol. The engine service (src/engine/service.ts) has one method per command; events flow the other way.
@@ -178,6 +179,31 @@ export interface SubmitResult {
   remaining: number
 }
 
+/** A task of the `client` provider as an MCP client gets it (`getClientTask`), or `none` when nothing waits. */
+export type ClientTaskResult =
+  | { none: true; waiting: number }
+  | {
+      taskId: string
+      meta: { job: string; call: number; role: string; task: string; project: string; unit: string }
+      /** All system messages, joined. */
+      system: string
+      /** The user and assistant messages in order. */
+      user: string
+      /** Only when the request has more than one message. */
+      messages?: { role: string; content: string }[]
+      schema?: Record<string, unknown>
+      maxTokens?: number
+      /** What the answer must look like. */
+      output: string
+      leaseMinutes: number
+    }
+
+/** Counts of the `client` tasks. */
+export interface ClientTaskCounts {
+  waiting: number
+  leased: number
+}
+
 /** The MCP server (src/engine/mcp). `token` is the bearer token: the UI shows it, `serve` never prints it. */
 export interface McpStatus {
   enabled: boolean
@@ -277,6 +303,14 @@ export type Command =
   | { type: 'setBrief'; projectId: string; brief: string }
   /** The MCP server's state, and its token once enabled. */
   | { type: 'getMcpStatus' }
+  /** The waiting and leased requests of the `client` provider. */
+  | { type: 'listClientTasks' }
+  /** Leases the oldest waiting `client` task that matches (an MCP client answers it with `submitClientTask`). */
+  | { type: 'getClientTask'; role?: string; project?: string; task?: string }
+  /** Answers a `client` task. A reply that fails the task's schema is not accepted and the task stays leased. */
+  | { type: 'submitClientTask'; taskId: string; text: string }
+  /** Gives a leased `client` task back to the queue. */
+  | { type: 'releaseClientTask'; taskId: string }
 
 export type CommandType = Command['type']
 
@@ -314,6 +348,10 @@ export interface CommandResults {
   submitTranslation: SubmitResult
   setBrief: undefined
   getMcpStatus: McpStatus
+  listClientTasks: ClientTaskCounts & { tasks: ClientTaskSummary[] }
+  getClientTask: ClientTaskResult
+  submitClientTask: { accepted: true } | { accepted: false; problems: string[] }
+  releaseClientTask: { released: boolean }
 }
 
 export type CommandOf<K extends CommandType> = Extract<Command, { type: K }>
