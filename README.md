@@ -11,7 +11,7 @@ Books are larger than any model's context, so the text is split into chunks that
 
 ## Features
 
-- Formats: EPUB, DOCX, TXT, Markdown, PDF (text layer). The output has the same format, except PDF, which becomes EPUB (and Markdown).
+- Formats: EPUB, DOCX, TXT, Markdown, PDF (text layer). The output has the same format, except PDF, which becomes EPUB (and Markdown). Also Scriptorium visual-novel book folders, written back as a folder with the same script lines (see [Visual-novel book folders](#visual-novel-book-folders)).
 - Inline formatting (bold, italic, links, footnote marks, images) survives: it is carried through the model as numbered tags and restored.
 - Per-agent model choice, with a fallback list per agent (for example local first, API as fallback). Models are grouped Local / API with context size and price.
 - Estimate before you start: chunks, tokens, cost, rough time.
@@ -64,8 +64,8 @@ The engine also runs headless: `npm run engine -- <command>`.
 
 ```text
 models [--data <dir>]                       list configured and discovered models
-parse <file>                                read a document and print its structure
-translate <file> --to <language> [--from <language>] [--model <provider/model>[,fallback]]
+parse <file|folder>                         read a document (or a visual-novel book folder) and print its structure
+translate <file|folder> --to <language> [--from <language>] [--model <provider/model>[,fallback]]
           [--glossary-model <ref>] [--proofread-model <ref>] [--qa-model <ref>]
           [--no-glossary] [--no-proofread] [--no-qa] [--max-chunk <tokens>]
           [--project <id>] [--pause-after-glossary] [--out <file>]
@@ -153,10 +153,32 @@ The agents' instructions are the Markdown files in `prompts/`. Edit them in any 
 - **DOCX**: paragraphs in the body, footnotes, endnotes, headers and footers are translated. Formatting runs that differ inside a paragraph become tags. Text boxes, SmartArt, comments and tracked changes are not specially handled and may be missed or flattened.
 - **TXT / Markdown**: blocks are blank-line separated paragraphs; Markdown syntax is kept as is (code fences are left alone).
 - **PDF**: only the text is extracted (reading order, paragraphs, headings by font size, running headers and page numbers dropped). The layout, images and tables are not preserved: the result is a new EPUB or Markdown. There is no OCR: a scanned PDF without a text layer is rejected with an error.
+- **Visual-novel book folder**: see below. Pick the folder with the CLI or MCP; the app's New project screen picks files only, and the built-in reader does not open folders.
 - A chunk whose model reply loses inline tags is written as plain text and flagged. A chunk that keeps failing is marked failed: retry it or edit it by hand.
 - Output has not been checked in every reader (Calibre, Thorium, Word) on real-world books: check an export before relying on it.
 - Token counts are approximate for non-OpenAI models (a safety margin covers it). Cost and time estimates are rough.
 
+## Visual-novel book folders
+
+A Scriptorium visual novel is a folder (`book.md`, `outline.md`, `chapters/ch-01.md` ..., `bible/bible.md`, `cover-brief.md`) whose chapters are scripts read line by line (`SCENE:`, `ON SCREEN:`, `NAME (expression): words`, narration; grammar in Scriptorium's `docs/visual-novel.md`). VN Studio reads a translated copy of the folder as an edition and pairs it with the original beat by beat, so the translation has to keep every line, in order, with its markers.
+
+Give the folder instead of a file: `npm run engine -- translate <book folder> --to hr`, or `create_project` / `analyze_file` over MCP with the folder as `sourcePath`. The folder is one project (format `vn`). Export writes a folder `<folder name>.<lang>` with the same layout, which VN Studio takes with `vno_add_edition {slug, source: <that folder>, lang}`.
+
+What is translated and what stays:
+
+| Part | Translated | Kept as it is |
+| --- | --- | --- |
+| `book.md` | `title`, `blurb` | every other key, the body (editor notes) |
+| `outline.md` | `chapters[].title`, `summary`, `ending`, `choices[].text`, the body line by line | `n`, `to` and every other key, list markers |
+| `chapters/*.md` | `title`; narration; the words of spoken lines; the place and time after `SCENE:`; `#` headings | the other keys, `SCENE:`, `ON SCREEN:` lines (names and looks), speaker tags with their expression, `Narration:`, `---`, stage directions (`FADE OUT.`), blank lines |
+| `bible/bible.md`, `cover-brief.md` | nothing | copied |
+
+- One segment per line, so a translated chapter has the same lines in the same order. Line endings and frontmatter formatting are kept; a translated YAML value is quoted only when it has to be.
+- A spoken line goes to the translator as `<1>PETRA (grumpy):</1> Pip, shhh!`, so it knows who speaks (voice and grammatical gender). The tag is checked like any inline tag and dropped again on export; the source tag is written back.
+- Character names stay: they are the speaker tags and the bible names VN Studio matches. The project starts with a glossary entry per bible character that keeps the name (the glossary builder does not replace entries that are already there), and every agent is told the script rules with the book brief.
+- The bible and the cover brief are the art reference for the pictures: VN Studio reuses the original's pictures in an edition, and image models are prompted in English, so they are copied, not translated.
+- A translated line that would read as another kind of line (narration that now looks like `NAME: ...` or a heading), or that comes back empty, keeps the source line, with a warning in the project log.
+
 ## Tests
 
-`npm test` runs the Vitest suite: chunker, segment parser, inline-tag round trips, every format adapter on generated fixtures, the pipeline end to end with a scripted mock provider (resume, retry, QA fix pass, partial export), the command dispatcher and the renderer store. No network or real model is needed. Checks against real models are done by hand with the CLI.
+`npm test` runs the Vitest suite: chunker, segment parser, inline-tag round trips, every format adapter on generated fixtures (and the visual-novel folder adapter on the `tests/fixtures/books/soother` book), the pipeline end to end with a scripted mock provider (resume, retry, QA fix pass, partial export), the command dispatcher and the renderer store. No network or real model is needed. Checks against real models are done by hand with the CLI.

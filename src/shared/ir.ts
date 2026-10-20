@@ -1,6 +1,7 @@
 /** Document IR: what every format adapter reads into and writes from. */
 
-export type DocFormat = 'epub' | 'docx' | 'txt' | 'md' | 'pdf'
+/** `vn`: a Scriptorium visual-novel book folder (see formats/vn.ts). */
+export type DocFormat = 'epub' | 'docx' | 'txt' | 'md' | 'pdf' | 'vn'
 
 export type BlockKind = 'heading' | 'para' | 'item' | 'caption' | 'cell' | 'toc' | 'meta'
 
@@ -33,7 +34,12 @@ export interface Section {
 
 export interface DocumentIR {
   format: DocFormat
-  meta: { title?: string; language?: string }
+  meta: {
+    title?: string
+    language?: string
+    /** Names that must stay as they are in the translation (the characters of a visual novel): seeded into the glossary. */
+    names?: string[]
+  }
   sections: Section[]
 }
 
@@ -41,6 +47,8 @@ export interface DocumentIR {
 export interface WriteOptions {
   /** Target language code (`hr`, `ar`...): written to language attributes, and picks the text direction. */
   targetLanguage?: string
+  /** Called for a translation the adapter could not use (the source text was written instead). */
+  onWarning?: (message: string) => void
 }
 
 export interface FormatAdapter {

@@ -1,4 +1,5 @@
 import { chunkBudget, planChunks } from '../chunker'
+import { briefWithNote } from '../formats'
 import type { ModelRegistry } from '../models/registry'
 import type { ModelRouter } from '../models/router'
 import { isAbortError } from '../models/types'
@@ -299,7 +300,7 @@ export class ProjectRunner {
       dataDir,
       sourceLanguage: s.sourceLanguage ?? 'the original language',
       targetLanguage: s.targetLanguage,
-      brief,
+      brief: briefWithNote(brief, this.project.format),
       glossary,
       call: this.makeCall(chunk),
       log: (level, message) => this.log(level, message),

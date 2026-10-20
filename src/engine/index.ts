@@ -9,7 +9,8 @@ Usage:
   npm run engine -- translate <file> --to <language> [--from <language>] [--model <provider/model>[,fallback]]
         [--glossary-model <ref>] [--proofread-model <ref>] [--qa-model <ref>] [--no-glossary] [--no-proofread] [--no-qa]
         [--max-chunk <tokens>] [--project <id>] [--pause-after-glossary] [--out <file>]
-                                                 Translate a document (creates the project or resumes it) and export it
+                                                 Translate a document (creates the project or resumes it) and export it.
+                                                 <file> may be a Scriptorium visual-novel book folder: the export is a folder
   npm run engine -- export <projectId> [--out <file>]   Write the document from the chunks translated so far
   npm run engine -- status <projectId>           Show chunk states, spend and flagged chunks
   node out/engine/index.js serve [--data <dir>] [--mcp]  Run as the app's engine process (Electron utilityProcess or a Node child with IPC); --mcp turns the MCP server on for this run

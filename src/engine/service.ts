@@ -2,20 +2,20 @@ import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { chunkBudget, planChunks } from './chunker'
 import { loadDefaults, resolveLanguage } from './config'
-import { adapterFor } from './formats'
+import { adapterFor, briefWithNote, hashSource } from './formats'
 import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
 import { computeCost, isPaidModel } from './models/registry'
 import type { ModelRegistry } from './models/registry'
 import { budgetFor, planProjectChunks, ProjectRunner, workerCount } from './pipeline/runner'
 import type { RunResult } from './pipeline/runner'
-import { hashFile, mergeSettings, ProjectStore, projectIdFor } from './project/store'
+import { mergeSettings, ProjectStore, projectIdFor } from './project/store'
 import { countStates, summarize } from './project/summary'
 import { buildMessages } from './pipeline/prompts'
 import { describeParse, parseSegments } from './pipeline/segments'
 import type { SegmentParse } from './pipeline/segments'
 import { fitEdges, prevTail, tagIssue, translatorUserContent } from './pipeline/translator'
-import type { DocumentIR } from '../shared/ir'
+import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { IN_PROGRESS_STATES } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
 import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, SubmitResult, TranslationTask } from '../shared/protocol'
@@ -70,7 +70,7 @@ const EXPANSION = 1.2
 /** The ways an adapter may differ from the minimal FormatAdapter: an output extension and a target language hint for `write`. */
 interface AdapterExtras {
   outputExt?: string
-  write(ir: DocumentIR, translations: Map<string, string>, srcPath: string, outPath: string, opts?: { targetLanguage?: string }): Promise<void>
+  write(ir: DocumentIR, translations: Map<string, string>, srcPath: string, outPath: string, opts?: WriteOptions): Promise<void>
 }
 
 /**
@@ -146,7 +146,7 @@ export class EngineService {
   /** Creates the project (project.json, source.json ...). The same file and language give the same project: its settings are updated. */
   async createProject(req: CreateProjectRequest): Promise<ProjectSummary> {
     const sourcePath = path.resolve(req.sourcePath)
-    const hash = await hashFile(sourcePath)
+    const hash = await hashSource(sourcePath)
     const base = await this.defaultSettings(req.targetLanguage, req.sourceLanguage)
     const settings = mergeSettings(base, req.settings)
     const id = req.id ?? projectIdFor(sourcePath, settings.targetLanguageCode ?? settings.targetLanguage, hash)
@@ -174,6 +174,9 @@ export class EngineService {
       spend: { tokensIn: 0, tokensOut: 0, costUsd: 0, ms: 0 }
     }
     await this.store.create(project, ir)
+    // names the format says must stay (the speaker tags of a visual novel use them): the glossary keeps them, and the builder does not replace them
+    const names = ir.meta.names ?? []
+    if (names.length > 0) await this.store.writeGlossary(id, names.map((n) => ({ source: n, target: n, type: 'person', note: 'character name: keep it as it is' })))
     const summary = summarize(project, [])
     this.emit({ type: 'project.updated', project: summary })
     return summary
@@ -370,7 +373,7 @@ export class EngineService {
     const messages = await buildMessages(
       this.opts.dataDir,
       'translator',
-      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief },
+      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief: briefWithNote(brief, project.format) },
       translatorUserContent({ glossary, targetLanguage: s.targetLanguage }, chunk.segments, prev, undefined)
     )
     return {
@@ -470,10 +473,16 @@ export class EngineService {
     const adapter = adapterFor(project.sourcePath) as unknown as AdapterExtras
     const ext = adapter.outputExt ?? path.extname(project.sourcePath)
     const lang = project.settings.targetLanguageCode ?? project.settings.targetLanguage
-    const out = outPath ? path.resolve(outPath) : this.store.file(id, 'output', `${path.basename(project.sourcePath, path.extname(project.sourcePath))}.${lang}${ext}`)
+    // a book folder is written as a folder `<name>.<lang>`
+    const stem = project.format === 'vn' ? path.basename(project.sourcePath) : path.basename(project.sourcePath, path.extname(project.sourcePath))
+    const out = outPath ? path.resolve(outPath) : this.store.file(id, 'output', `${stem}.${lang}${ext}`)
     await fs.mkdir(path.dirname(out), { recursive: true })
     const translations = await this.translations(id)
-    await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang })
+    const onWarning = (message: string) => {
+      this.emit({ type: 'log', projectId: id, level: 'warn', message })
+      void this.store.log(id, `warn: ${message}`)
+    }
+    await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning })
     this.emit({ type: 'log', projectId: id, level: 'info', message: `exported ${translations.size} block(s) to ${out}` })
     return out
   }

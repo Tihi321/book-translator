@@ -16,13 +16,15 @@ const DEFAULT_WAIT_SEC = 25
 /** Lines of log.md that `get_project` returns. */
 const LOG_LINES = 40
 
-const INSTRUCTIONS = `Book Translator translates books (EPUB, DOCX, TXT, MD, PDF) chunk by chunk, with a glossary and a brief for consistency.
+const INSTRUCTIONS = `Book Translator translates books (EPUB, DOCX, TXT, MD, PDF, and Scriptorium visual-novel book folders) chunk by chunk, with a glossary and a brief for consistency.
 
 Two ways to work:
 
 1. Operator: the app's own models translate. analyze_file, create_project (pick models with list_models and agentModels), start_translation, then wait_for_progress until the status is done (paused: start_translation again to resume), look at chunks that came back flagged or failed (get_project, get_chunk, edit_chunk, retry_chunk), then export_project. Models of paid providers cost money: check analyze_file's estimate first.
 
 2. Translator: you translate, the app's models are not used and nothing is spent. create_project with enabledAgents all false, then prepare_chunks. Optionally write a glossary (update_glossary) and a brief (set_brief) first. Then repeat get_translation_task and submit_translation until get_translation_task says nothing is left. A submission whose segment ids or inline tags (<1>, </1>, <2/>) do not match is rejected with the reason: fix it and submit again. Finish with export_project. The prompt translate_book_yourself has the full loop.
+
+Visual-novel book folder: give the folder (book.md, outline.md, chapters/, bible/bible.md, cover-brief.md) as sourcePath. Every script line is one segment and the export is a folder of the same layout with the same lines: SCENE:, ON SCREEN: and speaker tags stay, a spoken line comes as <1>NAME (expression):</1> text (keep the tag, translate the text), the bible and cover brief are copied. VN Studio can add the exported folder as an edition (vno_add_edition).
 
 Paths are on the machine the app runs on. Projects are named after the file, the language and a hash, so the same file and language give the same project.`
 
@@ -83,7 +85,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   tool(
     'analyze_file',
     'Reads a document and estimates chunks, tokens, cost and time with the default (or given) settings. Creates nothing.',
-    { sourcePath: z.string().describe('Absolute path of the book'), targetLanguage: z.string().optional(), sourceLanguage: z.string().optional() },
+    { sourcePath: z.string().describe('Absolute path of the book, or of a visual-novel book folder'), targetLanguage: z.string().optional(), sourceLanguage: z.string().optional() },
     (a) => run({ type: 'analyze', sourcePath: a.sourcePath, targetLanguage: a.targetLanguage, sourceLanguage: a.sourceLanguage }),
     true
   )
@@ -91,7 +93,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     'create_project',
     'Creates a project for a book and a target language (or returns the one that exists for that file and language, with its settings updated). Defaults come from get_defaults. To translate it yourself, set enabledAgents to all false.',
     {
-      sourcePath: z.string().describe('Absolute path of the book'),
+      sourcePath: z.string().describe('Absolute path of the book, or of a Scriptorium visual-novel book folder (exported as a folder)'),
       targetLanguage: z.string().describe('Name or code, for example Croatian or hr'),
       sourceLanguage: z.string().optional(),
       agentModels,
@@ -204,7 +206,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     await run({ type: 'setBrief', projectId: a.projectId, brief: a.brief })
     return { saved: true }
   })
-  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path.', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath }))
+  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath }))
 
   // ---- translate it yourself ----
 

@@ -267,6 +267,43 @@ describe('MCP translator flow (the outside LLM translates)', () => {
     const bad = (await c.callTool({ name: 'submit_translation', arguments: { projectId: 'missing', index: 1, reply: 'x' } })) as ToolResult
     expect(bad.isError).toBe(true)
   })
+
+  it('takes a visual-novel book folder: speaker tags are checked, and the export is a folder with the same lines', async () => {
+    const { r, c } = await setup()
+    const book = path.join(r.dir, 'soother')
+    await fs.cp(path.resolve(__dirname, 'fixtures', 'books', 'soother'), book, { recursive: true })
+    const info = await call<{ file: { format: string; outputExt: string } }>(c, 'analyze_file', { sourcePath: book, targetLanguage: 'hr' })
+    expect(info.file.format).toBe('vn')
+    const p = await call<{ id: string; format: string }>(c, 'create_project', { sourcePath: book, targetLanguage: 'hr', agentModels: { translator: [] }, enabledAgents: NO_AGENTS })
+    expect(p.format).toBe('vn')
+    const prepared = await call<{ chunks: number }>(c, 'prepare_chunks', { projectId: p.id })
+    let rejected = false
+    for (let i = 0; i < prepared.chunks + 2; i++) {
+      const res = (await c.callTool({ name: 'get_translation_task', arguments: { projectId: p.id } })) as ToolResult
+      const meta = JSON.parse(res.content[0]!.text) as { done?: boolean; index: number }
+      if (meta.done) break
+      expect(res.content[1]!.text).toContain('visual-novel script')
+      const segs = segsIn(res.content[2]!.text)
+      const spoken = segs.find((s) => s.text.startsWith('<1>'))
+      if (spoken && !rejected) {
+        // a spoken line without its speaker tag is refused
+        const wrong = await call<{ ok: boolean; problems: string[] }>(c, 'submit_translation', { projectId: p.id, index: meta.index, segments: Object.fromEntries(segs.map((s) => [s.id, s === spoken ? 'Bok.' : s.text])) })
+        expect(wrong.ok).toBe(false)
+        expect(wrong.problems.join(' ')).toMatch(/<1>/)
+        rejected = true
+      }
+      const reply = segs.map((s) => `<seg id="${s.id}">${s.text.replace(/^(<1>.*?<\/1> )?/, (m) => `${m}[hr] `)}</seg>`).join('\n')
+      expect((await call<{ ok: boolean }>(c, 'submit_translation', { projectId: p.id, index: meta.index, reply })).ok).toBe(true)
+    }
+    expect(rejected).toBe(true)
+    const exported = (await call<{ path: string }>(c, 'export_project', { projectId: p.id })).path
+    expect(path.basename(exported)).toBe('soother.hr')
+    const src = await fs.readFile(path.join(book, 'chapters', 'ch-02.md'), 'utf8')
+    const dst = await fs.readFile(path.join(exported, 'chapters', 'ch-02.md'), 'utf8')
+    expect(dst.split('\n')).toHaveLength(src.split('\n').length)
+    expect(dst).toMatch(/^[A-Z]+(?: \([^)]+\))?: \[hr\] /m)
+    expect(r.mock.calls).toHaveLength(0)
+  })
 })
 
 describe('MCP token and controller', () => {
