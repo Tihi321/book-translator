@@ -255,13 +255,15 @@ const TEXT_OUTPUT = 'Reply with the text only: no preamble, no notes, no code fe
 export function clientTaskResult(t: ClientTask): ClientTaskResult {
   const system = t.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
   const rest = t.messages.filter((m) => m.role !== 'system')
+  // `messages` only when `system` + `user` cannot say it all: a repair round (an assistant turn) or several user turns
+  const multiTurn = rest.some((m) => m.role === 'assistant') || rest.filter((m) => m.role === 'user').length > 1
   const segText = !t.schema && (t.role === 'translator' || t.role === 'proofreader')
   return {
     taskId: t.id,
     meta: { job: t.job, call: t.call, role: t.role, task: t.task, project: t.project, unit: t.unit },
     system,
     user: rest.map((m) => m.content).join('\n\n'),
-    ...(t.messages.length > 1 ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
+    ...(multiTurn ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
     ...(t.schema ? { schema: t.schema } : {}),
     ...(t.maxTokens !== undefined ? { maxTokens: t.maxTokens } : {}),
     output: t.schema ? SCHEMA_OUTPUT : segText ? SEG_OUTPUT : TEXT_OUTPUT,

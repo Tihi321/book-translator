@@ -1,6 +1,6 @@
 import { applyModelDefaults, loadDefaults } from './config'
 import { EngineBus } from './bus'
-import { CommandDispatcher, serveEngine, SLOT_SYNC_MS } from './dispatcher'
+import { CommandDispatcher, CONFIG_CHECK_MS, serveEngine, SLOT_SYNC_MS } from './dispatcher'
 import type { DispatcherOptions } from './dispatcher'
 import { McpController } from './mcp/controller'
 import { scriptDevMock } from './models/devMock'
@@ -48,7 +48,9 @@ export async function bootEngine(opts: BootOptions): Promise<BootedEngine> {
   const lock = await acquireDataLock(dataDir)
   releaseOnExit(lock)
   try {
-    await initDataFolder(dataDir, argValue(argv, 'seed'))
+    const init = await initDataFolder(dataDir, argValue(argv, 'seed'))
+    if (init.migrated.length) process.stderr.write(`[engine] config/providers.md: added ${init.migrated.join(', ')} from the seed\n`)
+    for (const w of init.warnings) process.stderr.write(`[engine] ${w}\n`)
     const showMock = process.env.BOOK_TRANSLATOR_MOCK === '1'
     // BOOK_TRANSLATOR_MOCK_DELAY (ms per streamed piece) slows the mock models down, to watch a run in the UI
     const delay = Number(process.env.BOOK_TRANSLATOR_MOCK_DELAY) || undefined
@@ -64,13 +66,21 @@ export async function bootEngine(opts: BootOptions): Promise<BootedEngine> {
     const service = new EngineService({ dataDir, registry, emit })
     await service.recoverInterrupted()
     const dispatcher = new CommandDispatcher({ service, emit, showMock, mcpStatus: opts.mcpStatus, onDefaultsSaved: opts.onDefaultsSaved })
+    if (init.migrated.length) emit({ type: 'log', level: 'info', message: `models: config/providers.md: added ${init.migrated.join(', ')} from the seed` })
+    for (const w of init.warnings) emit({ type: 'log', level: 'warn', message: `models: ${w}` })
     // `concurrency: auto` servers (Strata, LM Studio) report their slot count: asked now and every few seconds, so starting a
     // "4 at once" or a "one at a time" script needs no change in providers.md
     void dispatcher.syncSlots()
     const slotTimer = setInterval(() => void dispatcher.syncSlots(), SLOT_SYNC_MS)
     slotTimer.unref?.()
+    // providers.md, models.md and defaults.json are read again within a few seconds of an edit
+    const configTimer = setInterval(() => void dispatcher.reloadConfigIfChanged(), CONFIG_CHECK_MS)
+    configTimer.unref?.()
     // the timer ends with the process, or with the IPC channel of a Node child
-    const stopTimer = () => clearInterval(slotTimer)
+    const stopTimer = () => {
+      clearInterval(slotTimer)
+      clearInterval(configTimer)
+    }
     process.once('exit', stopTimer)
     process.once('disconnect', stopTimer)
     return {

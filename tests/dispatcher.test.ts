@@ -451,6 +451,25 @@ describe('updateProjectSettings', () => {
     await expect(run({ type: 'updateProjectSettings', projectId: 'missing', patch: {} })).rejects.toThrow()
   })
 
+  it('saves localizeNames for a book folder, and warns when it changes once chunks are translated', async () => {
+    const { r, run, emitted } = await setup()
+    const book = path.join(r.dir, 'soother')
+    await fs.cp(path.resolve(__dirname, 'fixtures', 'books', 'soother'), book, { recursive: true })
+    const p = await run<ProjectSummary>({ type: 'createProject', sourcePath: book, targetLanguage: 'hr', settings: { agentModels: MODELS, maxChunkTokens: 400, enabled: { glossary: false, proofreader: false, qa: false } } })
+    const warns = () => emitted.filter((e) => e.type === 'log' && e.level === 'warn' && /localizeNames changed/.test(e.message))
+    expect((await run<ProjectDetail>({ type: 'getProject', projectId: p.id })).project.settings.localizeNames).toBeUndefined()
+    // no chunk is translated yet: nothing to warn about
+    expect((await run<ProjectDetail>({ type: 'updateProjectSettings', projectId: p.id, patch: { localizeNames: true } })).project.settings.localizeNames).toBe(true)
+    expect(warns()).toHaveLength(0)
+    expect((await r.service.start(p.id)).status).toBe('done')
+    // the same value again is no change
+    await run({ type: 'updateProjectSettings', projectId: p.id, patch: { localizeNames: true } })
+    expect(warns()).toHaveLength(0)
+    expect((await run<ProjectDetail>({ type: 'updateProjectSettings', projectId: p.id, patch: { localizeNames: false } })).project.settings.localizeNames).toBe(false)
+    expect(warns()).toHaveLength(1)
+    expect(await fs.readFile(path.join(r.dir, 'projects', p.id, 'log.md'), 'utf8')).toContain('localizeNames changed: chunks translated before keep the names they have')
+  })
+
   it('is refused while the project runs, and works after a pause', async () => {
     const { r, run, waitFor } = await setup()
     r.mock.on({ role: 'translator' }, async (req) => {
@@ -628,6 +647,56 @@ describe('external translator commands (prepareChunks, getTranslationTask, submi
   it('setBrief rejects an unknown project', async () => {
     const { run } = await setup()
     await expect(run({ type: 'setBrief', projectId: 'missing', brief: 'x' })).rejects.toThrow()
+  })
+})
+
+describe('config reload', () => {
+  /** Adds a mock provider `extra` (model `x`) before `mock` in providers.md and bumps the file's time. */
+  async function addExtra(dir: string): Promise<void> {
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await fs.readFile(file, 'utf8')
+    const edited = text.replace(/(\r?\n)( {2}- id: mock\r?\n)/, '$1  - id: extra\n    kind: mock\n    models:\n      - id: x$1$2')
+    expect(edited).not.toBe(text)
+    await fs.writeFile(file, edited)
+    const later = new Date(Date.now() + 5000)
+    await fs.utimes(file, later, later)
+  }
+  const warns = (emitted: EngineEvent[]) => emitted.filter((e) => e.type === 'log' && e.level === 'warn' && /could not be read/.test(e.message))
+
+  it('listModels shows a provider added to providers.md, with no refreshModels, and tells the UI', async () => {
+    const { r, run, dispatcher, emitted } = await setup()
+    expect((await run<ModelsInfo>({ type: 'listModels' })).models.some((m) => m.ref === 'extra/x')).toBe(false)
+    await addExtra(r.dir)
+    emitted.length = 0
+    expect((await run<ModelsInfo>({ type: 'listModels' })).models.some((m) => m.ref === 'extra/x')).toBe(true)
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(false)
+    expect(emitted.some((e) => e.type === 'models')).toBe(true)
+    expect(emitted.some((e) => e.type === 'log' && /reloaded/.test(e.message))).toBe(true)
+  })
+
+  it('a timer-style check reloads once and then reports no change', async () => {
+    const { r, dispatcher } = await setup()
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(false)
+    await addExtra(r.dir)
+    const [a, b] = await Promise.all([dispatcher.reloadConfigIfChanged(), dispatcher.reloadConfigIfChanged()])
+    expect([a, b]).toEqual([true, true]) // one shared reload
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(false)
+    expect(r.service.registry.getModel('extra/x')).toBeDefined()
+  })
+
+  it('a file that cannot be read keeps the previous providers and warns once', async () => {
+    const { r, dispatcher, emitted } = await setup()
+    const file = path.join(r.dir, 'config', 'providers.md')
+    const good = await fs.readFile(file, 'utf8')
+    await fs.writeFile(file, '---\nkind: providers\nproviders: [unclosed\n---\n')
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(false)
+    expect(r.service.registry.getModel('mock/mock-translator')).toBeDefined()
+    expect(warns(emitted)).toHaveLength(1)
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(false)
+    expect(warns(emitted)).toHaveLength(1)
+    await fs.writeFile(file, good + '\n')
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
+    expect(warns(emitted)).toHaveLength(1)
   })
 })
 

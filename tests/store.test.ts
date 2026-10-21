@@ -41,6 +41,7 @@ describe('renderer store', () => {
       pickFile: async () => null,
       pickFolder: async () => null,
       listFolder: async (dir) => ({ folder: dir, files: [] }),
+      pickBookFolder: async () => null,
       pathForFile: () => '',
       pickBook: async () => null,
       readBook: async () => ({ name: 'x.txt', ext: '.txt', bytes: new Uint8Array() }),

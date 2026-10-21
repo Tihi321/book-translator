@@ -3,8 +3,9 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 import { adapterFor, formatOf, hashSource } from '../src/engine/formats'
-import { classifyScriptLine, readVnFolder, writeVnFolder, yamlScalar } from '../src/engine/formats/vn'
+import { bibleNames, classifyScriptLine, localizeBible, localizeScriptNames, readVnFolder, writeVnFolder, yamlScalar } from '../src/engine/formats/vn'
 import { parseGlossary } from '../src/engine/pipeline/glossary'
+import { characterLabels } from '../src/engine/pipeline/names'
 import type { ChatRequest } from '../src/engine/models/types'
 import { splitFrontmatter } from '../src/shared/md'
 import type { DocumentIR } from '../src/shared/ir'
@@ -298,5 +299,170 @@ describe('visual-novel book folder through the engine (mock models)', () => {
     // the scripted proofreader adds a check mark at the end of each segment
     expect(ch1).toContain('PETRA (grumpy): [hr] Pip, shhh! I am trying to build a sandcastle. ✓')
     expect(await fs.readFile(path.join(out, 'bible', 'bible.md'), 'utf8')).toBe(await fs.readFile(path.join(book, 'bible', 'bible.md'), 'utf8'))
+  })
+})
+
+describe('localized character names: export', () => {
+  const NAMES = { petra: 'Petrica', 'blue dragon': 'Plavi zmaj', nib: 'Nibko' }
+
+  it('writes the localized name into speaker tags, keeping expression, bold marks and capitals', () => {
+    const text = ['PETRA (grumpy): Pip, shhh!', '**PETRA** (small): Oops.', 'BLUE DRAGON: Roar.', 'PETRA: Hello, Petra.', 'MANGO (happy): Ooh, shiny!', 'Narration: Petra looks up.', 'SCENE: Petra\'s garden', ''].join('\n')
+    expect(localizeScriptNames(text, NAMES, 'hr').split('\n')).toEqual([
+      'PETRICA (grumpy): Pip, shhh!',
+      '**PETRICA** (small): Oops.',
+      'PLAVI ZMAJ: Roar.',
+      'PETRICA: Hello, Petra.',
+      'MANGO (happy): Ooh, shiny!',
+      'Narration: Petra looks up.',
+      "SCENE: Petra's garden",
+      ''
+    ])
+  })
+
+  it('renames the names of ON SCREEN lines and leaves the looks and other items alone', () => {
+    const text = ['ON SCREEN: Petra (yellow raincoat, hands over ears), Nib (knee-high green dragon), Mango (proud)', 'ON SCREEN: A sign that reads "LOST THINGS OFFICE"', 'ON SCREEN: **Petra**, Blue Dragon', ''].join('\n')
+    expect(localizeScriptNames(text, NAMES, 'hr').split('\n')).toEqual([
+      'ON SCREEN: Petrica (yellow raincoat, hands over ears), Nibko (knee-high green dragon), Mango (proud)',
+      'ON SCREEN: A sign that reads "LOST THINGS OFFICE"',
+      'ON SCREEN: **Petrica**, Plavi zmaj',
+      ''
+    ])
+  })
+
+  it('keeps the number of lines and the line endings', () => {
+    const text = 'PETRA (grumpy): One.\r\n\r\nON SCREEN: Petra (x)\r\nNarration: Two.\r\nPETRA: Three.'
+    const out = localizeScriptNames(text, NAMES, 'hr')
+    expect(out.split('\n')).toHaveLength(text.split('\n').length)
+    expect(/(?<!\r)\n/.test(out)).toBe(false)
+    expect(out.endsWith('PETRICA: Three.')).toBe(true)
+  })
+
+  it('keeps the source tag of a name that cannot be a speaker tag, with one warning for the name', () => {
+    const warnings: string[] = []
+    const text = ['PETRA (grumpy): One.', 'PETRA: Two.', 'ON SCREEN: Petra (x)', 'NIB: Three.', ''].join('\n')
+    const out = localizeScriptNames(text, { petra: 'ペトラ', nib: 'Nib: the tidy' }, 'ja', (m) => void warnings.push(m))
+    expect(out.split('\n')).toEqual(['PETRA (grumpy): One.', 'PETRA: Two.', 'ON SCREEN: ペトラ (x)', 'NIB: Three.', ''])
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0]).toMatch(/PETRA/)
+    expect(warnings[1]).toMatch(/NIB/)
+  })
+
+  it('renames only the character bullets of the bible, in the same order', async () => {
+    const bible = await fs.readFile(path.join(SOOTHER, 'bible', 'bible.md'), 'utf8')
+    const out = localizeBible(bible, { petra: 'Petrica', nib: 'Nibko', 'golden cave': 'Zlatna špilja' })
+    expect(bibleNames(out)).toEqual(['Petrica', 'Pip', 'Mango', 'Grumble', 'Nibko'])
+    expect(out.split('\n')).toHaveLength(bible.split('\n').length)
+    // the places, even the one named in the map, and all the prose stay
+    expect(out).toContain('- **Golden Cave**: Indoors')
+    expect(out).toContain('Petra\'s House')
+    expect(out).toContain('One boot is her favourite.')
+    expect(localizeBible(bible, {})).toBe(bible)
+  })
+
+  it('finds the characters of the soother book: the bible names, then the speakers the bible does not have', async () => {
+    const ir = await readVnFolder(SOOTHER)
+    const labels = characterLabels(ir)
+    expect(labels.slice(0, 5)).toEqual(['Petra', 'Pip', 'Mango', 'Grumble', 'Nib'])
+    expect(labels).toEqual(expect.arrayContaining(['Mama', 'Blue Dragon']))
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+})
+
+describe('localized character names: through the engine (mock models)', () => {
+  const NAME_FORMS = [
+    { source: 'Petra', target: 'Petrica', type: 'person', gender: 'f' },
+    { source: 'Blue Dragon', target: 'Plavi zmaj', type: 'person', gender: 'm' }
+  ]
+
+  async function run(localizeNames: boolean | undefined) {
+    r = await rig()
+    const book = path.join(r.dir, 'books', 'soother')
+    await copyDir(SOOTHER, book)
+    const seen = { glossary: '', translator: '' }
+    r.mock.on({ role: 'glossary' }, (req: ChatRequest) => {
+      seen.glossary += req.messages.map((m) => m.content).join('\n')
+      return JSON.stringify({ terms: NAME_FORMS, brief: { genre: 'fiction', tone: 'light', characters: [] } })
+    })
+    r.mock.on({ role: 'translator' }, (req: ChatRequest) => {
+      seen.translator = req.messages[0]!.content
+      return asSegs(segsIn(lastUser(req)).map((s) => ({ id: s.id, text: translate(s.text) })))
+    })
+    const p = await r.service.createProject({
+      sourcePath: book,
+      targetLanguage: 'Croatian',
+      sourceLanguage: 'English',
+      settings: { agentModels: { glossary: [MODEL], translator: [MODEL], proofreader: [MODEL], qa: [QA_MODEL] }, enabled: { glossary: true, proofreader: false, qa: false }, maxChunkTokens: 400, ...(localizeNames === undefined ? {} : { localizeNames }) }
+    })
+    expect((await r.service.start(p.id)).status).toBe('done')
+    return { p, book, seen }
+  }
+
+  it('asks the glossary builder for the names, tells the translator, and writes the names into tags, cast lines and the bible', async () => {
+    const { p, book, seen } = await run(true)
+    expect(seen.glossary).toContain('localized for Croatian readers')
+    expect(seen.glossary).toContain('Petra, Pip, Mango, Grumble, Nib')
+    expect(seen.translator).toContain('Character names are localized')
+    expect(seen.translator).not.toContain('Character names stay exactly')
+
+    const glossary = parseGlossary(await fs.readFile(r!.service.store.file(p.id, 'glossary.md'), 'utf8'))
+    expect(glossary.find((e) => e.source === 'Petra')).toMatchObject({ target: 'Petrica', type: 'person' })
+    // the names the builder gave no form for are listed with themselves, to edit
+    expect(glossary.find((e) => e.source === 'Pip')).toMatchObject({ target: 'Pip', type: 'person', note: expect.stringContaining('no localized form yet') })
+    expect(glossary.find((e) => e.source === 'Mama')).toMatchObject({ target: 'Mama' })
+
+    const out = await r!.service.export(p.id)
+    for (const c of await chapterFiles(book)) {
+      const src = splitFrontmatter(await fs.readFile(path.join(book, 'chapters', c), 'utf8'))
+      const dst = splitFrontmatter(await fs.readFile(path.join(out, 'chapters', c), 'utf8'))
+      expect(dst.body.split('\n').length, c).toBe(src.body.split('\n').length)
+      // every line keeps its class: read back with the source names, the shapes are the same
+      const back = shapes(dst.body).map((s) => s.replace(/PETRICA/g, 'PETRA').replace(/PLAVI ZMAJ/g, 'BLUE DRAGON').replace(/Petrica/g, 'Petra').replace(/Plavi zmaj/g, 'Blue Dragon'))
+      expect(back, c).toEqual(shapes(src.body))
+    }
+    const ch1 = await fs.readFile(path.join(out, 'chapters', 'ch-01.md'), 'utf8')
+    expect(ch1).toContain('PETRICA (grumpy): [hr] Pip, shhh! I am trying to build a sandcastle.')
+    expect(ch1).toContain('ON SCREEN: Pip (in a green onesie, red face, crying), Petrica (yellow raincoat, hands over ears)')
+    expect(ch1).not.toContain('PETRA (')
+    expect(await fs.readFile(path.join(out, 'chapters', 'ch-03.md'), 'utf8')).toMatch(/^PLAVI ZMAJ[ (:]/m)
+
+    const bible = await fs.readFile(path.join(out, 'bible', 'bible.md'), 'utf8')
+    expect(bibleNames(bible)).toEqual(['Petrica', 'Pip', 'Mango', 'Grumble', 'Nib'])
+    expect(bible.split('\n')).toHaveLength((await fs.readFile(path.join(book, 'bible', 'bible.md'), 'utf8')).split('\n').length)
+    expect(await fs.readFile(path.join(out, 'cover-brief.md'), 'utf8')).toBe(await fs.readFile(path.join(book, 'cover-brief.md'), 'utf8'))
+  })
+
+  it('writes an edited name from the glossary on the next export', async () => {
+    const { p } = await run(true)
+    const store = r!.service.store
+    const glossary = await store.readGlossary(p.id)
+    await store.writeGlossary(p.id, glossary.map((e) => (e.source === 'Nib' ? { ...e, target: 'Nibko' } : e)))
+    const out = await r!.service.export(p.id)
+    const ch2 = await fs.readFile(path.join(out, 'chapters', 'ch-02.md'), 'utf8')
+    expect(ch2).toMatch(/^NIBKO( \(.*\))?: /m)
+    expect(ch2).toContain('Nibko (knee-high green dragon')
+    expect(ch2).not.toMatch(/^NIB[ (:]/m)
+    expect(bibleNames(await fs.readFile(path.join(out, 'bible', 'bible.md'), 'utf8'))).toContain('Nibko')
+  })
+
+  it('is off by default: the names stay, the glossary pins them, the glossary builder is not asked for them', async () => {
+    const { p, book, seen } = await run(undefined)
+    expect(seen.glossary).not.toContain('localized for')
+    expect(seen.translator).toContain('Character names stay exactly')
+    const out = await r!.service.export(p.id)
+    expect(await fs.readFile(path.join(out, 'chapters', 'ch-01.md'), 'utf8')).toContain('PETRA (grumpy): [hr] Pip, shhh!')
+    expect(await fs.readFile(path.join(out, 'bible', 'bible.md'), 'utf8')).toBe(await fs.readFile(path.join(book, 'bible', 'bible.md'), 'utf8'))
+    // the builder's Petra -> Petrica does not rename a pinned name
+    const glossary = parseGlossary(await fs.readFile(r!.service.store.file(p.id, 'glossary.md'), 'utf8'))
+    expect(glossary.find((e) => e.source === 'Petra')?.target).toBe('Petra')
+  })
+
+  it('warns when two characters get the same name', async () => {
+    const { p } = await run(true)
+    const store = r!.service.store
+    await store.writeGlossary(p.id, (await store.readGlossary(p.id)).map((e) => (e.source === 'Mango' || e.source === 'Nib' ? { ...e, target: 'Dragic' } : e)))
+    r!.events.length = 0
+    await r!.service.export(p.id)
+    const warns = r!.events.filter((e) => e.type === 'log' && e.level === 'warn').map((e) => (e as { message: string }).message)
+    expect(warns.some((m) => /mango and nib would all be called Dragic/.test(m))).toBe(true)
   })
 })

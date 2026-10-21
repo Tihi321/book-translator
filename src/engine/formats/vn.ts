@@ -4,6 +4,7 @@ import path from 'node:path'
 import { isMap, isScalar, isSeq, parse as parseYaml, parseDocument, stringify as stringifyYaml } from 'yaml'
 import type { Scalar, YAMLMap } from 'yaml'
 import type { Block, BlockKind, DocumentIR, FormatAdapter, InlineTag, Section, WriteOptions } from '../../shared/ir'
+import { splitFrontmatter } from '../../shared/md'
 import { stripTags } from './inline'
 
 /**
@@ -321,6 +322,115 @@ export function bibleNames(bible: string): string[] {
   return names
 }
 
+// ---- localized character names ----
+
+/** How a name map is looked up: case, spacing and Unicode form do not matter (the same rule as the glossary's `normalizeTerm`). */
+const nameKey = (s: string) => s.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim()
+
+/** `text` in capitals for a language code (`hr`), or for no particular language when the code is not one (`Croatian`). */
+function upper(text: string, lang?: string): string {
+  try {
+    return text.toLocaleUpperCase(lang)
+  } catch {
+    return text.toUpperCase()
+  }
+}
+
+/** The kept start of a spoken line, split: before the name, the name, after it (bold marks, expression, colon). */
+const SPEAKER_PREFIX = /^(\s*\**)([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)(\**(?:\s*\([^)]{1,120}\))?\s*:\**\s+)$/u
+const CAST_LINE = /^(\s*\**\s*(?:on screen|na ekranu)\s*:\s*\**\s*)(.*?)(\s*)$/iu
+/** One entry of an `ON SCREEN:` line: marks, the name, then what follows it (the look in brackets). */
+const CAST_ITEM = /^(\s*\**\s*)([^(*]+?)(\s*(?:\(.*)?\**\s*)$/s
+
+/** Splits at the commas that are outside brackets: `Petra (hat, boots), Nib` is two entries. */
+function topLevelCommas(text: string): string[] {
+  const items: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of text) {
+    if (ch === '(') depth++
+    else if (ch === ')') depth = Math.max(0, depth - 1)
+    if (ch === ',' && depth === 0) {
+      items.push(cur)
+      cur = ''
+    } else cur += ch
+  }
+  items.push(cur)
+  return items
+}
+
+/**
+ * Writes localized character names into a chapter body: the name of every spoken line (in capitals, with the expression and bold marks as they
+ * were) and the names in `ON SCREEN:` lines. `names` maps the lower-cased source name to the new one. Narration, scenes and the other lines stay.
+ * A name that would stop its line from being a spoken line (no capitals in the language, a colon or bracket in it) keeps its source form, with
+ * one warning per name. The line endings and the number of lines stay.
+ */
+export function localizeScriptNames(text: string, names: Record<string, string>, lang?: string, onWarning?: (message: string) => void): string {
+  const warned = new Set<string>()
+  const keep = (label: string, target: string, what: string) => {
+    if (warned.has(label)) return
+    warned.add(label)
+    onWarning?.(`the name ${label} cannot be written as ${what} as "${target}", it keeps its source form there`)
+  }
+  return text
+    .split(/(?<=\n)/)
+    .map((line) => {
+      const eol = line.endsWith('\r\n') ? '\r\n' : line.endsWith('\n') ? '\n' : ''
+      const body = line.slice(0, line.length - eol.length)
+      const parts = classifyScriptLine(body)
+      if (parts.cls === 'line') {
+        const m = SPEAKER_PREFIX.exec(parts.prefix)
+        const target = m ? names[nameKey(m[2]!)]?.trim() : undefined
+        if (!m || !target) return line
+        const prefix = m[1]! + upper(target, lang) + m[3]!
+        const rest = parts.text + parts.suffix
+        const again = classifyScriptLine(prefix + rest)
+        if (again.cls !== 'line' || again.prefix !== prefix) {
+          keep(m[2]!.trim(), target, 'a speaker tag')
+          return line
+        }
+        return prefix + rest + eol
+      }
+      if (parts.cls === 'cast') {
+        const c = CAST_LINE.exec(body)
+        if (!c) return line
+        const items = topLevelCommas(c[2]!).map((item) => {
+          const m = CAST_ITEM.exec(item)
+          const target = m ? names[nameKey(m[2]!)]?.trim() : undefined
+          if (!m || !target) return item
+          if (/[,()]/.test(target)) {
+            keep(m[2]!.trim(), target, 'a name on screen')
+            return item
+          }
+          return m[1]! + target + m[3]!
+        })
+        return c[1]! + items.join(',') + c[3]! + eol
+      }
+      return line
+    })
+    .join('')
+}
+
+/** Renames the `- **Name**` bullets under `## Characters` (or `## Likovi`) of the bible. The order, the descriptions and everything else stay. */
+export function localizeBible(text: string, names: Record<string, string>): string {
+  let inChars = false
+  return text
+    .split(/(?<=\n)/)
+    .map((line) => {
+      const h = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line.replace(/\r?\n$/, ''))
+      if (h) {
+        inChars = /^(characters|likovi)$/i.test(h[1]!.trim())
+        return line
+      }
+      if (!inChars) return line
+      return line.replace(/^(\s*[-*+]\s+\*\*)(.+?)(\*\*)/, (all, open: string, name: string, close: string) => {
+        const target = names[nameKey(name)]?.trim()
+        return target ? open + target + close : all
+      })
+    })
+    .join('')
+}
+
 /** Reads a book folder: one section per translated file (book, outline, each chapter), one block per text span. */
 export async function readVnFolder(dir: string): Promise<DocumentIR> {
   const sections: Section[] = []
@@ -349,12 +459,23 @@ export async function readVnFolder(dir: string): Promise<DocumentIR> {
 /** Writes the translated book folder: the translated files with every line in place, the others copied. */
 export async function writeVnFolder(translations: Map<string, string>, srcDir: string, outDir: string, opts: WriteOptions = {}): Promise<void> {
   let n = 0
+  // localized names: a warning about a name comes once, not once per chapter
+  const names = opts.names && Object.keys(opts.names).length > 0 ? opts.names : undefined
+  const told = new Set<string>()
+  const nameWarning = (message: string) => {
+    if (told.has(message)) return
+    told.add(message)
+    opts.onWarning?.(message)
+  }
   for (const f of await vnFiles(srcDir)) {
     const src = path.join(srcDir, f.rel)
     const out = path.join(outDir, f.rel)
     await fs.mkdir(path.dirname(out), { recursive: true })
     if (f.mode === 'copy') {
-      await fs.copyFile(src, out)
+      if (names && f.rel.endsWith('bible.md')) {
+        const bible = await readText(src)
+        await fs.writeFile(out, bible.bom + localizeBible(bible.text, names), 'utf8')
+      } else await fs.copyFile(src, out)
       continue
     }
     const { bom, text } = await readText(src)
@@ -370,6 +491,10 @@ export async function writeVnFolder(translations: Map<string, string>, srcDir: s
       if (t !== undefined && rendered === undefined) opts.onWarning?.(`${f.rel}: the translation of ${id} is empty or would change the kind of script line, the source text was kept: ${oneLine(t).slice(0, 80)}`)
       result += rendered ?? s.source
     }
+    if (names && f.mode === 'script') {
+      const body = splitFrontmatter(result).body
+      result = result.slice(0, result.length - body.length) + localizeScriptNames(body, names, opts.targetLanguage, nameWarning)
+    }
     await fs.writeFile(out, bom + result, 'utf8')
   }
 }
@@ -380,8 +505,14 @@ export const vnAdapter: FormatAdapter = {
   write: (_ir, translations, srcDir, outDir, opts) => writeVnFolder(translations, srcDir, outDir, opts)
 }
 
-/** What the translator is told about a visual-novel script, with the book brief. */
-export const VN_BRIEF_NOTE = `## Visual-novel script
+const VN_NOTE_RULES = `## Visual-novel script
 This book is a visual-novel script. Every segment is one line of it: a narration line, a spoken line, the place and time of a scene, a chapter title, or a choice the player picks. Keep every segment one line.
-A segment that starts with a tag such as <1>PETRA (grumpy):</1> is spoken by that character with that expression. Copy the tag and its content unchanged and translate only the words after it, in that character's voice and with the grammatical gender of the speaker.
+A segment that starts with a tag such as <1>PETRA (grumpy):</1> is spoken by that character with that expression. Copy the tag and its content unchanged and translate only the words after it, in that character's voice and with the grammatical gender of the speaker.`
+
+/** What the translator is told about a visual-novel script, with the book brief. */
+export const VN_BRIEF_NOTE = `${VN_NOTE_RULES}
 Character names stay exactly as in the source; they must match the speaker tags.`
+
+/** The same for a project with `localizeNames`: the names come from the glossary, and the app writes them into the speaker tags. */
+export const VN_BRIEF_NOTE_LOCALIZED = `${VN_NOTE_RULES}
+Character names are localized: write every name as the glossary gives it, in narration and in what characters say. Still copy the speaker tag such as <1>PETRA (grumpy):</1> unchanged; the app writes the localized name into it.`

@@ -44,6 +44,8 @@ export const providerEntrySchema = z.looseObject({
    * `GET <base_url>/status`, the Strata status), checked every few seconds; 1 while the server can't be asked.
    */
   concurrency: z.union([z.number().int().positive(), z.literal('auto')]).default(4),
+  /** Context window for this provider's models that have no `context` of their own. */
+  context: z.number().int().positive().optional(),
   rpm: z.number().int().positive().optional(),
   tpm: z.number().int().positive().optional(),
   /**

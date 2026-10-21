@@ -36,6 +36,8 @@ Other scripts: `npm run build`, `npm run headless`, `npm run typecheck`, `npm ru
 
 Providers and their models are listed in `config/providers.md` in the data folder (YAML frontmatter, see the notes in the file). The Settings screen edits enabled / base URL / parallel requests. Prices in the file are examples: check them on the providers' pricing pages. The OpenAI, OpenRouter, Anthropic and Gemini entries are marked "to verify".
 
+A running app or engine reads `config/providers.md`, `config/models.md` and `config/defaults.json` again within a few seconds of an edit, and before it lists models, analyzes, creates, starts or retries. No restart is needed. A project that is running keeps its chunk plan, and a request that is already waiting for a free slot keeps the old settings until it gets one. A file that can't be read (a YAML mistake) keeps the previous providers and is logged once; fix it and it loads.
+
 API keys are never written to files. A key is looked up in an environment variable named in `api_key_env` (for example `DEEPSEEK_API_KEY`), then in the Windows Credential Manager (service `book-translator`). Set one of these ways:
 
 - Settings screen: type the key and press Save key (it goes to the credential store and is never shown again).
@@ -68,7 +70,7 @@ parse <file|folder>                         read a document (or a visual-novel b
 translate <file|folder> --to <language> [--from <language>] [--model <provider/model>[,fallback]]
           [--glossary-model <ref>] [--proofread-model <ref>] [--qa-model <ref>]
           [--no-glossary] [--no-proofread] [--no-qa] [--max-chunk <tokens>]
-          [--project <id>] [--pause-after-glossary] [--out <file>]
+          [--project <id>] [--pause-after-glossary] [--localize-names] [--out <file>]
 export <projectId> [--out <file>]           write the document from what is translated so far
 status <projectId>                          chunk states, spend, failed chunks and major QA issues
 key-set <ENV_NAME>                          store an API key (npm run key:set <ENV_NAME>)
@@ -126,12 +128,14 @@ Safety:
 
 The `client` provider (model `client/claude-code`) turns the app's model calls into tasks for an MCP client. Nothing is spent on models.
 
-1. Add the provider once. A new data folder has it enabled in `config/providers.md` (context 200000); an existing folder needs the entry added by hand (see `seed/config/providers.md`: `id: client`, `kind: client`, `local: true`, `concurrency: 8`, model `claude-code`) and `context: 200000`, `enabled: true`, then restart the app.
+1. The provider is already there. A new data folder has it enabled in `config/providers.md`, and an existing folder gets it added at the next start (see [Data folder](#data-folder)). Its model plans with a context of 200000 tokens: set `context` on the model or on the provider to change that.
 2. For a Claude-only translation set `clientOnly: true` in `create_project` or `update_project_settings`: all four agents (glossary, translator, proofreader, qa) go on `client/claude-code` (any `agentModels` given with it is ignored) and the project refuses every other model ref, also one from old settings, the defaults or `retry_chunk {model}`, with an error instead of calling it. `clientOnly: false` turns it off; the agents stay on `client/claude-code` until you set `agentModels`. `get_project` shows `clientOnly`. Or choose single agents with `update_project_settings`, for example `agentModels: { translator: ["client/claude-code"], glossary: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }`. An agent left on another model keeps using that model.
 3. `start_translation`, then loop: `wait_for_progress` (returns at once when a task waits, with `clientTasks: { waiting, leased }`), `get_client_task` (leases the oldest waiting task for 30 minutes; filter by `role`, `project`, `task`), write the answer as `output` says, `submit_client_task`. A JSON answer (glossary, QA) is checked against the task's schema when you submit: if it fails you get `problems` and the task stays leased. A task whose lease runs out goes back to the queue; `release_client_task` gives one back. Several clients or subagents can each take a task.
+
+`get_client_task` returns `system` (the rules) and `user` (the request). A normal task has only those two. `messages` (the whole conversation, in order) comes only for a request with more than one turn, such as a JSON repair round after a bad answer: answer its last user message.
 4. When `get_project` shows `clientTasks` at 0 and the status is `done`, `export_project`. Put the agents back on real models afterwards: an agent left on `client` waits for ever when no client is connected.
 
-The entry for `config/providers.md` (before `mock`):
+The entry as the seed has it:
 
 ```yaml
   - id: client
@@ -141,6 +145,7 @@ The entry for `config/providers.md` (before `mock`):
     models:
       - id: claude-code
         family: claude
+        context: 200000
         vision: true
 ```
 
@@ -154,11 +159,12 @@ From a terminal, `npm run headless -- [--data <dir>] [--port <n>]` prints the UR
 
 ## Data folder
 
-`%USERPROFILE%\BookTranslator` (override with `--data` or `BOOK_TRANSLATOR_DATA`), created from `seed/` on first run. Existing files are never overwritten.
+`%USERPROFILE%\BookTranslator` (override with `--data` or `BOOK_TRANSLATOR_DATA`), created from `seed/` on first run. Existing files are never overwritten, with one exception: a provider the seed gained later is added to `config/providers.md` once, at the next start. The new entry is copied as the seed has it (existing entries, comments and order stay), and a provider you deleted is not added back. `config/seed-state.json` lists the providers the seed has offered this folder: delete an entry there to have the seed offer it again. A `config/providers.md` that can't be read is left alone, with a warning.
 
 ```text
 config/providers.md     providers and models
 config/defaults.json    default model per agent, default chunk size, language list
+config/seed-state.json  the providers the seed has offered this folder (written by the app)
 prompts/<agent>.md      prompt templates ({{variables}}), _rules.md is shared by all agents
 projects/<id>/
   project.json          source, languages, models per agent, status, spend
@@ -179,7 +185,7 @@ The agents' instructions are the Markdown files in `prompts/`. Edit them in any 
 - **DOCX**: paragraphs in the body, footnotes, endnotes, headers and footers are translated. Formatting runs that differ inside a paragraph become tags. Text boxes, SmartArt, comments and tracked changes are not specially handled and may be missed or flattened.
 - **TXT / Markdown**: blocks are blank-line separated paragraphs; Markdown syntax is kept as is (code fences are left alone).
 - **PDF**: only the text is extracted (reading order, paragraphs, headings by font size, running headers and page numbers dropped). The layout, images and tables are not preserved: the result is a new EPUB or Markdown. There is no OCR: a scanned PDF without a text layer is rejected with an error.
-- **Visual-novel book folder**: see below. Pick the folder with the CLI or MCP; the app's New project screen picks files only, and the built-in reader does not open folders.
+- **Visual-novel book folder**: see below. Pick it with **Open a book folder** on the New translation screen, by dropping it there, or with the CLI or MCP. **Open a folder** and a drop also recognize a book folder (one project) and offer the book folders inside an ordinary folder next to its documents. The built-in reader does not open folders.
 - A chunk whose model reply loses inline tags is written as plain text and flagged. A chunk that keeps failing is marked failed: retry it or edit it by hand.
 - Output has not been checked in every reader (Calibre, Thorium, Word) on real-world books: check an export before relying on it.
 - Token counts are approximate for non-OpenAI models (a safety margin covers it). Cost and time estimates are rough.
@@ -201,9 +207,19 @@ What is translated and what stays:
 
 - One segment per line, so a translated chapter has the same lines in the same order. Line endings and frontmatter formatting are kept; a translated YAML value is quoted only when it has to be.
 - A spoken line goes to the translator as `<1>PETRA (grumpy):</1> Pip, shhh!`, so it knows who speaks (voice and grammatical gender). The tag is checked like any inline tag and dropped again on export; the source tag is written back.
-- Character names stay: they are the speaker tags and the bible names VN Studio matches. The project starts with a glossary entry per bible character that keeps the name (the glossary builder does not replace entries that are already there), and every agent is told the script rules with the book brief.
+- Character names stay by default: they are the speaker tags and the bible names VN Studio matches. The project starts with a glossary entry per bible character that keeps the name (the glossary builder does not replace entries that are already there), and every agent is told the script rules with the book brief. To localize the names, see below.
 - The bible and the cover brief are the art reference for the pictures: VN Studio reuses the original's pictures in an edition, and image models are prompted in English, so they are copied, not translated.
 - A translated line that would read as another kind of line (narration that now looks like `NAME: ...` or a heading), or that comes back empty, keeps the source line, with a warning in the project log.
+
+### Localized character names
+
+Off by default. Turn it on with the checkbox **Localize the character names** (New translation, or the project's settings), `localizeNames: true` in `create_project` / `update_project_settings`, or `--localize-names` on the CLI. It is for visual-novel folders only.
+
+- The glossary is the name map. The glossary builder is asked for a `person` entry for each character (the bible's names and every speaker of the script) with the form the target language readers should see. A character it gives no form for is listed with its own name, to edit. Edit the rows in the glossary (or with `update_glossary`) before you export.
+- The translator writes the names as the glossary gives them, in narration and in speech. It still copies the speaker tag; the export writes the localized name into it.
+- On export the name is written into the speaker tags (in capitals, with the expression and bold marks as they were), into the names of `ON SCREEN:` lines, and into the `- **Name**` bullets under `## Characters` of `bible/bible.md`, in the same order. Narration, scene lines, places and the rest of the bible stay, and so does the cover brief. Every line keeps its kind, so VN Studio can still pair the lines.
+- A name that cannot be a speaker tag (no capital letters in the language, a colon or bracket in it) keeps its source form in the tags, with a warning. Two characters with the same new name give a warning too.
+- Changing the setting after chunks are translated is allowed, with a warning: those chunks keep the names they were translated with, so retry them. Without it the export is byte for byte the same as before.
 
 ## Tests
 

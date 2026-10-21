@@ -38,6 +38,12 @@ export interface DispatcherOptions {
 /** How often the `concurrency: auto` servers are asked for their slots. */
 export const SLOT_SYNC_MS = 10_000
 
+/** How often config/providers.md, models.md and defaults.json are checked for an edit. */
+export const CONFIG_CHECK_MS = 3000
+
+/** The commands that check the config files for an edit first (the others wait for the timer). */
+const RELOADS_CONFIG = new Set<Command['type']>(['listModels', 'analyze', 'createProject', 'start', 'resume', 'retryChunk'])
+
 /** The body of a config/models.md the app creates. */
 const MODELS_MD_BODY = `
 # Models in the pickers
@@ -88,6 +94,8 @@ export class CommandDispatcher {
   private readonly irCache = new Map<string, DocumentIR>()
   /** The last model list each provider gave `detectModels`, for the prices of the models picked from it. */
   private readonly catalogs = new Map<string, ListedModel[]>()
+  /** The check that is running, so two callers share one reload. */
+  private reloading?: Promise<boolean>
 
   constructor(private readonly opts: DispatcherOptions) {
     this.service = opts.service
@@ -237,6 +245,42 @@ export class CommandDispatcher {
       return true
     }
     return false
+  }
+
+  /**
+   * Reloads providers and models when providers.md, models.md or defaults.json changed on disk since the last load. Used by the
+   * 3-second timer in `serve` and before the commands that plan a run. A file that can't be read keeps the previous providers and is
+   * logged once. A project that runs keeps its chunk plan, and a request already waiting for a slot keeps the old provider until it wakes.
+   * Returns true when it reloaded.
+   */
+  reloadConfigIfChanged(): Promise<boolean> {
+    this.reloading ??= this.reloadConfig().finally(() => {
+      this.reloading = undefined
+    })
+    return this.reloading
+  }
+
+  private async reloadConfig(): Promise<boolean> {
+    let signature: string
+    try {
+      if (!(await this.registry.configChanged())) return false
+      signature = await this.registry.configSignature()
+    } catch {
+      return false
+    }
+    try {
+      await applyModelDefaults(this.registry, this.dataDir)
+      await this.registry.load()
+    } catch (err) {
+      this.registry.markConfigSeen(signature)
+      this.log('warn', `config/providers.md (or models.md / defaults.json) could not be read, keeping the previous providers: ${(err as Error).message}`)
+      return false
+    }
+    this.log('info', 'config changed on disk, providers and models reloaded')
+    for (const p of this.registry.providers.values()) this.service.router.limiter.wakeAll(p)
+    this.emitModels()
+    void this.discover().then(() => this.emitModels(), () => undefined)
+    return true
   }
 
   /** Asks a provider for every chat model it lists and keeps the list for `showModels`. Throws when it can't be asked. */
@@ -426,6 +470,8 @@ export class CommandDispatcher {
   /** Runs one command. Throws on a failure (the transport turns it into an error reply). */
   async handle(cmd: Command): Promise<unknown> {
     const s = this.service
+    // a providers.md edit shows before the commands that read the models
+    if (RELOADS_CONFIG.has(cmd.type)) await this.reloadConfigIfChanged()
     switch (cmd.type) {
       case 'getInfo':
         return this.info()
@@ -504,8 +550,15 @@ export class CommandDispatcher {
       case 'updateProjectSettings': {
         if (s.isRunning(cmd.projectId)) throw new Error('pause the project before changing its settings')
         const project = await s.store.load(cmd.projectId)
+        const namesBefore = project.settings.localizeNames === true
         project.settings = mergeSettings(project.settings, cmd.patch)
         await s.store.save(project)
+        // chunks that are translated keep the names they were translated with
+        if (project.format === 'vn' && namesBefore !== (project.settings.localizeNames === true) && (await s.store.listChunks(cmd.projectId)).some((c) => c.state === 'done' || c.state === 'flagged')) {
+          const message = 'localizeNames changed: chunks translated before keep the names they have, retry them to follow the new setting'
+          await s.store.log(cmd.projectId, `warn: ${message}`)
+          this.opts.emit({ type: 'log', projectId: cmd.projectId, level: 'warn', message })
+        }
         return s.detail(cmd.projectId)
       }
       case 'prepareChunks':

@@ -1,10 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, shell } from 'electron'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { isRequest } from '../shared/protocol'
 import type { BookFile, Command, EngineEvent, EngineInfo, FolderListing } from '../shared/protocol'
 import { startEngine } from './engineClient'
 import type { EngineClient } from './engineClient'
+import { isBookFolder, listDocuments as listFolderDocuments } from './folders'
 
 const EVENT_CHANNEL = 'engine:event'
 
@@ -86,16 +87,9 @@ async function engineInfo(): Promise<EngineInfo> {
   return info
 }
 
-/** The documents the engine can read in a folder: top level only, in natural name order (chapter2 before chapter10). */
+/** The documents the engine can read in a folder (a visual-novel book folder counts as one): see `listDocuments` in ./folders. */
 async function listDocuments(dir: unknown): Promise<FolderListing> {
-  if (typeof dir !== 'string' || !dir) throw new Error('no folder')
-  const folder = path.resolve(dir)
-  if (!(await stat(folder)).isDirectory()) throw new Error('Not a folder')
-  const exts = new Set((await engineInfo()).extensions.map((e) => e.toLowerCase()))
-  const entries = await readdir(folder, { withFileTypes: true })
-  const names = entries.filter((e) => e.isFile() && exts.has(path.extname(e.name).toLowerCase())).map((e) => e.name)
-  names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
-  return { folder, files: names.map((n) => path.join(folder, n)) }
+  return listFolderDocuments(dir, (await engineInfo()).extensions)
 }
 
 /** The engine did not start (the data folder is in use, a bad data folder ...): say why and quit. */
@@ -162,6 +156,18 @@ if (!app.requestSingleInstanceLock()) {
       return res.canceled || !res.filePaths[0] ? null : listDocuments(res.filePaths[0])
     })
     ipcMain.handle('host:listFolder', (_e, dir: unknown) => listDocuments(dir))
+    ipcMain.handle('host:pickBookFolder', async () => {
+      let picked: string | null
+      if (process.env.BOOK_TRANSLATOR_PICK_BOOK_FOLDER) picked = process.env.BOOK_TRANSLATOR_PICK_BOOK_FOLDER
+      else {
+        const options = { title: 'Choose a visual-novel book folder (book.md and chapters/)', properties: ['openDirectory' as const] }
+        const res = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+        picked = res.canceled ? null : (res.filePaths[0] ?? null)
+      }
+      if (!picked) return null
+      if (!(await isBookFolder(picked))) throw new Error('Not a visual-novel book folder: it needs book.md and a chapters folder')
+      return path.resolve(picked)
+    })
     ipcMain.handle('host:pickBook', async () => {
       let picked: string | null
       if (process.env.BOOK_TRANSLATOR_PICK_FILE) picked = process.env.BOOK_TRANSLATOR_PICK_FILE

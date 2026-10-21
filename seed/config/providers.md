@@ -137,10 +137,10 @@ providers:
     enabled: true
     local: true
     concurrency: 8
-    context: 200000
     models:
       - id: claude-code
         family: claude
+        context: 200000
         vision: true
   - id: mock
     kind: mock
@@ -153,7 +153,7 @@ providers:
 ---
 # Providers
 
-One entry per provider. The app reads this file when it starts and when you refresh the model list in the settings. API keys are never written here: `api_key_env` names an environment variable, and the app also looks in the Windows credential store under that name (`npm run key:set <NAME>`, or the settings screen).
+One entry per provider. The app reads this file when it starts, when you refresh the model list in the settings, and again within a few seconds when it changes on disk (no restart). A file with a mistake keeps the previous providers until it is fixed. API keys are never written here: `api_key_env` names an environment variable, and the app also looks in the Windows credential store under that name (`npm run key:set <NAME>`, or the settings screen).
 
 Prices are examples. Verify them on each provider's pricing page. The DeepSeek numbers were updated 2026-10-11 from the DeepSeek docs: `deepseek-flash` is DeepSeek-V4.1-Flash (the old name `deepseek-v4-flash` still works, but is served by V4.1 at the Flash price) and `deepseek-v4-pro` is DeepSeek-V4-Pro-0813. DeepSeek charges a peak and an off-peak price; the config holds the peak price, so estimates never count too little (off-peak is half of it). `deepseek-flash` sends `thinking: { type: disabled }`: with thinking on, it bills the hidden thinking as output and can spend the whole answer budget on it. DeepSeek has `json_schema: false` because it answers `response_format` with HTTP 400; the prompt and the repair step handle the JSON instead. The OpenAI, OpenRouter, Anthropic and Gemini entries are marked "to verify": model ids and prices there may be out of date. Cost estimates in the app come from these numbers.
 
@@ -166,6 +166,7 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
 - `concurrency`: how many requests may run at once. This is also how many chapters are translated in parallel, unless a project sets its own "How many at once". `auto`: as many as the server says it serves at once, asked at start and every 10 seconds, 1 while the server is down. A server that doesn't answer is skipped: its work goes straight to the next model in the list (no failed retries first) until it answers again. The first request that can't connect marks it down at once, and the Settings screen shows it as down with a **Check now** button for right after you start it. Strata reports it as `concurrency.serving` of `<base_url>/status`, so it follows the script you started: 4 with a parallel script, 1 with a solo one. For LM Studio it is the sum of `parallel` over the loaded chat models (from LM Studio's `/api/v1/models`). Requests in parallel share the GPU, so each one is slower, but the total is higher. A plain number keeps the old behavior (the default for existing files).
 - `json_schema`: `false` stops the app from sending the JSON schema as `response_format`. Use it for servers that fail a bad JSON answer (HTTP 502) instead of constraining it. The app would retry that error and then fall back to the next model. With `false`, the prompt asks for JSON and the app's parse-and-repair step handles the answer. Default `true`.
+- `context`: the context window of the provider's models that have none of their own.
 - `rpm`: optional requests-per-minute limit.
 - `rpd`: optional requests per day, counted from midnight UTC (when OpenRouter's daily limit starts again). The count is kept in memory only. A provider that reached it, or that answers that its daily limit is used up, is skipped until then: its work goes to the next model in the list.
 - The **Models** dialog in Settings sets requests at once, per minute and per day for each provider. It saves them in `limits` of `config/models.md`, which win over the values here (0 means no limit).
@@ -179,9 +180,9 @@ One key (`OPENROUTER_API_KEY`, stored in the Settings screen) gives many models.
 
 ## The client provider
 
-`kind: client` sends no request to a server. The app puts each model call (glossary, translation, proofreading, QA review, QA fix) in a queue and waits, with no time limit, until an MCP client such as Claude Code takes it with `get_client_task` and answers with `submit_client_task`. The model is `client/claude-code`. It costs nothing, needs no key and counts as local. It is switched off in a new data folder.
+`kind: client` sends no request to a server. The app puts each model call (glossary, translation, proofreading, QA review, QA fix) in a queue and waits, with no time limit, until an MCP client such as Claude Code takes it with `get_client_task` and answers with `submit_client_task`. The model is `client/claude-code`. It costs nothing, needs no key and counts as local. It is enabled in a new data folder.
 
-A data folder that already exists is not changed when the app is updated, so add the entry to `config/providers.md` by hand: copy the `client` entry (the lines from `- id: client` to `vision: true`) from the seed file or from the README, put it before `mock`, set `enabled: true` and restart the app.
+A data folder that already exists gets the entry at the next start: the app adds a provider the seed gained later to this file once (before `mock`), without changing the entries, comments and order you have. A provider you delete is not added back (`config/seed-state.json` lists the ones the seed has offered). If you delete `client` and want it again, copy it from the seed file.
 
 ## Fields of a model
 
@@ -194,7 +195,7 @@ A data folder that already exists is not changed when the app is updated, so add
 
 ## Context size and local models
 
-The app splits the book into chunks that fit the model's context window. For LM Studio it reads the window the model is loaded with. Otherwise it uses `context` from this file, and 8192 if that is missing. LM Studio loads models with a small window (often 4096 or 8192) unless you change it. Load the model you translate with 16384 tokens or more, for example `lms load <model> -c 16384 --parallel 1`, or set it in LM Studio's model settings. A larger window does not make chunks bigger than the chunk size you choose in the app (default 1500 tokens), because long chunks make models skip text.
+The app splits the book into chunks that fit the model's context window. For LM Studio it reads the window the model is loaded with. Otherwise it uses `context` from this file (the model's, else the provider's), 200000 for a `client` provider, and 8192 if that is missing. LM Studio loads models with a small window (often 4096 or 8192) unless you change it. Load the model you translate with 16384 tokens or more, for example `lms load <model> -c 16384 --parallel 1`, or set it in LM Studio's model settings. A larger window does not make chunks bigger than the chunk size you choose in the app (default 1500 tokens), because long chunks make models skip text.
 
 ## Strata
 

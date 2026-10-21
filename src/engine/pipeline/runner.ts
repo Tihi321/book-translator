@@ -12,6 +12,7 @@ import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } fro
 import type { EngineEvent } from '../../shared/protocol'
 import type { AgentEnv, CallFn } from './env'
 import { buildGlossary, serializeBrief } from './glossary'
+import { characterLabels, ensureNameEntries, isPlaceholderName, localizesNames } from './names'
 import { proofreadChunk } from './proofreader'
 import { fixChunk, reviewChunk } from './qa'
 import { prevTail, translateChunk } from './translator'
@@ -121,6 +122,7 @@ export class ProjectRunner {
         const stop = await this.glossaryStage(ir)
         if (stop) return this.result('glossary-review')
       }
+      await this.ensureNames(ir)
       await this.setProjectStatus('translating')
       await this.prepareChunks(ir, opts)
       await this.schedule(opts)
@@ -154,8 +156,12 @@ export class ProjectRunner {
     const env = await this.makeEnv(null)
     const model = router.resolve(project.settings.agentModels.glossary ?? [])[0]
     try {
-      const res = await buildGlossary(env, ir, { contexts: model ? [registry.contextLength(model.ref)] : [], existing: env.glossary })
+      const localize = localizesNames(project)
+      // a name entry that only keeps the name (from before the setting was turned on) is left for the builder to localize
+      const existing = localize ? env.glossary.filter((e) => !isPlaceholderName(e)) : env.glossary
+      const res = await buildGlossary(env, ir, { contexts: model ? [registry.contextLength(model.ref)] : [], existing, localizeNames: localize ? characterLabels(ir) : undefined })
       await store.writeGlossary(project.id, res.entries)
+      await this.ensureNames(ir)
       const hasBrief = res.brief.characters.length > 0 || [res.brief.genre, res.brief.tone, res.brief.register, res.brief.pov, res.brief.address].some(Boolean)
       if (hasBrief) await store.writeBrief(project.id, serializeBrief(res.brief))
       project.glossaryDone = true
@@ -173,6 +179,13 @@ export class ProjectRunner {
       return true
     }
     return false
+  }
+
+  /** With `localizeNames`: every character name gets a glossary entry (the builder's form, or the name itself to edit). */
+  private async ensureNames(ir: DocumentIR): Promise<void> {
+    if (!localizesNames(this.project)) return
+    const added = await ensureNameEntries(this.deps.store, this.projectId, ir)
+    if (added > 0) this.log('info', `${added} character name(s) have no localized form in the glossary yet: they keep the source name until you change Target in glossary.md`)
   }
 
   // ---- chunks ----
@@ -300,7 +313,7 @@ export class ProjectRunner {
       dataDir,
       sourceLanguage: s.sourceLanguage ?? 'the original language',
       targetLanguage: s.targetLanguage,
-      brief: briefWithNote(brief, this.project.format),
+      brief: briefWithNote(brief, this.project.format, { localizeNames: localizesNames(this.project) }),
       glossary,
       call: this.makeCall(chunk),
       log: (level, message) => this.log(level, message),

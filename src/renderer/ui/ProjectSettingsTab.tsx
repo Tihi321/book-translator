@@ -62,6 +62,15 @@ export function ProjectSettingsTab({ detail }: { detail: ProjectDetail }) {
           <input type="checkbox" checked={s.pauseAfterGlossary} disabled={locked || !s.enabled.glossary} onChange={(e) => set({ pauseAfterGlossary: e.target.checked })} />
           Pause after the glossary, so I can review it
         </label>
+        {detail.project.format === 'vn' && (
+          <>
+            <span />
+            <label className="row small" title="The glossary gives each character a name for the target language; the export writes it into the speaker tags, the ON SCREEN: lines and the bible. Chunks that are already translated keep the names they have.">
+              <input type="checkbox" checked={s.localizeNames === true} disabled={locked} onChange={(e) => set({ localizeNames: e.target.checked })} data-testid="settings-localize-names" />
+              Localize the character names
+            </label>
+          </>
+        )}
         <ParallelFields value={s.parallel} onChange={(v) => set({ parallel: v })} disabled={locked} testId="settings-parallel" />
         <label>Chunk size (tokens)</label>
         <input type="number" min={200} max={20000} step={100} style={{ width: 100 }} disabled={locked} value={s.maxChunkTokens} onChange={(e) => set({ maxChunkTokens: Number(e.target.value) })} data-testid="settings-chunk" />

@@ -98,6 +98,9 @@ export function computeCost(m: Pick<ModelInfo, 'priceIn' | 'priceOut' | 'priceCa
 
 export const DEFAULT_CONTEXT = 8192
 
+/** The context of Claude Code, the usual client: a `client` model with no `context` of its own or its provider's plans with this. */
+export const CLIENT_DEFAULT_CONTEXT = 200_000
+
 /** Group aliases (`paid`, `strata`, `lmstudio`) -> `provider/model`, the group order, and how LM Studio models are loaded. From config/defaults.json. */
 export interface ModelDefaults {
   aliases: Record<string, string>
@@ -125,6 +128,8 @@ export class ModelRegistry {
   private serverSlots = new Map<string, number>()
   /** Which of them did not answer the last check, kept across config reloads. */
   private serverDown = new Map<string, boolean>()
+  /** `configSignature()` of the files the last successful `load` read, for `configChanged`. */
+  private configStamp = ''
   /** Until defaults.json is read: the defaults it has when it says nothing. */
   private defaults: ModelDefaults = modelDefaultsOf(defaultsSchema.parse({}))
 
@@ -142,13 +147,41 @@ export class ModelRegistry {
     for (const p of this.providers.values()) if (p.client instanceof ClientProvider) p.client.queue = queue
   }
 
+  /** Size and modification time of the files a load reads (providers.md, models.md, defaults.json), as one string. */
+  async configSignature(): Promise<string> {
+    const parts: string[] = []
+    for (const name of ['providers.md', 'models.md', 'defaults.json']) {
+      try {
+        const st = await fs.stat(path.join(this.dataDir, 'config', name))
+        parts.push(`${st.mtimeMs}:${st.size}`)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+        parts.push('missing')
+      }
+    }
+    return parts.join('|')
+  }
+
+  /** True when a config file changed on disk since the last successful `load` (or since `markConfigSeen`). */
+  async configChanged(): Promise<boolean> {
+    return (await this.configSignature()) !== this.configStamp
+  }
+
+  /** Treats the files with this signature as seen, so a file that can't be read is not tried again until it changes. */
+  markConfigSeen(signature: string): void {
+    this.configStamp = signature
+  }
+
   /** (Re)reads config/providers.md and config/models.md. Keeps the previous state if a file is invalid. */
   async load(): Promise<void> {
+    // taken before the files are read: an edit during the read shows as a change at the next check
+    const signature = await this.configSignature()
     const provFile = path.join(this.dataDir, 'config', 'providers.md')
     const prov = parseMdWith(await fs.readFile(provFile, 'utf8'), providersSchema, provFile)
     const choices = await this.readModelChoices()
     const keys = this.opts.keys ?? resolveKey
     const discoveredBefore = [...this.models.values()].filter((m) => m.discovered)
+    const loadedBefore = new Map([...this.models.values()].filter((m) => m.loadedContext !== undefined).map((m) => [m.ref, m.loadedContext!]))
 
     const providers = new Map<string, ProviderInfo>()
     const models = new Map<string, ModelInfo>()
@@ -178,13 +211,14 @@ export class ModelRegistry {
       providers.set(p.id, info)
       for (const m of p.models) {
         const ref = `${p.id}/${m.id}`
+        const ctx = m.context ?? p.context ?? (p.kind === 'client' ? CLIENT_DEFAULT_CONTEXT : undefined)
         models.set(ref, {
           ref,
           provider: info,
           id: m.id,
           family: m.family,
           // a model the engine loads itself gets the context window it loads it with
-          context: p.load_models ? Math.min(m.context ?? Infinity, m.load_context ?? this.defaults.lmLoad.context) : m.context,
+          context: p.load_models ? Math.min(ctx ?? Infinity, m.load_context ?? this.defaults.lmLoad.context) : ctx,
           loadContext: m.load_context,
           loadParallel: m.load_parallel,
           maxOutput: m.max_output,
@@ -226,6 +260,11 @@ export class ModelRegistry {
       const prov = this.providers.get(d.provider.id)
       if (prov && !this.models.has(d.ref) && !skipsDiscovered(prov, d.id)) this.models.set(d.ref, { ...d, provider: prov })
     }
+    for (const [ref, loaded] of loadedBefore) {
+      const m = this.models.get(ref)
+      if (m) m.loadedContext = loaded // what LM Studio reported stays true after a reload
+    }
+    this.configStamp = signature
   }
 
   modelsFile(): string {
@@ -418,7 +457,7 @@ export class ModelRegistry {
     return this.models.get(ref)
   }
 
-  /** The context window to plan with: LM Studio's loaded context, else `context` in providers.md, else 8192. */
+  /** The context window to plan with: LM Studio's loaded context, else `context` of the model or its provider in providers.md (200000 for a `client` provider), else 8192. */
   contextLength(ref: string): number {
     const m = this.models.get(ref)
     return m?.loadedContext ?? m?.context ?? DEFAULT_CONTEXT

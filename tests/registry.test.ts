@@ -22,6 +22,7 @@ describe('ModelRegistry with the seed providers.md', () => {
     expect(s.registry.providers.get('ollama')!.available).toBe(false)
     expect(s.registry.providers.get('custom')!.available).toBe(false)
     expect(s.registry.providers.get('mock')!.available).toBe(true)
+    expect(s.registry.providers.get('client')).toMatchObject({ available: true, local: true })
     expect(s.registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
     expect(s.registry.contextLength('strata/qwen3.8-flash-next')).toBe(131072)
     expect(s.registry.getModel('strata/qwen3.8-flash-next')?.extraBody).toEqual({ reasoning_effort: 'none' })
@@ -51,10 +52,58 @@ describe('ModelRegistry with the seed providers.md', () => {
     cleanups.push(s.cleanup)
     const r = s.registry
     expect(r.contextLength('deepseek/deepseek-flash')).toBe(1_000_000)
+    expect(r.contextLength('client/claude-code')).toBe(200000)
     expect(r.contextLength('mock/mock-translator')).toBe(8192)
     expect(r.contextLength('unknown/model')).toBe(8192)
     r.getModel('deepseek/deepseek-flash')!.loadedContext = 32768
     expect(r.contextLength('deepseek/deepseek-flash')).toBe(32768)
+  })
+
+  it('a model takes its context from the model, then the provider, then 200000 for a client', async () => {
+    const { dir, cleanup } = await tempDir()
+    cleanups.push(cleanup)
+    await initDataFolder(dir, SEED_DIR)
+    const text = `---
+kind: providers
+providers:
+  - id: client
+    kind: client
+    models:
+      - id: m
+        context: 50000
+  - id: client2
+    kind: client
+    context: 120000
+    models:
+      - id: m
+  - id: client3
+    kind: client
+    models:
+      - id: m
+  - id: compat
+    kind: openai-compat
+    local: true
+    base_url: http://localhost:1/v1
+    context: 64000
+    models:
+      - id: m
+      - id: own
+        context: 4096
+  - id: mock
+    kind: mock
+    models:
+      - id: mock-translator
+---
+`
+    await fs.writeFile(path.join(dir, 'config', 'providers.md'), text)
+    const registry = new ModelRegistry(dir, { keys: () => 'test-key' })
+    await registry.load()
+    expect(registry.contextLength('client/m')).toBe(50000)
+    expect(registry.contextLength('client2/m')).toBe(120000)
+    expect(registry.contextLength('client3/m')).toBe(200000)
+    expect(registry.contextLength('compat/m')).toBe(64000)
+    expect(registry.contextLength('compat/own')).toBe(4096)
+    expect(registry.contextLength('mock/mock-translator')).toBe(8192)
   })
 
   it('discovery of an unreachable server does not throw', async () => {
@@ -211,6 +260,51 @@ describe('config/models.md', () => {
     await fs.writeFile(path.join(s.dir, 'config', 'models.md'), '---\nkind: models\nhidden: 5\n---\n', 'utf8')
     await expect(s.registry.load()).rejects.toThrow()
     expect(s.registry.isShown('deepseek/deepseek-v4-pro')).toBe(false)
+  })
+})
+
+describe('config reload', () => {
+  it('sees an edit of providers.md, and not before it', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    expect(await s.registry.configChanged()).toBe(false)
+    const file = path.join(s.dir, 'config', 'providers.md')
+    const text = await fs.readFile(file, 'utf8')
+    const edited = text.replace(/(id: client[\s\S]*?claude-code[\s\S]*?context: )200000/, (_m, head: string) => `${head}100000`)
+    expect(edited).not.toBe(text)
+    await fs.writeFile(file, edited)
+    const later = new Date(Date.now() + 5000)
+    await fs.utimes(file, later, later)
+    expect(await s.registry.configChanged()).toBe(true)
+    expect(s.registry.contextLength('client/claude-code')).toBe(200000)
+    await s.registry.load()
+    expect(await s.registry.configChanged()).toBe(false)
+    expect(s.registry.contextLength('client/claude-code')).toBe(100000)
+  })
+
+  it('keeps a broken file from being tried again once it is marked seen, and sees the fix', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    const file = path.join(s.dir, 'config', 'providers.md')
+    const good = await fs.readFile(file, 'utf8')
+    await fs.writeFile(file, '---\nkind: providers\nproviders: [unclosed\n---\n')
+    expect(await s.registry.configChanged()).toBe(true)
+    const sig = await s.registry.configSignature()
+    await expect(s.registry.load()).rejects.toThrow()
+    expect(await s.registry.configChanged()).toBe(true)
+    s.registry.markConfigSeen(sig)
+    expect(await s.registry.configChanged()).toBe(false)
+    expect(s.registry.getModel('mock/mock-translator')).toBeDefined()
+    await fs.writeFile(file, good)
+    expect(await s.registry.configChanged()).toBe(true)
+  })
+
+  it('keeps the context LM Studio reported across a reload', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    s.registry.getModel('deepseek/deepseek-flash')!.loadedContext = 32768
+    await s.registry.load()
+    expect(s.registry.contextLength('deepseek/deepseek-flash')).toBe(32768)
   })
 })
 

@@ -13,6 +13,7 @@ const api: BookTranslatorApi = {
   pickFile: () => ipcRenderer.invoke('host:pickFile'),
   pickFolder: () => ipcRenderer.invoke('host:pickFolder'),
   listFolder: (dir) => ipcRenderer.invoke('host:listFolder', dir),
+  pickBookFolder: () => ipcRenderer.invoke('host:pickBookFolder'),
   // File.path is gone since Electron 32: the preload asks webUtils for a dropped file's path
   pathForFile: (file) => webUtils.getPathForFile(file),
   pickBook: () => ipcRenderer.invoke('host:pickBook'),

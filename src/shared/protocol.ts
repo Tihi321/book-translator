@@ -187,9 +187,9 @@ export type ClientTaskResult =
       meta: { job: string; call: number; role: string; task: string; project: string; unit: string }
       /** All system messages, joined. */
       system: string
-      /** The user and assistant messages in order. */
+      /** The user and assistant messages in order, joined. */
       user: string
-      /** Only when the request has more than one message. */
+      /** Only for a multi-turn request (an assistant turn, such as a JSON repair round, or more than one user message): the conversation in order; answer its last user message. */
       messages?: { role: string; content: string }[]
       schema?: Record<string, unknown>
       maxTokens?: number
@@ -387,10 +387,12 @@ export interface BookFile {
   bytes: Uint8Array
 }
 
-/** The documents of a folder that the app can translate (top level only, natural name order, absolute paths). */
+/** The documents of a folder that the app can translate (top level only, natural name order, absolute paths). A visual-novel book folder is one document. */
 export interface FolderListing {
   folder: string
   files: string[]
+  /** The folder is itself a visual-novel book folder (book.md and chapters/): `files` is the folder. */
+  book?: boolean
 }
 
 /** What the preload script exposes to the renderer as `window.bt`. */
@@ -405,6 +407,8 @@ export interface BookTranslatorApi {
   pickFolder(): Promise<FolderListing | null>
   /** The documents in a folder (for a dropped folder). Rejects when it is not a folder. */
   listFolder(dir: string): Promise<FolderListing>
+  /** The folder dialog for a visual-novel book folder (book.md and chapters/): its path. Null when cancelled. Rejects when the folder is not a book folder. */
+  pickBookFolder(): Promise<string | null>
   /** The path of a dropped file or folder, '' when it has none. */
   pathForFile(file: File): string
   /** The file dialog for the reader (epub, pdf, txt, md). Null when cancelled. The chosen path may then be read with `readBook`. */

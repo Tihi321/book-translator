@@ -171,11 +171,12 @@ export interface GlossaryBuildResult {
  * The glossary pre-pass: goes over the whole source in large chunks, asks for terms and (in the first pass) the book brief,
  * merges the terms across passes. Entries already in `existing` (for example edited by the user) win. A pass that fails is skipped
  * (the terms found so far are kept); only when every pass fails does the error reach the caller.
+ * `localizeNames`: the character names of a visual novel, which the builder is asked to give a form for the target language (a `person` term each).
  */
 export async function buildGlossary(
   env: AgentEnv,
   ir: DocumentIR,
-  opts: { contexts: number[]; existing?: GlossaryEntry[]; unit?: string }
+  opts: { contexts: number[]; existing?: GlossaryEntry[]; unit?: string; localizeNames?: string[] }
 ): Promise<GlossaryBuildResult> {
   const budget = chunkBudget({ contexts: opts.contexts, userMax: 6000, promptOverhead: 900, glossarySlice: 1500, prevContext: 0, expansion: 0.4 })
   // sections do not matter here: the passes read the book as one text
@@ -183,6 +184,9 @@ export async function buildGlossary(
   const passes = planChunks(flat, budget)
   let entries: GlossaryEntry[] = [...(opts.existing ?? [])]
   let brief: Brief = { characters: [] }
+  const nameInstruction = opts.localizeNames?.length
+    ? ` The character names of this visual novel are localized for ${env.targetLanguage} readers: add a term of type person for each of these names with the form ${env.targetLanguage} readers should see, the same form everywhere (it also becomes the speaker tag, so no colon or bracket in it); keep a name only when it already suits ${env.targetLanguage}: ${opts.localizeNames.slice(0, 80).join(', ')}.`
+    : ''
   let first = true
   let failed = 0
   let lastError: unknown
@@ -198,9 +202,10 @@ export async function buildGlossary(
         sourceLanguage: env.sourceLanguage,
         targetLanguage: env.targetLanguage,
         knownTerms: formatEntries(entries.slice(-150)) || '(none yet)',
-        briefInstruction: first
-          ? 'Also fill "brief": the genre, tone, register, narrator and point of view, formal or informal address, and the main characters with their gender.'
-          : 'Leave "brief" out, except for characters that are new in this text.'
+        briefInstruction:
+          (first
+            ? 'Also fill "brief": the genre, tone, register, narrator and point of view, formal or informal address, and the main characters with their gender.'
+            : 'Leave "brief" out, except for characters that are new in this text.') + nameInstruction
       },
       text
     )
