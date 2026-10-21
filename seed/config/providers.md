@@ -130,13 +130,14 @@ providers:
     discover: true
     models: []
   # Answered by an MCP client (Claude Code): a request waits in a queue until the client takes it (get_client_task) and answers it (submit_client_task).
-  # Nothing is spent and no key is needed. Enable it, then give agents the model `client/claude-code` (update_project_settings, agentModels).
+  # Nothing is spent and no key is needed. It is enabled because it costs nothing and does nothing until an MCP client answers. Give a project `clientOnly: true` (create_project / update_project_settings) to put all agents on `client/claude-code` and refuse every other model.
   # An agent left on it with no client connected waits for ever: switch the project back when the client is done.
   - id: client
     kind: client
-    enabled: false
+    enabled: true
     local: true
     concurrency: 8
+    context: 200000
     models:
       - id: claude-code
         family: claude

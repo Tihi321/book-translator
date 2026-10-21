@@ -24,7 +24,7 @@ Three ways to work:
 
 2. Translator: you translate, the app's models are not used and nothing is spent. create_project with enabledAgents all false, then prepare_chunks. Optionally write a glossary (update_glossary) and a brief (set_brief) first. Then repeat get_translation_task and submit_translation until get_translation_task says nothing is left. A submission whose segment ids or inline tags (<1>, </1>, <2/>) do not match is rejected with the reason: fix it and submit again. Finish with export_project. The prompt translate_book_yourself has the full loop. This path does the first pass only: no glossary builder, proofreader or QA.
 
-3. Full pipeline, you answer the app's model calls: give agents the model client/claude-code with update_project_settings (agentModels for translator, glossary, proofreader, qa), start_translation, then repeat wait_for_progress (it returns at once when a request waits: clientTasks.waiting) and get_client_task, answer as its output says, and submit_client_task. A JSON answer (glossary, QA) is checked against its schema when submitted. Nothing is spent. The client provider is in config/providers.md, disabled in the seed; a data folder that already exists needs it added by hand (see the README). Put the agents back on real models afterwards, or the project waits for a client for ever. The prompt translate_with_full_pipeline has the loop.
+3. Full pipeline, you answer the app's model calls: create_project (or update_project_settings) with clientOnly true: all four agents (glossary, translator, proofreader, qa) go on client/claude-code and the project refuses every other model, so a paid or local model can never be called by mistake; start_translation, then repeat wait_for_progress (it returns at once when a request waits: clientTasks.waiting) and get_client_task, answer as its output says, and submit_client_task. A JSON answer (glossary, QA) is checked against its schema when submitted. Nothing is spent. The client provider is in config/providers.md, enabled in the seed; a data folder that already exists needs it added by hand (see the README). Put the project back on real models afterwards (clientOnly false and agentModels), or it waits for a client for ever. The prompt translate_with_full_pipeline has the loop.
 
 Visual-novel book folder: give the folder (book.md, outline.md, chapters/, bible/bible.md, cover-brief.md) as sourcePath. Every script line is one segment and the export is a folder of the same layout with the same lines: SCENE:, ON SCREEN: and speaker tags stay, a spoken line comes as <1>NAME (expression):</1> text (keep the tag, translate the text), the bible and cover brief are copied. VN Studio can add the exported folder as an edition (vno_add_edition).
 
@@ -39,6 +39,11 @@ const agentModels = z.partialRecord(agentNames, z.array(z.string())).describe('P
 const enabledAgents = z
   .object({ glossary: z.boolean().optional(), proofreader: z.boolean().optional(), qa: z.boolean().optional() })
   .describe('Which optional agents run. The translator always runs')
+  .optional()
+
+const clientOnly = z
+  .boolean()
+  .describe('true: only client/claude-code (you, the MCP client) answers every model call of the project, nothing is spent. Sets all four agents to client/claude-code (any agentModels given with it is ignored) and refuses every other model, retry_chunk model included. false: turns it off, the agents stay on client/claude-code until you set agentModels.')
   .optional()
 
 /** What a model list needs: not every field of the picker's entries. */
@@ -93,13 +98,14 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'create_project',
-    'Creates a project for a book and a target language (or returns the one that exists for that file and language, with its settings updated). Defaults come from get_defaults. To translate it yourself, set enabledAgents to all false.',
+    'Creates a project for a book and a target language (or returns the one that exists for that file and language, with its settings updated). Defaults come from get_defaults. To translate it yourself, set enabledAgents to all false. For a Claude-only translation of the full pipeline set clientOnly true.',
     {
       sourcePath: z.string().describe('Absolute path of the book, or of a Scriptorium visual-novel book folder (exported as a folder)'),
       targetLanguage: z.string().describe('Name or code, for example Croatian or hr'),
       sourceLanguage: z.string().optional(),
       agentModels,
       enabledAgents,
+      clientOnly,
       maxChunkTokens: z.number().int().min(100).optional().describe('Upper limit of a chunk in source tokens'),
       projectId: z.string().optional().describe('A project id of your own (default: made from the file name, language and hash)')
     },
@@ -110,7 +116,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         targetLanguage: a.targetLanguage,
         sourceLanguage: a.sourceLanguage,
         id: a.projectId,
-        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens })
+        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly })
       })
   )
   tool(
@@ -130,6 +136,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       projectId,
       agentModels,
       enabledAgents,
+      clientOnly,
       maxChunkTokens: z.number().int().min(100).optional(),
       targetLanguage: z.string().optional(),
       sourceLanguage: z.string().optional(),
@@ -143,6 +150,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         patch: defined({
           agentModels: a.agentModels as never,
           enabled: a.enabledAgents as never,
+          clientOnly: a.clientOnly,
           maxChunkTokens: a.maxChunkTokens,
           targetLanguage: a.targetLanguage,
           sourceLanguage: a.sourceLanguage,
@@ -315,11 +323,11 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
             text: `Translate the book "${a.file}" into ${a.targetLanguage} with Book Translator's full pipeline, answering its model calls yourself.
 
 1. list_models: client/claude-code must be there and available. If it is not, tell me: the client provider has to be added to config/providers.md of the data folder (see the README).
-2. create_project with sourcePath "${a.file}", targetLanguage "${a.targetLanguage}" and agentModels { glossary: ["client/claude-code"], translator: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }. Keep the project id.
+2. create_project with sourcePath "${a.file}", targetLanguage "${a.targetLanguage}" and clientOnly true (all four agents go on client/claude-code and no other model can be used, so nothing is spent). Keep the project id.
 3. start_translation with that project id.
 4. Loop: wait_for_progress. While clientTasks.waiting is above 0, call get_client_task (project: the id), do what it says (meta.role and meta.task tell the job) and reply as its output says: JSON that matches the schema for glossary and QA, <seg id> segments with the same ids and inline tags (<1>, </1>, <2/>) for translation, proofreading and fixes. submit_client_task with taskId and text. If it comes back with accepted false, fix the problems and submit again. If it says the task is gone, take the next one.
 5. Stop when wait_for_progress says status done (if it says paused, start_translation again). Then export_project and tell me the file path.
-6. Last, update_project_settings to put the agents back on real models, so the project does not wait for a client again.`
+6. Last, update_project_settings with clientOnly false and agentModels for real models, so the project does not wait for a client again.`
           }
         }
       ]

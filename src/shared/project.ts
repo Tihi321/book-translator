@@ -43,9 +43,16 @@ export interface ProjectSettings {
   maxChunkTokens: number
   /** Stop after the glossary is built, so it can be reviewed. */
   pauseAfterGlossary: boolean
+  /** Only the `client` provider (an MCP client such as Claude Code) answers model calls: all four agents sit on `client/claude-code` and any other model ref is refused. Nothing is spent. */
+  clientOnly?: boolean
   /** Parallel translation. `maxAtOnce: auto` follows the translator provider's concurrency; `splitSections` also runs the chunks of one section at the same time. */
   parallel: ParallelSettings
 }
+
+/** The one model a client-only project uses for every agent. */
+export const CLIENT_ONLY_MODEL = 'client/claude-code'
+
+export const isClientRef = (ref: string): boolean => ref.startsWith('client/')
 
 export interface ParallelSettings {
   enabled: boolean
