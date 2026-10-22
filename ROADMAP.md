@@ -5,12 +5,8 @@ What Book Translator still lacks on its own. Work that needs the other tools or 
 ## Where it stands (2026-10-22, master 1895741)
 
 - **Merged:** BTT-08 to BTT-11. BTT-11 closed every Book Translator item of the hub roadmap. 283 tests pass.
-- **Verified live:** a VN book folder aligned in VN Studio 381/381 (mock model); a whole book translated into Croatian with Claude doing every model task (*The Clockless God*).
+- **Verified live:** the Electron UI of BTT-11 (book folder picker, folder and book-folder drop, `localize-names` checkboxes, a mock run, `yarn build` and `yarn dist`, BTT-13); a VN book folder aligned in VN Studio 381/381 (mock model); a whole book translated into Croatian with Claude doing every model task (*The Clockless God*).
 - **Hub tasks that use this repo:** HUB-02 (BTT-11 live check), HUB-05 (*The Hour That Happens Twice* in Croatian), HUB-09 (ACP proxy provider, on hold).
-
-## App
-
-- **The Electron UI of BTT-11 was only type-checked:** the "Open a book folder" picker, folder drop of a book folder, and the `localize-names` / `settings-localize-names` checkboxes. `yarn build` / `yarn dist` were not run.
 
 ## Engine
 
