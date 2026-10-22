@@ -87,7 +87,7 @@ export class EngineService {
   private readonly emit: (ev: EngineEvent) => void
   /** The one queue of `client` requests: the registry's `client` providers fill it, the MCP tools drain it. */
   readonly clientQueue: ClientTaskQueue
-  private runs = new Map<string, { controller: AbortController; promise: Promise<RunResult> }>()
+  private runs = new Map<string, { controller: AbortController; promise: Promise<RunResult>; runner: ProjectRunner }>()
 
   constructor(private readonly opts: ServiceOptions) {
     this.store = new ProjectStore(opts.dataDir)
@@ -280,7 +280,7 @@ export class EngineService {
       .finally(() => {
         this.runs.delete(id)
       })
-    this.runs.set(id, { controller, promise })
+    this.runs.set(id, { controller, promise, runner })
     // callers that do not await still must not trigger an unhandled rejection
     promise.catch(() => undefined)
     return promise
@@ -292,6 +292,11 @@ export class EngineService {
 
   isRunning(id: string): boolean {
     return this.runs.has(id)
+  }
+
+  /** The providers were reloaded: every running project follows it (worker count, chunk budget warning). */
+  configReloaded(): void {
+    for (const run of this.runs.values()) run.runner.configReloaded()
   }
 
   /** Stops after the requests in flight are cancelled; chunks that were in progress go back to pending. Resume with `start`. */

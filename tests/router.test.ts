@@ -1,4 +1,7 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { ModelRegistry } from '../src/engine/models/registry'
 import { ModelRouter } from '../src/engine/models/router'
 import { ProviderError } from '../src/engine/models/types'
 import type { ChatEvent, ChatRequest, ProviderClient } from '../src/engine/models/types'
@@ -259,5 +262,117 @@ describe('ModelRouter aliases and group order', () => {
     const r = await router.complete(['paid'], { messages: [{ role: 'user', content: 'x' }] })
     expect(r.model.ref).toBe('mock/mock-translator')
     expect(r.text).toBe('via alias')
+  })
+})
+
+describe('ModelRouter and a config reload during a call', () => {
+  /** Answers with its own name once its gate is opened (at once without one). */
+  class GateClient implements ProviderClient {
+    calls: { model: string; extraBody?: Record<string, unknown> | null }[] = []
+    constructor(
+      readonly id: string,
+      private readonly gate: Promise<void> = Promise.resolve()
+    ) {}
+    async *chat(req: ChatRequest): AsyncGenerator<ChatEvent, void, void> {
+      this.calls.push({ model: req.model, extraBody: req.extraBody })
+      await this.gate
+      yield { type: 'delta', text: this.id }
+      yield { type: 'usage', usage: { inputTokens: 1, cachedInputTokens: 0, outputTokens: 1 } }
+    }
+  }
+  const tick = () => new Promise<void>((r) => setImmediate(r))
+  const deferred = () => {
+    let open!: () => void
+    const promise = new Promise<void>((r) => (open = r))
+    return { promise, open }
+  }
+
+  /** Edits the mock provider in providers.md and loads it again, as the config reload does. */
+  async function edit(dir: string, registry: ModelRegistry, change: (text: string) => string): Promise<void> {
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await fs.readFile(file, 'utf8')
+    const edited = change(text)
+    expect(edited).not.toBe(text)
+    await fs.writeFile(file, edited)
+    await registry.load()
+  }
+  const concurrency = (n: number) => (t: string) => t.replace(/(\r?\n {2}- id: mock\r?\n {4}kind: mock\r?\n {4}concurrency: )\d+/, `$1${n}`)
+  const withoutTranslator = (t: string) => t.replace(/ {6}- id: mock-translator\r?\n {8}family: mock\r?\n/, '')
+  const msgs = [{ role: 'user' as const, content: 'x' }]
+
+  async function blockedSetup() {
+    const { dir, registry } = await setup()
+    await edit(dir, registry, concurrency(1))
+    const gate = deferred()
+    const first = new GateClient('A', gate.promise)
+    registry.providers.get('mock')!.client = first
+    const router = new ModelRouter(registry, { retries: 0, sleep: noSleep })
+    // the first request holds the only slot of the mock provider
+    const holder = router.complete(['mock/mock-reviewer'], { messages: msgs })
+    await tick()
+    expect(first.calls).toHaveLength(1)
+    return { dir, registry, router, gate, first, holder }
+  }
+
+  it('a request waiting for a slot is sent with the reloaded client once the concurrency went up', async () => {
+    const { dir, registry, router, gate, first, holder } = await blockedSetup()
+    const waiting = router.complete(['mock/mock-translator'], { messages: msgs })
+    await tick()
+    expect(first.calls).toHaveLength(1) // still waiting
+    await edit(dir, registry, concurrency(2))
+    const second = new GateClient('B')
+    registry.providers.get('mock')!.client = second
+    router.limiter.wakeEvery()
+    const r = await waiting
+    expect(r.text).toBe('B')
+    expect(second.calls).toEqual([{ model: 'mock-translator', extraBody: null }])
+    expect(first.calls).toHaveLength(1)
+    gate.open()
+    expect((await holder).text).toBe('A') // a request already sent finishes on the client it was sent with
+    expect(router.limiter.inFlight('mock')).toBe(0)
+  })
+
+  it('a model removed during the wait goes to the next model, and says so when it was the only one', async () => {
+    const { dir, registry, router, gate, holder } = await blockedSetup()
+    const both = router.complete(['mock/mock-translator', 'mock/mock-reviewer'], { messages: msgs })
+    const only = router.complete(['mock/mock-translator'], { messages: msgs })
+    await tick()
+    await edit(dir, registry, (t) => withoutTranslator(concurrency(3)(t)))
+    const second = new GateClient('B')
+    registry.providers.get('mock')!.client = second
+    router.limiter.wakeEvery()
+    const r = await both
+    expect(r.model.ref).toBe('mock/mock-reviewer')
+    expect(r.model).toBe(registry.getModel('mock/mock-reviewer'))
+    expect(second.calls.map((c) => c.model)).toEqual(['mock-reviewer'])
+    await expect(only).rejects.toThrow('mock/mock-translator: removed or turned off in the config during the call')
+    gate.open()
+    await holder
+    expect(router.limiter.inFlight('mock')).toBe(0)
+  })
+
+  it('a provider removed during the wait ends the wait with an error', async () => {
+    const { dir, registry, router, gate, holder } = await blockedSetup()
+    const waiting = router.complete(['mock/mock-translator'], { messages: msgs })
+    await tick()
+    await edit(dir, registry, (t) => t.replace(/ {2}- id: mock\r?\n {4}kind: mock\r?\n {4}concurrency: \d+\r?\n {4}models:\r?\n {6}- id: mock-translator\r?\n {8}family: mock\r?\n {6}- id: mock-reviewer\r?\n {8}family: mock-other\r?\n/, ''))
+    expect(registry.providers.has('mock')).toBe(false)
+    router.limiter.wakeEvery()
+    await expect(waiting).rejects.toThrow('provider mock was removed from the config while the request waited')
+    gate.open()
+    await holder
+  })
+
+  it('without a reload the call keeps the objects it resolved and the generation stays', async () => {
+    const { registry } = await setup()
+    const client = new GateClient('A')
+    registry.providers.get('mock')!.client = client
+    const router = new ModelRouter(registry, { retries: 0, sleep: noSleep })
+    const generation = registry.generation
+    const r = await router.complete(['mock/mock-translator'], { messages: msgs })
+    expect(r.model).toBe(registry.getModel('mock/mock-translator'))
+    expect(registry.generation).toBe(generation)
+    await registry.load()
+    expect(registry.generation).toBe(generation + 1)
   })
 })

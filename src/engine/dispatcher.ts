@@ -250,7 +250,10 @@ export class CommandDispatcher {
   /**
    * Reloads providers and models when providers.md, models.md or defaults.json changed on disk since the last load. Used by the
    * 3-second timer in `serve` and before the commands that plan a run. A file that can't be read keeps the previous providers and is
-   * logged once. A project that runs keeps its chunk plan, and a request already waiting for a slot keeps the old provider until it wakes.
+   * logged once. A running project follows the reload: a request waiting for a slot uses the new concurrency (and ends if its provider
+   * is gone), the next attempt of a call uses the new client, prices and `extra_body` (a model removed or turned off goes to the next
+   * model in the list), and the number of workers follows the new concurrency. A request already sent finishes as sent, and the
+   * project keeps its chunk plan (a smaller chunk budget is only warned about).
    * Returns true when it reloaded.
    */
   reloadConfigIfChanged(): Promise<boolean> {
@@ -277,8 +280,9 @@ export class CommandDispatcher {
       return false
     }
     this.log('info', 'config changed on disk, providers and models reloaded')
-    for (const p of this.registry.providers.values()) this.service.router.limiter.wakeAll(p)
+    this.service.router.limiter.wakeEvery()
     this.emitModels()
+    this.service.configReloaded()
     void this.discover().then(() => this.emitModels(), () => undefined)
     return true
   }

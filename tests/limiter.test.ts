@@ -103,3 +103,58 @@ describe('ProviderLimiter slots', () => {
     expect(got).toBe(true)
   })
 })
+
+describe('ProviderLimiter waiting requests follow a reload', () => {
+  const tick = () => new Promise<void>((r) => setImmediate(r))
+
+  it('a waiter woken after current() gives a higher concurrency takes the slot', async () => {
+    const limiter = new ProviderLimiter()
+    const old = provider({ concurrency: 1 })
+    let live: ProviderInfo | undefined = old
+    await limiter.acquire(old, undefined, () => live)
+    let got = false
+    const w = limiter.acquire(old, undefined, () => live).then(() => (got = true))
+    await tick()
+    expect(got).toBe(false)
+    live = provider({ concurrency: 2 }) // the reloaded provider is another object
+    limiter.wakeEvery()
+    await w
+    expect(limiter.inFlight('p')).toBe(2)
+    // a slot taken under the old object is released by id
+    limiter.release(old)
+    limiter.release(live)
+    expect(limiter.inFlight('p')).toBe(0)
+  })
+
+  it('a waiter woken with a lower concurrency keeps waiting', async () => {
+    const limiter = new ProviderLimiter()
+    const old = provider({ concurrency: 2 })
+    let live: ProviderInfo | undefined = old
+    await limiter.acquire(old, undefined, () => live)
+    await limiter.acquire(old, undefined, () => live)
+    let got = false
+    const w = limiter.acquire(old, undefined, () => live).then(() => (got = true))
+    live = provider({ concurrency: 1 })
+    limiter.wakeEvery()
+    await tick()
+    limiter.release(old) // 1 in flight, the reloaded limit is 1: still full
+    await tick()
+    expect(got).toBe(false)
+    limiter.release(old)
+    await w
+    expect(limiter.inFlight('p')).toBe(1)
+  })
+
+  it('a waiter whose provider is gone from the config is rejected with a plain error', async () => {
+    const limiter = new ProviderLimiter()
+    const p = provider({ concurrency: 1 })
+    let live: ProviderInfo | undefined = p
+    await limiter.acquire(p, undefined, () => live)
+    const w = limiter.acquire(p, undefined, () => live)
+    const rejected = expect(w).rejects.toMatchObject({ name: 'ProviderError', retryable: false, message: expect.stringContaining('provider p was removed from the config') })
+    live = undefined
+    limiter.wakeEvery()
+    await rejected
+    expect(limiter.inFlight('p')).toBe(1)
+  })
+})

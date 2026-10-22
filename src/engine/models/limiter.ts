@@ -1,4 +1,5 @@
 import type { ProviderInfo } from './registry'
+import { ProviderError } from './types'
 
 /** The UTC day of a time, `YYYY-MM-DD`: daily request limits (OpenRouter's) start again at midnight UTC. */
 export function utcDay(ms: number): string {
@@ -30,9 +31,15 @@ export class ProviderLimiter {
     return true
   }
 
-  /** Waits for a slot. */
-  async acquire(p: ProviderInfo, signal?: AbortSignal): Promise<void> {
-    while (!this.tryAcquire(p)) {
+  /**
+   * Waits for a slot. With `current`, the provider is read afresh before every try, so a config reload that changes its concurrency
+   * decides for the request that waits; when it returns undefined (the provider was removed) the wait ends with an error.
+   */
+  async acquire(p: ProviderInfo, signal?: AbortSignal, current?: () => ProviderInfo | undefined): Promise<void> {
+    for (;;) {
+      const now = current ? current() : p
+      if (!now) throw new ProviderError(`provider ${p.id} was removed from the config while the request waited`)
+      if (this.tryAcquire(now)) return
       await new Promise<void>((resolve, reject) => {
         const list = this.waiters.get(p.id) ?? []
         const wake = () => {
@@ -50,6 +57,15 @@ export class ProviderLimiter {
         list.push(wake)
         this.waiters.set(p.id, list)
       })
+    }
+  }
+
+  /** Wakes every waiting request of every provider, also of one that is gone after a config reload (it then sees `current()` is empty). */
+  wakeEvery(): void {
+    for (const id of [...this.waiters.keys()]) {
+      const list = this.waiters.get(id) ?? []
+      this.waiters.set(id, [])
+      for (const w of list) w()
     }
   }
 
