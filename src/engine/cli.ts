@@ -16,7 +16,9 @@ const out = (s: string) => process.stdout.write(s + '\n')
 async function loadRegistry(argv: string[]): Promise<{ registry: ModelRegistry; dataDir: string }> {
   const dataDir = resolveDataDir({ argv })
   const seed = argValue(argv, 'seed')
-  await initDataFolder(dataDir, seed)
+  const init = await initDataFolder(dataDir, seed)
+  if (init.migrated.length) process.stderr.write(`config/providers.md: added ${init.migrated.join(', ')} from the seed\n`)
+  for (const w of init.warnings) process.stderr.write(`${w}\n`)
   const registry = new ModelRegistry(dataDir)
   await applyModelDefaults(registry, dataDir)
   await registry.load()
@@ -89,6 +91,7 @@ export async function translate(argv: string[]): Promise<number> {
   if (!file || !to) {
     out('Usage: npm run engine -- translate <file> --to <language> [--from <language>] [--model <provider/model>[,fallback]] [--glossary-model ..] [--proofread-model ..] [--qa-model ..]')
     out('                                         [--no-proofread] [--no-qa] [--no-glossary] [--max-chunk N] [--project <id>] [--pause-after-glossary]')
+    out('                                         [--localize-names]   (visual-novel folders: localized character names)')
     return 2
   }
   const { registry, dataDir } = await loadRegistry(argv)
@@ -127,7 +130,8 @@ export async function translate(argv: string[]): Promise<number> {
     agentModels: agentModels as Record<AgentName, string[]>,
     enabled: { glossary: !argv.includes('--no-glossary'), proofreader: !argv.includes('--no-proofread'), qa: !argv.includes('--no-qa') },
     ...(maxChunk ? { maxChunkTokens: Number(maxChunk) } : {}),
-    ...(argv.includes('--pause-after-glossary') ? { pauseAfterGlossary: true } : {})
+    ...(argv.includes('--pause-after-glossary') ? { pauseAfterGlossary: true } : {}),
+    ...(argv.includes('--localize-names') ? { localizeNames: true } : {})
   }
   const projectId = argValue(argv, 'project')
   const summary = await service.createProject({ sourcePath: file, targetLanguage: to, sourceLanguage: argValue(argv, 'from'), settings, id: projectId })

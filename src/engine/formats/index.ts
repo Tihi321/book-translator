@@ -6,7 +6,7 @@ import { docxAdapter } from './docx'
 import { epubAdapter } from './epub'
 import { pdfAdapter } from './pdf'
 import { textAdapter } from './text'
-import { hashVnFolder, isVnFolder, VN_BRIEF_NOTE, vnAdapter } from './vn'
+import { hashVnFolder, isVnFolder, VN_BRIEF_NOTE, VN_BRIEF_NOTE_LOCALIZED, vnAdapter } from './vn'
 
 interface Registration {
   format: DocFormat
@@ -57,12 +57,12 @@ export async function hashSource(file: string): Promise<string> {
 }
 
 /** What every agent is told about a format, after the book brief (the visual-novel script rules). */
-export function formatNote(format: DocFormat): string | undefined {
-  return format === 'vn' ? VN_BRIEF_NOTE : undefined
+export function formatNote(format: DocFormat, opts: { localizeNames?: boolean } = {}): string | undefined {
+  return format === 'vn' ? (opts.localizeNames ? VN_BRIEF_NOTE_LOCALIZED : VN_BRIEF_NOTE) : undefined
 }
 
 /** The book brief with the format's note. */
-export function briefWithNote(brief: string, format: DocFormat): string {
-  const note = formatNote(format)
+export function briefWithNote(brief: string, format: DocFormat, opts: { localizeNames?: boolean } = {}): string {
+  const note = formatNote(format, opts)
   return note ? [brief.trim(), note].filter(Boolean).join('\n\n') : brief
 }

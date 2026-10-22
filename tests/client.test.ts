@@ -8,12 +8,13 @@ import { CommandDispatcher } from '../src/engine/dispatcher'
 import { startMcpHttp } from '../src/engine/mcp/http'
 import type { McpHttp } from '../src/engine/mcp/http'
 import { createMcpServer } from '../src/engine/mcp/server'
-import { checkAgainstSchema, ClientProvider, ClientTaskQueue, GONE } from '../src/engine/models/client'
+import { checkAgainstSchema, ClientProvider, ClientTaskQueue, clientTaskResult, GONE } from '../src/engine/models/client'
 import { ModelRouter } from '../src/engine/models/router'
 import { collect } from '../src/engine/models/types'
 import { translate } from '../src/engine/cli'
 import { z } from 'zod'
-import { jsonSchemaOf } from '../src/engine/pipeline/llm'
+import { chatJson, jsonSchemaOf } from '../src/engine/pipeline/llm'
+import type { ChatFn } from '../src/engine/pipeline/llm'
 import { rig } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
 
@@ -106,6 +107,74 @@ describe('ClientTaskQueue', () => {
   })
 })
 
+describe('clientTaskResult', () => {
+  type Msg = { role: 'system' | 'user' | 'assistant'; content: string }
+  const lease = (messages: Msg[]) => {
+    const q = new ClientTaskQueue()
+    q.add({ messages }, { job: 'j', role: 'translator', task: 'translate', project: 'p' })
+    const t = clientTaskResult(q.lease({})!)
+    if ('none' in t) throw new Error('no task')
+    return t
+  }
+
+  it('leaves out messages for a system + user request', () => {
+    const t = lease(MSGS)
+    expect(t.system).toBe('rules')
+    expect(t.user).toBe('hello world')
+    expect(t.messages).toBeUndefined()
+    expect('messages' in t).toBe(false)
+  })
+
+  it('leaves out messages when there are only more system messages', () => {
+    const t = lease([{ role: 'system', content: 'a' }, { role: 'system', content: 'b' }, { role: 'user', content: 'hi' }])
+    expect(t.system).toBe('a\n\nb')
+    expect(t.messages).toBeUndefined()
+  })
+
+  it('gives messages for a repair round (an assistant turn)', () => {
+    const t = lease([...MSGS, { role: 'assistant', content: 'bad json' }, { role: 'user', content: 'fix it' }])
+    expect(t.messages?.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user'])
+    expect(t.messages?.[2]?.content).toBe('bad json')
+    expect(t.user).toBe('hello world\n\nbad json\n\nfix it')
+  })
+
+  it('gives messages for several user messages', () => {
+    const t = lease([...MSGS, { role: 'user', content: 'and this' }])
+    expect(t.messages).toHaveLength(3)
+  })
+
+  it('a JSON repair round of chatJson reaches the client as a task with an assistant turn', async () => {
+    r = await clientRig()
+    const router = new ModelRouter(r.service.registry)
+    // the title passes the queue's schema check (a string) but not zod's refine (at least 4 characters, which JSON schema cannot say)
+    const zodSchema = z.object({ title: z.string().refine((t) => t.length >= 4) })
+    const chat: ChatFn = async (req) => {
+      const res = await router.complete([REF], { messages: req.messages, schema: req.schema, meta: { role: 'glossary', task: 'glossary', project: 'p', job: 'p--glossary' } })
+      return { text: res.text, costUsd: res.costUsd }
+    }
+    const done = chatJson(chat, MSGS, zodSchema)
+    const queue = r.service.clientQueue
+    const take = async () => {
+      for (let i = 0; i < 200; i++) {
+        const t = queue.lease({ project: 'p' })
+        if (t) return t
+        await new Promise((res) => setTimeout(res, 5))
+      }
+      throw new Error('no task came')
+    }
+    const first = await take()
+    expect(first.id).toBe('p--glossary#1')
+    expect(clientTaskResult(first)).not.toHaveProperty('messages')
+    expect(queue.submit(first.id, '{"title":"ab"}')).toEqual({ accepted: true })
+    const second = await take()
+    expect(second.id).toBe('p--glossary#2')
+    const result = clientTaskResult(second)
+    expect('messages' in result && result.messages?.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user'])
+    expect(queue.submit(second.id, '{"title":"abcd"}')).toEqual({ accepted: true })
+    expect((await done).value).toEqual({ title: 'abcd' })
+  })
+})
+
 describe('checkAgainstSchema and zod defaults', () => {
   it('accepts an answer that leaves out a field that has a default', () => {
     const schema = jsonSchemaOf(z.object({ title: z.string(), tone: z.string().default('neutral') }))
@@ -132,6 +201,27 @@ describe('client provider in the registry and router', () => {
     expect(res.text).toBe('a reply of 20 chars!!')
     expect(res.costUsd).toBe(0)
     expect(res.usage.outputTokens).toBe(6)
+  })
+
+  it('keeps a parked task across a providers.md reload', async () => {
+    r = await clientRig()
+    const dispatcher = new CommandDispatcher({ service: r.service, emit: () => undefined, showMock: true })
+    const done = r.service.router.complete([REF], { messages: MSGS, meta: { role: 'translator', task: 'translate', project: 'p', unit: 'chunk-1', job: 'p--chunk-1--translate' } })
+    await new Promise((res) => setTimeout(res, 5))
+    const file = path.join(r.dir, 'config', 'providers.md')
+    const text = await fs.readFile(file, 'utf8')
+    // the client provider has `concurrency: 8` in the seed
+    const edited = text.replace(/(id: client[\s\S]*?concurrency: )8/, (_m, head: string) => `${head}4`)
+    expect(edited).not.toBe(text)
+    await fs.writeFile(file, edited)
+    const later = new Date(Date.now() + 5000)
+    await fs.utimes(file, later, later)
+    expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
+    expect(r.service.registry.providers.get('client')!.concurrency).toBe(4)
+    const t = r.service.clientQueue.lease({ project: 'p' })!
+    expect(t.id).toBe('p--chunk-1--translate#1')
+    expect(r.service.clientQueue.submit(t.id, 'still answered')).toEqual({ accepted: true })
+    expect((await done).text).toBe('still answered')
   })
 
   it('drops the task when the request is aborted, and a later submit finds it gone', async () => {
@@ -222,14 +312,14 @@ describe('client provider over MCP', () => {
     const list = await call<{ waiting: number; leased: number; tasks: { id: string; state: string; project: string }[] }>(c, 'list_client_tasks')
     expect(list.tasks[0]).toMatchObject({ state: 'waiting', project: id })
 
-    const task = await call<{ taskId: string; meta: { role: string; task: string; project: string }; system: string; user: string; output: string; messages: unknown[]; leaseMinutes: number }>(c, 'get_client_task', { role: 'translator' })
+    const task = await call<{ taskId: string; meta: { role: string; task: string; project: string }; system: string; user: string; output: string; messages?: unknown[]; leaseMinutes: number }>(c, 'get_client_task', { role: 'translator' })
     expect(task.meta).toMatchObject({ role: 'translator', task: 'translate', project: id })
     expect(task.taskId.startsWith(`${id}--chunk-`)).toBe(true)
     expect(task.taskId.endsWith('--translate#1')).toBe(true)
     expect(task.output).toContain('<seg id')
     expect(task.user).toContain('<seg id=')
     expect(task.system.length).toBeGreaterThan(0)
-    expect(task.messages).toHaveLength(2)
+    expect(task.messages).toBeUndefined()
     expect(task.leaseMinutes).toBe(30)
     expect(await call(c, 'release_client_task', { taskId: task.taskId })).toEqual({ released: true })
     expect(await call(c, 'release_client_task', { taskId: 'zzz#1' })).toEqual({ released: false })

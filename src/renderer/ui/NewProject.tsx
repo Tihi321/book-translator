@@ -62,6 +62,7 @@ export function NewProject() {
   const [parallelEdit, setParallelEdit] = useState<ParallelSettings | null>(null)
   const [enabled, setEnabled] = useState({ glossary: true, proofreader: true, qa: true })
   const [pauseAfterGlossary, setPauseAfterGlossary] = useState(false)
+  const [localizeNames, setLocalizeNames] = useState(false)
   const [maxChunk, setMaxChunk] = useState<number | null>(null)
 
   const chunkSize = maxChunk ?? defaults?.defaultMaxChunkTokens ?? 1500
@@ -75,9 +76,10 @@ export function NewProject() {
       enabled,
       maxChunkTokens: chunkSize,
       pauseAfterGlossary,
+      ...(localizeNames ? { localizeNames: true } : {}),
       parallel
     }),
-    [picked, models, defaults, enabled, chunkSize, pauseAfterGlossary, parallel]
+    [picked, models, defaults, enabled, chunkSize, pauseAfterGlossary, localizeNames, parallel]
   )
 
   // the estimate follows every change (debounced); a late answer for an older request is dropped
@@ -147,6 +149,12 @@ export function NewProject() {
   async function chooseFolder() {
     const listing = await attempt(getApi().pickFolder())
     if (listing) openMany(listing.folder, listing.files)
+  }
+
+  /** A Scriptorium visual-novel book folder (book.md and chapters/) opens as one translation. */
+  async function chooseBookFolder() {
+    const dir = await attempt(getApi().pickBookFolder())
+    if (dir) openFile(dir)
   }
 
   // ---- drag and drop: a file, several files, or folders (their documents, top level) ----
@@ -278,7 +286,8 @@ export function NewProject() {
             {file || batch ? 'Open another file' : 'Open a file'}
           </button>
           <button onClick={() => void chooseFolder()} data-testid="choose-folder">Open a folder</button>
-          <span className="mono dim grow" title={file ?? batch?.label ?? ''}>{dragging ? 'Drop to open' : (file ?? batch?.label ?? `${FORMATS}, or drop files or a folder here`)}</span>
+          <button onClick={() => void chooseBookFolder()} data-testid="choose-book-folder" title="A visual-novel book folder: book.md and chapters/">Open a book folder</button>
+          <span className="mono dim grow" title={file ?? batch?.label ?? ''}>{dragging ? 'Drop to open' : (file ?? batch?.label ?? `${FORMATS}, a visual-novel book folder, or drop files or a folder here`)}</span>
         </div>
         {error && <div className="bad" data-testid="analyze-error">{error}</div>}
         {batch && (
@@ -309,6 +318,7 @@ export function NewProject() {
             <div className="stat"><b>{fmtCount(f.tokens)}</b><span>tokens</span></div>
           </div>
         )}
+        {f?.format === 'vn' && <div className="note">Visual-novel book folder: every script line is translated as its own segment and the translation is written as a folder with the same layout. Speaker tags, SCENE: and ON SCREEN: lines stay, and the bible and cover brief are copied.</div>}
         {f?.format === 'pdf' && <div className="note">PDF: the text is extracted, the page layout is not preserved. The translation is written as an EPUB (and Markdown). Scanned PDFs without a text layer are not supported.</div>}
       </div>
 
@@ -350,6 +360,15 @@ export function NewProject() {
                 <input type="checkbox" checked={pauseAfterGlossary} disabled={!enabled.glossary} onChange={(e) => setPauseAfterGlossary(e.target.checked)} />
                 Pause after the glossary, so I can review it
               </label>
+              {f?.format === 'vn' && (
+                <>
+                  <span />
+                  <label className="row small" title="The glossary gives each character a name for the target language; the export writes it into the speaker tags, the ON SCREEN: lines and the bible. Edit the names in the glossary before you export.">
+                    <input type="checkbox" checked={localizeNames} onChange={(e) => setLocalizeNames(e.target.checked)} data-testid="localize-names" />
+                    Localize the character names
+                  </label>
+                </>
+              )}
               <ParallelFields value={parallel} onChange={setParallelEdit} testId="new-parallel" />
               <label>Chunk size</label>
               <div className="row">

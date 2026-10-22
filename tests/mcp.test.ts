@@ -109,6 +109,10 @@ describe('MCP HTTP endpoint', () => {
     expect(msg.text).toContain('Croatian')
     expect(msg.text).toContain('submit_translation')
     expect(c.getInstructions()).toContain('Operator')
+    // localized character names can be set when creating a project and later
+    const tools = (await c.listTools()).tools
+    for (const n of ['create_project', 'update_project_settings']) expect(Object.keys(tools.find((t) => t.name === n)!.inputSchema.properties ?? {})).toContain('localizeNames')
+    expect(c.getInstructions()).toContain('localizeNames')
   })
 
   it('answers a failing tool with isError and the engine message, and checks the arguments', async () => {

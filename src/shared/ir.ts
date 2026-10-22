@@ -49,6 +49,11 @@ export interface WriteOptions {
   targetLanguage?: string
   /** Called for a translation the adapter could not use (the source text was written instead). */
   onWarning?: (message: string) => void
+  /**
+   * Visual-novel folders: localized character names, from the lower-cased source name to the name to write (speaker tags, `ON SCREEN:` lines and the
+   * bible's character bullets). Unset or empty: the folder is written byte for byte as it was.
+   */
+  names?: Record<string, string>
 }
 
 export interface FormatAdapter {

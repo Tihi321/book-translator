@@ -1,6 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { migrateProviders, seedHasProviders } from './migrate'
 
 /** Folders created inside the data folder. */
 export const DATA_LAYOUT = ['config', 'prompts', 'projects'] as const
@@ -48,6 +49,9 @@ export interface InitResult {
   createdDirs: number
   copied: string[]
   skipped: string[]
+  /** Providers copied into an existing config/providers.md from the seed (see `migrateProviders`). */
+  migrated: string[]
+  warnings: string[]
 }
 
 async function copyTree(src: string, dest: string, root: string, result: InitResult): Promise<void> {
@@ -71,11 +75,18 @@ async function copyTree(src: string, dest: string, root: string, result: InitRes
   }
 }
 
-/** Creates the data folder layout and copies `seed/` into it. Existing files are never overwritten. */
+/** Creates the data folder layout and copies `seed/` into it. Existing files are never overwritten; providers the seed gained since are added to config/providers.md once. */
 export async function initDataFolder(dataDir: string, seedDir: string | undefined = findSeedDir()): Promise<InitResult> {
-  const result: InitResult = { dataDir, createdDirs: 0, copied: [], skipped: [] }
+  const result: InitResult = { dataDir, createdDirs: 0, copied: [], skipped: [], migrated: [], warnings: [] }
   await fs.mkdir(dataDir, { recursive: true })
-  if (seedDir && existsSync(seedDir)) await copyTree(seedDir, dataDir, dataDir, result)
+  if (seedDir && existsSync(seedDir)) {
+    await copyTree(seedDir, dataDir, dataDir, result)
+    if (seedHasProviders(seedDir)) {
+      const m = await migrateProviders(dataDir, seedDir, { fresh: result.copied.includes('config/providers.md') })
+      result.migrated = m.added
+      result.warnings = m.warnings
+    }
+  }
   for (const rel of DATA_LAYOUT) {
     const dir = path.join(dataDir, ...rel.split('/'))
     if (!existsSync(dir)) {

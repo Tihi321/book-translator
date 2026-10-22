@@ -13,6 +13,7 @@ import type { RunResult } from './pipeline/runner'
 import { mergeSettings, ProjectStore, projectIdFor } from './project/store'
 import { countStates, summarize } from './project/summary'
 import { buildMessages } from './pipeline/prompts'
+import { characterLabels, ensureNameEntries, KEEP_NAME_NOTE, localizesNames, nameMap, sharedTargets } from './pipeline/names'
 import { describeParse, parseSegments } from './pipeline/segments'
 import type { SegmentParse } from './pipeline/segments'
 import { fitEdges, prevTail, tagIssue, translatorUserContent } from './pipeline/translator'
@@ -181,9 +182,10 @@ export class EngineService {
       spend: { tokensIn: 0, tokensOut: 0, costUsd: 0, ms: 0 }
     }
     await this.store.create(project, ir)
-    // names the format says must stay (the speaker tags of a visual novel use them): the glossary keeps them, and the builder does not replace them
+    // names the format says must stay (the speaker tags of a visual novel use them): the glossary keeps them, and the builder does not replace them.
+    // With localizeNames the glossary builder gives them a form for the target language instead.
     const names = ir.meta.names ?? []
-    if (names.length > 0) await this.store.writeGlossary(id, names.map((n) => ({ source: n, target: n, type: 'person', note: 'character name: keep it as it is' })))
+    if (names.length > 0 && !localizesNames(project)) await this.store.writeGlossary(id, names.map((n) => ({ source: n, target: n, type: 'person', note: KEEP_NAME_NOTE })))
     const summary = summarize(project, [])
     this.emit({ type: 'project.updated', project: summary })
     return summary
@@ -353,7 +355,10 @@ export class EngineService {
       project.settings.maxChunkTokens = maxChunkTokens
     }
     const budget = chunkBudget({ contexts: [], userMax: project.settings.maxChunkTokens })
-    const { chunks, planned } = await planProjectChunks(this.store, project, await this.store.readIr(id), budget)
+    const ir = await this.store.readIr(id)
+    // the glossary lists every character name, so the translator gets the localized ones (or the names to localize) from it
+    if (localizesNames(project) && (await ensureNameEntries(this.store, id, ir)) > 0) await this.store.log(id, 'info: character names added to the glossary, change Target to localize them')
+    const { chunks, planned } = await planProjectChunks(this.store, project, ir, budget)
     if (planned) {
       await this.store.log(id, `info: ${chunks.length} chunks of up to ${budget} tokens (prepared for an outside translator)`)
       this.emit({ type: 'project.updated', project: summarize(project, chunks) })
@@ -380,7 +385,7 @@ export class EngineService {
     const messages = await buildMessages(
       this.opts.dataDir,
       'translator',
-      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief: briefWithNote(brief, project.format) },
+      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief: briefWithNote(brief, project.format, { localizeNames: localizesNames(project) }) },
       translatorUserContent({ glossary, targetLanguage: s.targetLanguage }, chunk.segments, prev, undefined)
     )
     return {
@@ -489,7 +494,14 @@ export class EngineService {
       this.emit({ type: 'log', projectId: id, level: 'warn', message })
       void this.store.log(id, `warn: ${message}`)
     }
-    await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning })
+    // localized character names: the glossary's `person` entries for the characters, written into speaker tags, ON SCREEN lines and the bible
+    let names: Record<string, string> | undefined
+    if (localizesNames(project)) {
+      const map = nameMap(await this.store.readGlossary(id), characterLabels(ir))
+      for (const g of sharedTargets(map)) onWarning(`${g.sources.join(' and ')} would all be called ${g.target}: give each character its own name in glossary.md`)
+      if (Object.keys(map).length > 0) names = map
+    }
+    await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning, names })
     this.emit({ type: 'log', projectId: id, level: 'info', message: `exported ${translations.size} block(s) to ${out}` })
     return out
   }
