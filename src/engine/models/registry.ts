@@ -121,6 +121,8 @@ export class ModelRegistry {
   models = new Map<string, ModelInfo>()
   /** config/models.md: the models picked in the Models dialog, the refs the pickers leave out, and the limits. */
   modelChoices: ModelsConfig = { kind: 'models', picked: [], hidden: [], limits: {} }
+  /** Counts the successful `load`s: a call that started under an older one takes its models afresh (see `ModelRouter.chat`). */
+  generation = 0
   readonly mock: MockProvider
   /** Where `client` providers park their requests (the MCP tools read it). */
   clientQueue: ClientTaskQueue
@@ -265,6 +267,7 @@ export class ModelRegistry {
       if (m) m.loadedContext = loaded // what LM Studio reported stays true after a reload
     }
     this.configStamp = signature
+    this.generation++
   }
 
   modelsFile(): string {

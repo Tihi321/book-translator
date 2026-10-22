@@ -698,6 +698,82 @@ describe('config reload', () => {
     expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
     expect(warns(emitted)).toHaveLength(1)
   })
+
+  describe('a project that is running', () => {
+    /** Changes the mock provider's entry in providers.md (after its `concurrency` line) and bumps the file's time. */
+    async function editMock(dir: string, concurrency: number, extra = ''): Promise<void> {
+      const file = path.join(dir, 'config', 'providers.md')
+      const text = await fs.readFile(file, 'utf8')
+      const edited = text.replace(/(\r?\n {2}- id: mock\r?\n {4}kind: mock\r?\n {4}concurrency: )\d+/, `$1${concurrency}${extra}`)
+      expect(edited).not.toBe(text)
+      await fs.writeFile(file, edited)
+      const later = new Date(Date.now() + 5000 + Math.random() * 1000)
+      await fs.utimes(file, later, later)
+    }
+    /** The translator answers once `open` is called; `inFlight` and `peak` count the requests that wait for it. */
+    function gated(mock: Rig['mock']) {
+      let open!: () => void
+      const gate = new Promise<void>((res) => (open = res))
+      const state = { inFlight: 0, peak: 0, open }
+      mock.on({ role: 'translator' }, async (req) => {
+        state.peak = Math.max(state.peak, ++state.inFlight)
+        await gate
+        state.inFlight--
+        return asSegs(segsIn(lastUser(req)).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      })
+      return state
+    }
+
+    it('gets a second worker when providers.md raises the provider concurrency', async () => {
+      const { r, run, dispatcher, waitFor } = await setup()
+      await editMock(r.dir, 1)
+      expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
+      const state = gated(r.mock)
+      const id = await r.create({ parallel: { enabled: true, maxAtOnce: 'auto', splitSections: true } })
+      await run({ type: 'start', projectId: id })
+      await waitFor(() => state.inFlight === 1)
+      expect(state.peak).toBe(1)
+      await editMock(r.dir, 2)
+      expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
+      await waitFor(() => state.inFlight === 2)
+      state.open()
+      await waitFor(() => r.events.some((e) => e.type === 'project.updated' && e.project.status === 'done'))
+      expect(state.peak).toBe(2)
+      expect(r.calls('translator').length).toBeGreaterThan(2)
+    })
+
+    it('drops a worker when providers.md lowers the provider concurrency, and still translates every chunk once', async () => {
+      const { r, run, dispatcher, waitFor } = await setup()
+      const state = gated(r.mock)
+      const id = await r.create({ parallel: { enabled: true, maxAtOnce: 'auto', splitSections: true } })
+      await run({ type: 'start', projectId: id })
+      await waitFor(() => state.inFlight === 4)
+      await editMock(r.dir, 1)
+      expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
+      state.open()
+      await waitFor(() => r.events.some((e) => e.type === 'project.updated' && e.project.status === 'done'))
+      const chunks = (await run<ProjectDetail>({ type: 'getProject', projectId: id })).chunks
+      expect(chunks.every((c) => c.state === 'done')).toBe(true)
+      expect(r.calls('translator')).toHaveLength(chunks.length)
+    })
+
+    it('keeps its chunk plan and warns once when a reload lowers the context below the plan', async () => {
+      const { r, run, dispatcher, waitFor } = await setup()
+      const state = gated(r.mock)
+      const id = await r.create({ maxChunkTokens: 400, parallel: { enabled: false, maxAtOnce: 'auto', splitSections: true } })
+      await run({ type: 'start', projectId: id })
+      await waitFor(() => state.inFlight === 1)
+      const planned = (await run<ProjectDetail>({ type: 'getProject', projectId: id })).chunks.length
+      r.events.length = 0
+      await editMock(r.dir, 4, '\n    context: 2000')
+      expect(await dispatcher.reloadConfigIfChanged()).toBe(true)
+      const larger = (e: EngineEvent) => e.type === 'log' && e.level === 'warn' && /pending chunk\(s\) are larger than the new chunk budget \(\d+ tokens, the plan used 400\)/.test(e.message)
+      expect(r.events.filter(larger)).toHaveLength(1)
+      state.open()
+      await waitFor(() => r.events.some((e) => e.type === 'project.updated' && e.project.status === 'done'))
+      expect((await run<ProjectDetail>({ type: 'getProject', projectId: id })).chunks).toHaveLength(planned)
+    })
+  })
 })
 
 describe('MCP settings and status', () => {

@@ -1,4 +1,5 @@
-import { chunkBudget, planChunks } from '../chunker'
+import { chunkBudget, planChunks, SEG_OVERHEAD } from '../chunker'
+import { countTokens } from '../tokens'
 import { briefWithNote } from '../formats'
 import type { ModelRegistry } from '../models/registry'
 import type { ModelRouter } from '../models/router'
@@ -102,6 +103,14 @@ export class ProjectRunner {
   private startedAt = 0
   private finishedThisRun = 0
   private tokenBuf = new Map<number, { text: string; last: number }>()
+  /** The units (a section's chunks, or one chunk) no worker has taken yet, the workers running, and how many may run. */
+  private queue: ChunkRecord[][] = []
+  private workers = new Set<Promise<void>>()
+  private alive = 0
+  private target = 0
+  private split = false
+  private scheduling = false
+  private fatal?: unknown
 
   constructor(
     private readonly deps: RunnerDeps,
@@ -224,11 +233,46 @@ export class ProjectRunner {
       }
       units.push(...sections.values())
     }
-    const queue = units
-    const concurrency = workerCount(router, this.project.settings)
-    const worker = async () => {
+    this.queue = units
+    this.target = workerCount(router, this.project.settings)
+    this.split = split
+    this.fatal = undefined
+    this.scheduling = true
+    try {
+      for (let i = Math.min(this.target, this.queue.length); i > 0; i--) this.spawn()
+      // workers that `configReloaded` adds join the set while it is awaited
+      while (this.workers.size > 0) await Promise.all([...this.workers])
+    } finally {
+      this.scheduling = false
+    }
+    if (this.fatal) throw this.fatal
+  }
+
+  /** Starts one worker on the shared queue. */
+  private spawn(): void {
+    this.alive++
+    const p: Promise<void> = this.work()
+      .catch((err: unknown) => {
+        if (!isAbortError(err)) this.fatal ??= err
+      })
+      .finally(() => void this.workers.delete(p))
+    this.workers.add(p)
+  }
+
+  /** One worker: takes units from the queue until it is empty, the run is aborted, or the worker count went down. */
+  private async work(): Promise<void> {
+    let left = false
+    const leave = () => {
+      if (!left) {
+        left = true
+        this.alive--
+      }
+    }
+    try {
       for (;;) {
-        const unit = queue.shift()
+        // the worker count went down in a reload: this worker stops (checked and counted in one step, so no more stop than needed)
+        if (this.alive > this.target) return leave()
+        const unit = this.queue.shift()
         if (!unit || this.signal?.aborted) return
         for (const chunk of unit) {
           if (this.signal?.aborted) return
@@ -236,13 +280,35 @@ export class ProjectRunner {
           const before = this.chunks[at - 1]
           // split: the previous chunk may be running right now, so only a finished one gives its end as context
           const finished = before && (before.state === 'done' || before.state === 'flagged')
-          await this.runChunk(chunk, before && before.sectionId === chunk.sectionId && (!split || finished) ? before : undefined)
+          await this.runChunk(chunk, before && before.sectionId === chunk.sectionId && (!this.split || finished) ? before : undefined)
         }
       }
+    } finally {
+      leave()
     }
-    const results = await Promise.allSettled(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
-    const fatal = results.find((r): r is PromiseRejectedResult => r.status === 'rejected' && !isAbortError(r.reason))
-    if (fatal) throw fatal.reason
+  }
+
+  /**
+   * A providers reload happened. A running project follows it with the number of workers (more start on the queue, fewer after
+   * their current section or chunk) and says when the new chunk budget no longer fits the plan. The plan itself stays: re-planning
+   * would renumber chunk files that finished chunks, the UI and an outside translator refer to. Does nothing before the chunks are
+   * prepared (the glossary stage): the stage after it reads the reloaded providers anyway.
+   */
+  configReloaded(): void {
+    const { registry, router } = this.deps
+    if (this.chunks.length === 0) return
+    if (this.scheduling && !this.signal?.aborted) {
+      this.target = workerCount(router, this.project.settings)
+      for (let i = Math.min(this.target - this.alive, this.queue.length); i > 0; i--) this.spawn()
+    }
+    const planned = this.project.chunking?.budget
+    const budget = budgetFor(registry, router, this.project.settings)
+    const pending = this.queue.flat()
+    if (planned === undefined || pending.length === 0 || budget === planned) return
+    if (budget < planned) {
+      const large = pending.filter((c) => c.segments.reduce((n, s) => n + countTokens(s.text) + SEG_OVERHEAD, 0) > budget).length
+      if (large > 0) this.log('warn', `${large} pending chunk(s) are larger than the new chunk budget (${budget} tokens, the plan used ${planned}). They keep the plan; a model too small for one hands it to the next model in its list.`)
+    } else this.log('info', `the chunk budget grew to ${budget} tokens: the plan keeps chunks of up to ${planned} tokens; a project with no chunk started re-plans at its next start`)
   }
 
   private async runChunk(chunk: ChunkRecord, prev: ChunkRecord | undefined): Promise<void> {

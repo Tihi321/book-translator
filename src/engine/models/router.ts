@@ -138,43 +138,59 @@ export class ModelRouter {
     let lastError: unknown
     let attempts = 0
     const failures: string[] = []
+    const generation = this.registry.generation
     for (const [i, model] of models.entries()) {
       // a server that went down, or a daily limit used up, after the call started: skip it while a later model can answer
       if (!this.usable(model.provider) && models.slice(i + 1).some((m) => this.usable(m.provider))) continue
+      // the model as the attempts use it: taken afresh from the registry once a config reload happened since the objects were resolved
+      let active = model
+      let seenGeneration = generation
       for (let retry = 0; retry <= this.opts.retries; retry++) {
         if (req.signal?.aborted) throw abort()
-        const paid = isPaidModel(model)
-        const provider = model.provider
+        let provider = active.provider
         const holdsSlot = held.has(provider.id)
         let acquired = false
         const started = Date.now()
         try {
           if (!holdsSlot) {
-            await this.limiter.acquire(provider, req.signal)
+            const id = provider.id
+            await this.limiter.acquire(provider, req.signal, () => this.registry.providers.get(id))
             acquired = true
           }
           const wait = this.limiter.rpmWaitMs(provider)
           if (wait > 0) await this.opts.sleep(wait, req.signal)
+          if (seenGeneration !== this.registry.generation) {
+            seenGeneration = this.registry.generation
+            const fresh = this.registry.getModel(model.ref)
+            if (!fresh || !fresh.provider.available || !fresh.provider.client) {
+              const msg = `${model.ref}: removed or turned off in the config during the call`
+              lastError = new ProviderError(msg)
+              failures.push(msg)
+              break
+            }
+            active = fresh
+            provider = fresh.provider
+          }
           this.limiter.noteRequest(provider)
           attempts++
-          yield { type: 'attempt', model, attempt: attempts }
+          yield { type: 'attempt', model: active, attempt: attempts }
           let usage = emptyUsage()
           for await (const ev of provider.client!.chat({
-            model: model.id,
+            model: active.id,
             messages: req.messages,
             schema: req.schema,
             maxTokens: req.maxTokens,
             temperature: req.temperature,
             signal: req.signal,
-            extraBody: req.extraBody ? { ...model.extraBody, ...req.extraBody } : model.extraBody,
+            extraBody: req.extraBody ? { ...active.extraBody, ...req.extraBody } : active.extraBody,
             meta: req.meta
           })) {
             if (ev.type === 'delta') yield { type: 'delta', text: ev.text }
             else usage = ev.usage
           }
-          const costUsd = paid ? computeCost(model, usage) : 0
+          const costUsd = isPaidModel(active) ? computeCost(active, usage) : 0
           const ms = Date.now() - started
-          yield { type: 'done', model, usage, costUsd, ms }
+          yield { type: 'done', model: active, usage, costUsd, ms }
           return
         } catch (err) {
           if (isAbortError(err) || req.signal?.aborted) throw err
