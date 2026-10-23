@@ -179,10 +179,10 @@ async function serviceFor(argv: string[]): Promise<{ service: EngineService; id:
 export async function exportProject(argv: string[]): Promise<number> {
   const s = await serviceFor(argv)
   if (!s) {
-    out('Usage: npm run engine -- export <projectId> [--out <file>]')
+    out('Usage: npm run engine -- export <projectId> [--out <file>] [--cover title]')
     return 2
   }
-  out(`output: ${await s.service.export(s.id, argValue(argv, 'out'))}`)
+  out(`output: ${await s.service.export(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined })}`)
   return 0
 }
 
@@ -202,6 +202,7 @@ export async function projectStatus(argv: string[]): Promise<number> {
   for (const c of chunks) {
     if (c.state === 'failed') out(`  chunk ${c.index} failed: ${c.error}`)
     for (const i of c.qa.issues.filter((x) => x.severity === 'major')) out(`  chunk ${c.index} ${i.segId} ${i.type}: ${i.comment}`)
+    for (const i of c.qa.issues.filter((x) => x.severity === 'minor')) out(`  chunk ${c.index} ${i.segId} ${i.type} (minor): ${i.comment}`)
   }
   return 0
 }

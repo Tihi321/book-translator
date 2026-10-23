@@ -534,7 +534,7 @@ export class CommandDispatcher {
         await s.updateGlossary(cmd.projectId, cmd.entries)
         return undefined
       case 'export': {
-        const out = await s.export(cmd.projectId, cmd.outPath)
+        const out = await s.export(cmd.projectId, cmd.outPath, { cover: cmd.cover })
         return { path: out, rel: this.exportRel(out) }
       }
       case 'deleteProject':
@@ -579,13 +579,15 @@ export class CommandDispatcher {
       case 'listClientTasks':
         return { ...s.clientQueue.counts(), tasks: s.clientQueue.list() }
       case 'getClientTask': {
-        const t = s.clientQueue.lease({ role: cmd.role, project: cmd.project, task: cmd.task })
+        const t = s.clientQueue.lease({ role: cmd.role, project: cmd.project, task: cmd.task }, cmd.leaseMinutes ? cmd.leaseMinutes * 60_000 : undefined)
         return t ? clientTaskResult(t) : { none: true as const, waiting: s.clientQueue.counts().waiting }
       }
       case 'submitClientTask':
         return s.clientQueue.submit(cmd.taskId, cmd.text)
       case 'releaseClientTask':
-        return { released: s.clientQueue.release(cmd.taskId) }
+        if (cmd.taskId) return { released: s.clientQueue.release(cmd.taskId) }
+        if (!cmd.project && !cmd.role) throw new Error('give a taskId, or a project and/or role to release every leased task of')
+        return { released: s.clientQueue.releaseLeased({ project: cmd.project, role: cmd.role }) }
       default: {
         const never: never = cmd
         throw new Error(`unknown command: ${(never as { type?: string }).type}`)

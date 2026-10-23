@@ -62,6 +62,11 @@ export function ProjectSettingsTab({ detail }: { detail: ProjectDetail }) {
           <input type="checkbox" checked={s.pauseAfterGlossary} disabled={locked || !s.enabled.glossary} onChange={(e) => set({ pauseAfterGlossary: e.target.checked })} />
           Pause after the glossary, so I can review it
         </label>
+        <span />
+        <label className="row small" title="Off: only major QA issues go to the fixer and minor ones stay in the text (see the chunk's QA list). On: the fixer gets the minor ones too, and the chunk is checked again.">
+          <input type="checkbox" checked={s.fixMinorIssues === true} disabled={locked || !s.enabled.qa} onChange={(e) => set({ fixMinorIssues: e.target.checked })} data-testid="settings-fix-minor" />
+          Also fix minor QA issues
+        </label>
         {detail.project.format === 'vn' && (
           <>
             <span />

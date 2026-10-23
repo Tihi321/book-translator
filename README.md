@@ -18,6 +18,8 @@ Books are larger than any model's context, so the text is split into chunks that
 - Progress view with a tile per chunk, live model output, tokens, cost, ETA. Pause, resume and cancel at any time. Everything is written per chunk, so closing the app or a crash resumes where it stopped.
 - Review: source and translation side by side per chunk, QA flags, edit text, retranslate a chunk with another model, accept flags. An editable glossary that applies to the chunks that follow.
 - Export works with partial progress (untranslated parts keep the source text), for previewing.
+- An EPUB export keeps the source cover image with its alt text translated (the title and the word for "cover" where known). The source image still has the original title drawn on it: `export_project` with `cover: title` (CLI `--cover title`) replaces it by a plain SVG title page with the translated title and the author.
+- Glossary terms match as whole words or phrases ("Da" is not found in "day"); QA accepts an inflected form of a glossary target (it compares a stem). A glossary row whose Source equals its Target is a keep row: it does not count towards "left untranslated". Brief text written with `set_brief` is kept by the glossary pass: it only adds the fields and characters your brief lacks.
 - Headless CLI for scripting and tests.
 - An MCP server, so another LLM (Claude Code ...) can drive the app or translate with it, with or without a window.
 
@@ -71,7 +73,7 @@ translate <file|folder> --to <language> [--from <language>] [--model <provider/m
           [--glossary-model <ref>] [--proofread-model <ref>] [--qa-model <ref>]
           [--no-glossary] [--no-proofread] [--no-qa] [--max-chunk <tokens>]
           [--project <id>] [--pause-after-glossary] [--localize-names] [--out <file>]
-export <projectId> [--out <file>]           write the document from what is translated so far
+export <projectId> [--out <file>] [--cover title]  write the document from what is translated so far (EPUB: --cover title swaps the cover for a plain title page)
 status <projectId>                          chunk states, spend, failed chunks and major QA issues
 key-set <ENV_NAME>                          store an API key (npm run key:set <ENV_NAME>)
 headless [--data <dir>] [--port <n>]        run with no window and the MCP server on (npm run headless)
@@ -122,7 +124,7 @@ Safety:
 - The server listens on 127.0.0.1 only and checks the Host and Origin headers.
 - Every request needs the bearer token. It is made on first use and kept in the Windows credential store (`BOOK_TRANSLATOR_MCP_TOKEN`; an environment variable with that name takes priority).
 - API keys, provider settings and project deletion are not available over MCP.
-- One engine uses a data folder at a time (`engine.lock` in the folder). A second app or `headless` on the same folder is refused with a message. If no Book Translator is running and the message stays, delete `engine.lock`.
+- One engine uses a data folder at a time (`engine.lock` in the folder). A second app or `headless` on the same folder is refused with a message. The lock holds the pid, the process start time and name; a pid that was reused by an unrelated process (or started later) is not counted. If no Book Translator is running and the message stays, delete `engine.lock`.
 
 ### The client provider: Claude Code does the model work
 
@@ -130,7 +132,7 @@ The `client` provider (model `client/claude-code`) turns the app's model calls i
 
 1. The provider is already there. A new data folder has it enabled in `config/providers.md`, and an existing folder gets it added at the next start (see [Data folder](#data-folder)). Its model plans with a context of 200000 tokens: set `context` on the model or on the provider to change that.
 2. For a Claude-only translation set `clientOnly: true` in `create_project` or `update_project_settings`: all four agents (glossary, translator, proofreader, qa) go on `client/claude-code` (any `agentModels` given with it is ignored) and the project refuses every other model ref, also one from old settings, the defaults or `retry_chunk {model}`, with an error instead of calling it. `clientOnly: false` turns it off; the agents stay on `client/claude-code` until you set `agentModels`. `get_project` shows `clientOnly`. Or choose single agents with `update_project_settings`, for example `agentModels: { translator: ["client/claude-code"], glossary: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }`. An agent left on another model keeps using that model.
-3. `start_translation`, then loop: `wait_for_progress` (returns at once when a task waits, with `clientTasks: { waiting, leased }`), `get_client_task` (leases the oldest waiting task for 30 minutes; filter by `role`, `project`, `task`), write the answer as `output` says, `submit_client_task`. A JSON answer (glossary, QA) is checked against the task's schema when you submit: if it fails you get `problems` and the task stays leased. A task whose lease runs out goes back to the queue; `release_client_task` gives one back. Several clients or subagents can each take a task.
+3. `start_translation`, then loop: `wait_for_progress` (returns at once when a task waits, with `clientTasks: { waiting, leased }`; `role` counts only that role's tasks, so a worker for one role waits for its own work; it also lists the minor QA issues), `get_client_task` (leases the oldest waiting task for 10 minutes, `leaseMinutes` up to 60; filter by `role`, `project`, `task`), write the answer as `output` says, `submit_client_task`. A JSON answer (glossary, QA) is checked against the task's schema when you submit: if it fails you get `problems` and the task stays leased. A refused answer starts the lease again. A task whose lease runs out goes back to the queue; `release_client_task` gives one back, or (with `project` and/or `role`, no `taskId`) every leased task that matches: call it at the start of a session to free what an earlier client that stopped still holds. Minor QA issues stay in the text unless the project setting `fixMinorIssues` (`update_project_settings`, "Also fix minor QA issues" in the settings tab) sends them to the fixer too. Several clients or subagents can each take a task.
 
 `get_client_task` returns `system` (the rules) and `user` (the request). A normal task has only those two. `messages` (the whole conversation, in order) comes only for a request with more than one turn, such as a JSON repair round after a bad answer: answer its last user message.
 4. When `get_project` shows `clientTasks` at 0 and the status is `done`, `export_project`. Put the agents back on real models afterwards: an agent left on `client` waits for ever when no client is connected.

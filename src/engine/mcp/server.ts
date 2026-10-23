@@ -15,6 +15,8 @@ export const MAX_WAIT_SEC = 60
 const DEFAULT_WAIT_SEC = 25
 /** Lines of log.md that `get_project` returns. */
 const LOG_LINES = 40
+/** Minor QA issues that `wait_for_progress` lists (the count is always given). */
+const MAX_MINORS_LISTED = 30
 
 const INSTRUCTIONS = `Book Translator translates books (EPUB, DOCX, TXT, MD, PDF, and Scriptorium visual-novel book folders) chunk by chunk, with a glossary and a brief for consistency.
 
@@ -49,6 +51,11 @@ const clientOnly = z
 const localizeNames = z
   .boolean()
   .describe("Visual-novel book folders only (default false). true: the character names are localized: the glossary builder gives each name a form for the target language (type person in glossary.md, which you can edit before export_project), and the export writes it into the speaker tags, the ON SCREEN: lines and the bible's character list, so VN Studio (vno_add_edition) still pairs every line. false: names stay as in the source.")
+  .optional()
+
+const fixMinorIssues = z
+  .boolean()
+  .describe('Default false: only major QA issues go to the fixer, minor ones stay in the text (they are listed in wait_for_progress and get_chunk). true: the fixer gets the minor ones too, and the chunk is checked again.')
   .optional()
 
 /** What a model list needs: not every field of the picker's entries. */
@@ -112,6 +119,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       enabledAgents,
       clientOnly,
       localizeNames,
+      fixMinorIssues,
       maxChunkTokens: z.number().int().min(100).optional().describe('Upper limit of a chunk in source tokens'),
       projectId: z.string().optional().describe('A project id of your own (default: made from the file name, language and hash)')
     },
@@ -122,7 +130,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         targetLanguage: a.targetLanguage,
         sourceLanguage: a.sourceLanguage,
         id: a.projectId,
-        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, localizeNames: a.localizeNames })
+        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, localizeNames: a.localizeNames, fixMinorIssues: a.fixMinorIssues })
       })
   )
   tool(
@@ -144,6 +152,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       enabledAgents,
       clientOnly,
       localizeNames,
+      fixMinorIssues,
       maxChunkTokens: z.number().int().min(100).optional(),
       targetLanguage: z.string().optional(),
       sourceLanguage: z.string().optional(),
@@ -159,6 +168,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
           enabled: a.enabledAgents as never,
           clientOnly: a.clientOnly,
           localizeNames: a.localizeNames,
+          fixMinorIssues: a.fixMinorIssues,
           maxChunkTokens: a.maxChunkTokens,
           targetLanguage: a.targetLanguage,
           sourceLanguage: a.sourceLanguage,
@@ -184,9 +194,13 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   })
   tool(
     'wait_for_progress',
-    `Waits until a chunk finishes or the project's status changes, or for timeoutSec (at most ${MAX_WAIT_SEC}), then returns the status and progress. Returns at once when the project does not run, or when a request of this project waits for you on the client provider (clientTasks.waiting > 0: take it with get_client_task). Call it again until status is done.`,
-    { projectId, timeoutSec: z.number().min(1).max(MAX_WAIT_SEC).optional().describe(`Default ${DEFAULT_WAIT_SEC}`) },
-    (a) => waitForProgress(service, bus, a.projectId, Math.min(MAX_WAIT_SEC, a.timeoutSec ?? DEFAULT_WAIT_SEC)),
+    `Waits until a chunk finishes or the project's status changes, or for timeoutSec (at most ${MAX_WAIT_SEC}), then returns the status and progress. Returns at once when the project does not run, or when a request of this project waits for you on the client provider (clientTasks.waiting > 0: take it with get_client_task). With role, only a request of that role counts (and clientTasks counts only that role), so a worker for one role can wait for its own work. The result lists the minor QA issues of the chunks (minorIssues, minors). Call it again until status is done.`,
+    {
+      projectId,
+      timeoutSec: z.number().min(1).max(MAX_WAIT_SEC).optional().describe(`Default ${DEFAULT_WAIT_SEC}`),
+      role: z.string().optional().describe('glossary, translator, proofreader or qa: only a waiting request of this role ends the wait early')
+    },
+    (a) => waitForProgress(service, bus, a.projectId, Math.min(MAX_WAIT_SEC, a.timeoutSec ?? DEFAULT_WAIT_SEC), a.role),
     true
   )
 
@@ -224,7 +238,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     await run({ type: 'setBrief', projectId: a.projectId, brief: a.brief })
     return { saved: true }
   })
-  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath }))
+  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)'), cover: z.enum(['source', 'title']).optional().describe('EPUB only. source (default): keep the cover image and translate its alt text. title: replace it by a plain title page with the translated title and the author (the source cover has the original title drawn on it).') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath, cover: a.cover }))
 
   // ---- the client provider: you answer the app's model calls ----
 
@@ -237,9 +251,14 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'get_client_task',
-    'Leases the oldest waiting request of the client provider (for 30 minutes) and returns taskId, meta, system, user, schema (when the answer is JSON), output (what to reply with), leaseMinutes and messages (only for a multi-turn request such as a JSON repair round: answer its last user message), or {none: true, waiting}. Answer it with submit_client_task. A lease that runs out puts the task back in the queue.',
-    { role: z.string().optional().describe('glossary, translator, proofreader or qa'), project: z.string().optional(), task: z.string().optional().describe('For example translate, retry, retry-tags, fix, proofread, glossary, review, recheck') },
-    (a) => run({ type: 'getClientTask', role: a.role, project: a.project, task: a.task })
+    'Leases the oldest waiting request of the client provider (for 10 minutes, or leaseMinutes) and returns taskId, meta, system, user, schema (when the answer is JSON), output (what to reply with), leaseMinutes and messages (only for a multi-turn request such as a JSON repair round: answer its last user message), or {none: true, waiting}. Answer it with submit_client_task. A lease that runs out puts the task back in the queue, and an answer that submit_client_task refuses starts the lease again. A task you took and cannot answer (or that a client that stopped took): release_client_task.',
+    {
+      role: z.string().optional().describe('glossary, translator, proofreader or qa'),
+      project: z.string().optional(),
+      task: z.string().optional().describe('For example translate, retry, retry-tags, fix, proofread, glossary, review, recheck'),
+      leaseMinutes: z.number().int().min(1).max(60).optional().describe('How long you hold it before it goes back to the queue (default 10)')
+    },
+    (a) => run({ type: 'getClientTask', role: a.role, project: a.project, task: a.task, leaseMinutes: a.leaseMinutes })
   )
   tool(
     'submit_client_task',
@@ -247,7 +266,12 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     { taskId: z.string().min(1), text: z.string() },
     (a) => run({ type: 'submitClientTask', taskId: a.taskId, text: a.text })
   )
-  tool('release_client_task', 'Gives a leased request back to the queue, for another client to take.', { taskId: z.string().min(1) }, (a) => run({ type: 'releaseClientTask', taskId: a.taskId }))
+  tool(
+    'release_client_task',
+    'Gives a leased request back to the queue, for another client to take: the one with taskId ({released: true or false}), or, with project and/or role and no taskId, every leased request that matches ({released: how many}). Use the second form at the start of a session to free what an earlier client that stopped still holds, instead of waiting for its lease to run out.',
+    { taskId: z.string().min(1).optional(), project: z.string().optional(), role: z.string().optional() },
+    (a) => run({ type: 'releaseClientTask', taskId: a.taskId, project: a.project, role: a.role })
+  )
 
   // ---- translate it yourself ----
 
@@ -354,14 +378,15 @@ async function snapshotOf(service: EngineService, id: string) {
 }
 
 /** The client-provider requests of one project: waiting and leased. */
-function clientCounts(service: EngineService, projectId: string): { waiting: number; leased: number } {
-  const mine = service.clientQueue.list().filter((t) => t.project === projectId)
+function clientCounts(service: EngineService, projectId: string, role?: string): { waiting: number; leased: number } {
+  const mine = service.clientQueue.list().filter((t) => t.project === projectId && (!role || t.role === role))
   const leased = mine.filter((t) => t.state === 'leased').length
   return { waiting: mine.length - leased, leased }
 }
 
-function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotOf>>, p: ProjectFile, errors: string[], timedOut: boolean) {
+function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotOf>>, p: ProjectFile, errors: string[], timedOut: boolean, role?: string) {
   const { counts, chunks } = s
+  const minors = chunks.flatMap((c) => c.qa.issues.filter((i) => i.severity === 'minor').map((i) => ({ chunk: c.index, segId: i.segId, type: i.type, comment: i.comment })))
   return {
     status: p.status,
     running: s.running,
@@ -370,14 +395,17 @@ function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotO
     total: chunks.length,
     counts,
     spend: p.spend,
-    clientTasks: clientCounts(service, p.id),
+    clientTasks: { ...clientCounts(service, p.id, role), ...(role ? { role } : {}) },
+    // minor QA issues stay in the text unless the project's fixMinorIssues setting sends them to the fixer: the first ones are listed here
+    minorIssues: minors.length,
+    ...(minors.length > 0 ? { minors: minors.slice(0, MAX_MINORS_LISTED) } : {}),
     ...(errors.length > 0 ? { errors } : {})
   }
 }
 
-async function waitForProgress(service: EngineService, bus: EngineBus, id: string, seconds: number) {
+async function waitForProgress(service: EngineService, bus: EngineBus, id: string, seconds: number, role?: string) {
   const first = await snapshotOf(service, id)
-  if (!first.running || clientCounts(service, id).waiting > 0) return describe(service, first, first.project, [], false)
+  if (!first.running || clientCounts(service, id, role).waiting > 0) return describe(service, first, first.project, [], false, role)
   const finished = (c: { done: number; failed: number }) => c.done + c.failed
   const baseline = finished(first.counts)
   const errors: string[] = []
@@ -385,7 +413,7 @@ async function waitForProgress(service: EngineService, bus: EngineBus, id: strin
     const timer = setTimeout(() => stop(true), seconds * 1000)
     // a request on the client provider has no event: look for one now and then
     const poll = setInterval(() => {
-      if (clientCounts(service, id).waiting > 0) stop(false)
+      if (clientCounts(service, id, role).waiting > 0) stop(false)
     }, 500)
     const stop = (late: boolean) => {
       clearTimeout(timer)
@@ -405,5 +433,5 @@ async function waitForProgress(service: EngineService, bus: EngineBus, id: strin
     })
   })
   const now = await snapshotOf(service, id)
-  return describe(service, now, now.project, errors, timedOut)
+  return describe(service, now, now.project, errors, timedOut, role)
 }

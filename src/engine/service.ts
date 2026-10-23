@@ -484,7 +484,7 @@ export class EngineService {
   }
 
   /** Writes the translated document to output/. Works with partial progress. Returns the path. */
-  async export(id: string, outPath?: string): Promise<string> {
+  async export(id: string, outPath?: string, opts: { cover?: 'source' | 'title' } = {}): Promise<string> {
     const project = await this.store.load(id)
     const ir = await this.store.readIr(id)
     const adapter = adapterFor(project.sourcePath) as unknown as AdapterExtras
@@ -506,7 +506,7 @@ export class EngineService {
       for (const g of sharedTargets(map)) onWarning(`${g.sources.join(' and ')} would all be called ${g.target}: give each character its own name in glossary.md`)
       if (Object.keys(map).length > 0) names = map
     }
-    await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning, names })
+    await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning, names, cover: opts.cover })
     this.emit({ type: 'log', projectId: id, level: 'info', message: `exported ${translations.size} block(s) to ${out}` })
     return out
   }

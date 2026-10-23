@@ -5,7 +5,9 @@ import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Document, Element, Node } from '@xmldom/xmldom'
 import type { Block, BlockKind, DocumentIR, FormatAdapter, InlineTag, Section, WriteOptions } from '../../shared/ir'
 import { type InlineNode, resolveTranslation } from '../publish/inlineTree'
+import { coverAltText, titleCoverSvg } from '../publish/cover'
 import { isRtl } from '../publish/lang'
+import { escapeXml, xhtmlPage } from '../publish/xhtml'
 import { stripTags } from './inline'
 
 /**
@@ -322,6 +324,21 @@ async function read(file: string): Promise<DocumentIR> {
   return { format: 'epub', meta: { title: title || undefined, language: lang || undefined }, sections }
 }
 
+/** The archive paths of the images the package declares as its cover (`cover-image` property, or the EPUB 2 `<meta name="cover">`). */
+function coverImagePaths(opf: Document, opfPath: string): { id: string; path: string; item: Element }[] {
+  const dir = path.posix.dirname(opfPath)
+  const metaId = Array.from(opf.getElementsByTagName('meta')).find((m) => m.getAttribute('name') === 'cover')?.getAttribute('content')
+  const out: { id: string; path: string; item: Element }[] = []
+  for (const it of Array.from(opf.getElementsByTagName('item'))) {
+    const id = it.getAttribute('id') ?? ''
+    const props = (it.getAttribute('properties') ?? '').split(/\s+/)
+    if (props.includes('cover-image') || (metaId && id === metaId)) out.push({ id, path: path.posix.normalize(path.posix.join(dir === '.' ? '' : dir, decode((it.getAttribute('href') ?? '').split('#')[0]!))), item: it })
+  }
+  return out
+}
+
+const relativeTo = (fromFile: string, to: string) => path.posix.relative(path.posix.dirname(fromFile), to)
+
 async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath: string, outPath: string, opts: WriteOptions = {}): Promise<void> {
   const { zip, opfPath, opf, entries } = await loadEpub(srcPath)
   const lang = opts.targetLanguage?.trim() || undefined
@@ -347,12 +364,31 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
       else if (spine.getAttribute('page-progression-direction') === 'rtl') spine.removeAttribute('page-progression-direction')
     }
   }
+  // the cover: its alt text names the translated title; with `cover: 'title'` the image is replaced by a plain title page
+  const newTitle = t !== undefined ? stripTags(t).trim() : ''
+  const covers = coverImagePaths(opf, opfPath)
+  const coverPaths = new Set(covers.map((c) => c.path))
+  const opfDir = path.posix.dirname(opfPath) === '.' ? '' : path.posix.dirname(opfPath)
+  const newCover = { svg: path.posix.join(opfDir, 'translated-cover.svg'), page: path.posix.join(opfDir, 'translated-cover.xhtml'), used: false }
+  const extra = new Map<string, string>()
+  const alt = newTitle ? coverAltText(newTitle, lang) : ''
+
   replaced.set(opfPath, serialize(opf))
 
   for (const [i, e] of entries.entries()) {
     const text = await readText(zip, e.path)
     const doc = text ? parseDoc(text, e) : null
     if (!doc) continue
+    for (const img of Array.from(doc.getElementsByTagName('img'))) {
+      const src = img.getAttribute('src') ?? ''
+      const isCover = coverPaths.has(path.posix.normalize(path.posix.join(path.posix.dirname(e.path), decode(src.split('#')[0]!)))) || /^cover\b/i.test((img.getAttribute('alt') ?? '').trim())
+      if (!isCover) continue
+      if (alt) img.setAttribute('alt', alt)
+      if (opts.cover === 'title' && coverPaths.has(path.posix.normalize(path.posix.join(path.posix.dirname(e.path), decode(src.split('#')[0]!))))) {
+        img.setAttribute('src', relativeTo(e.path, newCover.svg))
+        newCover.used = true
+      }
+    }
     const key = `d${i + 1}`
     const all = [...(e.kind === 'ncx' ? [] : [extractTitle(doc, key)]), ...(e.kind === 'ncx' ? extractNcx(doc, key) : extractXhtml(doc, key, e.kind === 'nav'))]
     for (const ex of all) {
@@ -364,6 +400,41 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
     replaced.set(e.path, serialize(doc))
   }
 
+  if (opts.cover === 'title') {
+    const author = opf.getElementsByTagNameNS(DC, 'creator')[0]?.textContent?.trim()
+    extra.set(newCover.svg, titleCoverSvg(newTitle || collapse(opfTitleEl(opf)?.textContent ?? ''), author))
+    const ns = opf.documentElement?.namespaceURI ?? null
+    const manifest = opf.getElementsByTagName('manifest')[0]
+    const spine = opf.getElementsByTagName('spine')[0]
+    if (manifest) {
+      for (const c of covers) {
+        const props = (c.item.getAttribute('properties') ?? '').split(/\s+/).filter((p) => p && p !== 'cover-image')
+        if (props.length > 0) c.item.setAttribute('properties', props.join(' '))
+        else c.item.removeAttribute('properties')
+      }
+      const svgItem = opf.createElementNS(ns, 'item')
+      svgItem.setAttribute('id', 'translated-cover')
+      svgItem.setAttribute('href', path.posix.relative(opfDir || '.', newCover.svg))
+      svgItem.setAttribute('media-type', 'image/svg+xml')
+      svgItem.setAttribute('properties', 'cover-image')
+      manifest.appendChild(svgItem)
+      for (const m of Array.from(opf.getElementsByTagName('meta'))) if (m.getAttribute('name') === 'cover') m.setAttribute('content', 'translated-cover')
+      if (!newCover.used && spine) {
+        // the book had no cover page to point at the new image: add one at the start of the reading order
+        extra.set(newCover.page, xhtmlPage(newTitle || 'Cover', `<div style="text-align:center"><img src="${escapeXml(relativeTo(newCover.page, newCover.svg))}" alt="${escapeXml(alt || 'Cover')}" style="max-width:100%;max-height:100%"/></div>`, { lang: lang ?? 'en', epubType: 'cover', css: 'translated-cover.css' }).replace(/<link[^>]*>\n?/, ''))
+        const pageItem = opf.createElementNS(ns, 'item')
+        pageItem.setAttribute('id', 'translated-cover-page')
+        pageItem.setAttribute('href', path.posix.relative(opfDir || '.', newCover.page))
+        pageItem.setAttribute('media-type', 'application/xhtml+xml')
+        manifest.appendChild(pageItem)
+        const ref = opf.createElementNS(ns, 'itemref')
+        ref.setAttribute('idref', 'translated-cover-page')
+        spine.insertBefore(ref, spine.firstChild)
+      }
+      replaced.set(opfPath, serialize(opf))
+    }
+  }
+
   const out = new JSZip()
   const mimetype = zip.file('mimetype')
   out.file('mimetype', mimetype ? await mimetype.async('uint8array') : 'application/epub+zip', { compression: 'STORE', createFolders: false })
@@ -373,6 +444,7 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
     const data = replaced.get(name) ?? (await entry.async('uint8array'))
     out.file(name, data, { date: entry.date, createFolders: false, compression: 'DEFLATE' })
   }
+  for (const [name, data] of extra) out.file(name, data, { createFolders: false, compression: 'DEFLATE' })
   await fs.writeFile(outPath, await out.generateAsync({ type: 'nodebuffer', mimeType: 'application/epub+zip' }))
 }
 

@@ -75,6 +75,18 @@ describe('pipeline end to end (mock models)', () => {
     expect(await fs.readFile(await r.service.export(id), 'utf8')).toContain('[hr]')
   })
 
+  it('keeps the brief the user set when the glossary pass returns another', async () => {
+    r = await rig()
+    const id = await r.create({ enabled: { glossary: true, proofreader: false, qa: false } })
+    await r.service.setBrief(id, '- Tone: dry and cold\n- Rules: keep French lines as they are')
+    expect((await r.service.start(id)).status).toBe('done')
+    const brief = await fs.readFile(r.service.store.file(id, 'brief.md'), 'utf8')
+    expect(brief).toContain('- Tone: dry and cold')
+    expect(brief).toContain('keep French lines as they are')
+    expect(brief).not.toContain('Tone: light')
+    expect(brief).toContain('Genre: fiction')
+  })
+
   it('translates without the glossary when the builder cannot answer', async () => {
     r = await rig()
     r.mock.on({ role: 'glossary' }, 'I do not know JSON')
@@ -355,6 +367,21 @@ describe('proofreader and QA', () => {
     expect((await r.service.start(id)).counts.flagged).toBe(0)
     expect(r.calls('translator', 'fix')).toHaveLength(0)
     expect((await r.service.store.listChunks(id))[0]!.qa.issues).toHaveLength(1)
+  })
+
+  it('sends minor issues to the fixer too with fixMinorIssues', async () => {
+    r = await rig()
+    r.mock.on({ role: 'qa' }, (req) => {
+      const user = lastUser(req)
+      if (unitOf(req) !== 'chunk-1' || user.includes('[fixed]')) return '{"issues":[]}'
+      return JSON.stringify({ issues: [{ segId: segsIn(user, 'pair')[0]!.id, type: 'mistranslation', severity: 'minor', comment: 'Slightly off.' }] })
+    })
+    const id = await r.create({ enabled: { glossary: false, proofreader: false, qa: true }, fixMinorIssues: true })
+    expect((await r.service.start(id)).status).toBe('done')
+    expect(r.calls('translator', 'fix').map((c) => c.unit)).toEqual(['chunk-1'])
+    const chunk = (await r.service.store.listChunks(id))[0]!
+    expect(chunk.final[chunk.segments[0]!.id]).toContain('[fixed]')
+    expect(chunk.qa.issues).toEqual([])
   })
 
   it('uses deterministic checks when the QA model answers nonsense', async () => {

@@ -3,8 +3,12 @@ import type { ClientTaskResult } from '../../shared/protocol'
 import { estimateTokens } from './types'
 import type { ChatEvent, ChatMessage, ChatRequest, ProviderClient, RequestMeta } from './types'
 
-/** Default lease: how long a client has to answer a task it took before the task goes back to waiting. */
-export const DEFAULT_LEASE_MS = 30 * 60 * 1000
+/**
+ * Default lease: how long a client has to answer a task it took before the task goes back to waiting. The MCP endpoint has no sessions, so a client that
+ * stopped cannot be noticed: the lease is short (a client asks for more with `leaseMinutes`), a refused answer renews it, and `release` can free a
+ * dead client's tasks by project or role.
+ */
+export const DEFAULT_LEASE_MS = 10 * 60 * 1000
 
 /** One model request that waits for a client (Claude Code over MCP) to answer it. Meta fields are '' when the request had none. */
 export interface ClientTask {
@@ -25,6 +29,8 @@ export interface ClientTask {
   createdAt: number
   /** Epoch ms: set while a client holds the task. */
   leaseUntil?: number
+  /** The length of the lease the client got, so a renewal gives the same again. */
+  leaseMs?: number
 }
 
 export interface ClientTaskSummary {
@@ -140,6 +146,7 @@ export class ClientTaskQueue {
       if (filter.project && task.project !== filter.project) continue
       if (filter.task && task.task !== filter.task) continue
       task.leaseUntil = this.now() + leaseMs
+      task.leaseMs = leaseMs
       return { ...task }
     }
     return null
@@ -156,7 +163,11 @@ export class ClientTaskQueue {
     if (!text.trim()) return { accepted: false, problems: ['the text is empty'] }
     if (entry.task.schema) {
       const problems = checkAgainstSchema(text, entry.task.schema)
-      if (problems.length > 0) return { accepted: false, problems }
+      // the client is working on it: a refused answer starts the lease again
+      if (problems.length > 0) {
+        if (entry.task.leaseUntil !== undefined) entry.task.leaseUntil = this.now() + (entry.task.leaseMs ?? DEFAULT_LEASE_MS)
+        return { accepted: false, problems }
+      }
     }
     this.entries.delete(id)
     entry.resolve(text)
@@ -169,6 +180,21 @@ export class ClientTaskQueue {
     if (!entry) return false
     delete entry.task.leaseUntil
     return true
+  }
+
+  /** Gives back every leased task that matches (a new client freeing what a client that stopped held). Returns how many. */
+  releaseLeased(filter: ClientTaskFilter = {}): number {
+    this.expire()
+    let n = 0
+    for (const { task } of this.entries.values()) {
+      if (task.leaseUntil === undefined) continue
+      if (filter.role && task.role !== filter.role) continue
+      if (filter.project && task.project !== filter.project) continue
+      if (filter.task && task.task !== filter.task) continue
+      delete task.leaseUntil
+      n++
+    }
+    return n
   }
 
   /** Drops a task (its request was aborted). Its `done` rejects with an AbortError. False when it is already gone. */
@@ -267,7 +293,7 @@ export function clientTaskResult(t: ClientTask): ClientTaskResult {
     ...(t.schema ? { schema: t.schema } : {}),
     ...(t.maxTokens !== undefined ? { maxTokens: t.maxTokens } : {}),
     output: t.schema ? SCHEMA_OUTPUT : segText ? SEG_OUTPUT : TEXT_OUTPUT,
-    leaseMinutes: 30
+    leaseMinutes: Math.round((t.leaseMs ?? DEFAULT_LEASE_MS) / 60000)
   }
 }
 

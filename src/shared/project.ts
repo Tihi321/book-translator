@@ -47,6 +47,8 @@ export interface ProjectSettings {
   clientOnly?: boolean
   /** Visual-novel book folders only (default off): the character names are localized with the glossary's `person` entries, in speaker tags, `ON SCREEN:` lines and the bible. */
   localizeNames?: boolean
+  /** Default off: only major QA issues go to the fixer. On: the minor ones are sent too (and the chunk is checked again). */
+  fixMinorIssues?: boolean
   /** Parallel translation. `maxAtOnce: auto` follows the translator provider's concurrency; `splitSections` also runs the chunks of one section at the same time. */
   parallel: ParallelSettings
 }

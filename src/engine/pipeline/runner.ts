@@ -12,7 +12,7 @@ import type { DocumentIR } from '../../shared/ir'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
 import type { AgentEnv, CallFn } from './env'
-import { buildGlossary, serializeBrief } from './glossary'
+import { buildGlossary, mergeBriefText } from './glossary'
 import { characterLabels, ensureNameEntries, isPlaceholderName, localizesNames } from './names'
 import { proofreadChunk } from './proofreader'
 import { fixChunk, reviewChunk } from './qa'
@@ -172,7 +172,8 @@ export class ProjectRunner {
       await store.writeGlossary(project.id, res.entries)
       await this.ensureNames(ir)
       const hasBrief = res.brief.characters.length > 0 || [res.brief.genre, res.brief.tone, res.brief.register, res.brief.pov, res.brief.address].some(Boolean)
-      if (hasBrief) await store.writeBrief(project.id, serializeBrief(res.brief))
+      // a brief the user wrote (set_brief, or edited by hand) keeps all its text: the pass only adds what is missing
+      if (hasBrief) await store.writeBrief(project.id, mergeBriefText(await store.readBrief(project.id), res.brief))
       project.glossaryDone = true
       await store.save(project)
       this.log(res.failed > 0 ? 'warn' : 'info', `glossary built: ${res.entries.length} terms in ${res.passes} pass(es)${res.failed > 0 ? `, ${res.failed} of them failed and were skipped` : ''}`)
@@ -355,7 +356,7 @@ export class ProjectRunner {
     if (settings.enabled.qa) {
       await this.setState(chunk, 'reviewing')
       let issues = await reviewChunk(env, segs, chunk.final, { unit })
-      const bad = new Set(issues.filter(isMajor).map((i) => i.segId))
+      const bad = new Set((settings.fixMinorIssues === true ? issues : issues.filter(isMajor)).map((i) => i.segId))
       if (bad.size > 0) {
         await this.setState(chunk, 'fixing')
         const fixed = await fixChunk(env, segs, chunk.final, issues.filter((i) => bad.has(i.segId)), { unit })
