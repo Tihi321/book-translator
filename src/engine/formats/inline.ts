@@ -71,3 +71,8 @@ function isNested(tokens: TagToken[]): boolean {
 export function stripTags(text: string): string {
   return text.replace(TAG_RE, (m, a: string, _n: string, b: string) => (a === '/' && b === '/' ? m : ''))
 }
+
+/** The text outside the paired tags (`<1>...</1>` with its content removed; void tags just vanish): what is left of a line without its speaker tag or markup spans. */
+export function textOutsideTags(text: string): string {
+  return stripTags(text.replace(/<(\d+)>[\s\S]*?<\/\1>/g, ' '))
+}

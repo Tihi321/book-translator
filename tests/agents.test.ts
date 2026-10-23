@@ -136,6 +136,18 @@ describe('deterministic QA checks', () => {
     expect(deterministicChecks([seg('a', 'This is entirely untranslated text.')], { a: 'This is entirely untranslated text.' }, [], { sameLanguage: true })).toEqual([])
   })
 
+  it('does not flag a kept line behind a speaker tag, but still a real untranslated sentence', () => {
+    expect(kinds([seg('a', '<1>INÈS (angry):</1> Basszus.')], { a: '<1>INÈS (angry):</1> Basszus.' })).toEqual([])
+    expect(kinds([seg('a', '<1>INÈS:</1> This sentence stayed in English.')], { a: '<1>INÈS:</1> This sentence stayed in English.' })).toContain('a:untranslated:major')
+  })
+
+  it('does not flag a line made of kept glossary terms', () => {
+    const keep = [{ source: 'Sol Invictus', target: 'Sol Invictus', type: 'term' }]
+    expect(deterministicChecks([seg('a', 'Sol Invictus')], { a: 'Sol Invictus' }, keep)).toEqual([])
+    expect(deterministicChecks([seg('a', 'Sol Invictus rises again')], { a: 'Sol Invictus rises again' }, keep).map((i) => i.type)).toEqual([])
+    expect(deterministicChecks([seg('a', 'Sol Invictus rises again today')], { a: 'Sol Invictus rises again today' }, keep).map((i) => i.type)).toContain('untranslated')
+  })
+
   it('flags length outliers', () => {
     const src = 'A fairly long sentence that should have a fairly long translation as well.'
     expect(kinds([seg('a', src)], { a: 'Kratko.' })).toEqual(['a:omission:major'])

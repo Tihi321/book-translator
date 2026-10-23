@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import { stripTags, validateTags } from '../formats/inline'
+import { stripTags, textOutsideTags, validateTags } from '../formats/inline'
 import type { GlossaryEntry, IssueType, QaIssue, SegmentRec } from '../../shared/project'
 import { chatFn } from './env'
 import type { AgentEnv } from './env'
-import { formatEntries, relevantEntries } from './glossary'
+import { formatEntries, normalizeTerm, relevantEntries } from './glossary'
 import { chatJson } from './llm'
 import { buildMessages } from './prompts'
 import { describeParse, formatSegments, parseSegments } from './segments'
@@ -17,6 +17,21 @@ const MAX_RATIO = 2.5
 const MIN_CHARS_FOR_RATIO = 25
 
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length
+
+/**
+ * True when the text is long enough to count as left untranslated. Only the words outside inline tags count (a speaker tag
+ * like `<1>INÈS (angry):</1>` is not text), and the terms of glossary rows kept as they are (source == target) do not count either.
+ * A line made only of tagged text counts in full. The brief's free-text "kept as is" rules are not parsed: use a keep row in the glossary.
+ */
+function looksUntranslated(srcRaw: string, src: string, glossary: readonly GlossaryEntry[]): boolean {
+  if (!/\p{L}{2}/u.test(src)) return false
+  let body = textOutsideTags(srcRaw).trim() || src
+  for (const e of glossary) {
+    const t = e.source.trim()
+    if (t && normalizeTerm(e.source) === normalizeTerm(e.target)) body = body.split(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')).join(' ')
+  }
+  return words(body) >= 3
+}
 
 /**
  * Checks that need no model: length ratio outliers, text left untranslated (source == target), glossary term missing in the
@@ -40,7 +55,7 @@ export function deterministicChecks(
       const bits = [c.missing.length ? `missing ${c.missing.join(' ')}` : '', c.extra.length ? `unexpected ${c.extra.join(' ')}` : '', c.misnested ? 'not nested' : ''].filter(Boolean)
       issues.push({ segId: s.id, type: 'tags', severity: 'major', comment: `Inline tags differ from the source (${bits.join(', ')}).` })
     }
-    if (!opts.sameLanguage && src && src === tgt && words(src) >= 3 && /\p{L}{2}/u.test(src)) {
+    if (!opts.sameLanguage && src && src === tgt && looksUntranslated(s.text, src, glossary)) {
       issues.push({ segId: s.id, type: 'untranslated', severity: 'major', comment: 'The translation is identical to the source text.' })
     } else if (src.length >= MIN_CHARS_FOR_RATIO) {
       const ratio = tgt.length / src.length
