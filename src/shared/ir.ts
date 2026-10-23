@@ -54,6 +54,8 @@ export interface WriteOptions {
    * bible's character bullets). Unset or empty: the folder is written byte for byte as it was.
    */
   names?: Record<string, string>
+  /** EPUB: `title` replaces the cover image by a plain title page made from the translated title and the author (default `source`: the original image, with its alt text translated). */
+  cover?: 'source' | 'title'
 }
 
 export interface FormatAdapter {

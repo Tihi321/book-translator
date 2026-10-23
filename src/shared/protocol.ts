@@ -279,7 +279,8 @@ export type Command =
   | { type: 'retryChunk'; projectId: string; index: number; model?: string }
   | { type: 'editChunk'; projectId: string; index: number; final: Record<string, string> }
   | { type: 'updateGlossary'; projectId: string; entries: GlossaryEntry[] }
-  | { type: 'export'; projectId: string; outPath?: string }
+  /** EPUB: `cover: 'title'` replaces the cover image by a plain title page with the translated title (default: the source cover, alt text translated). */
+  | { type: 'export'; projectId: string; outPath?: string; cover?: 'source' | 'title' }
   | { type: 'deleteProject'; projectId: string }
   /** Asks a provider for every chat model it lists (`GET /models`). The list is kept for `showModels`. */
   | { type: 'detectModels'; provider: string }

@@ -137,3 +137,68 @@ expect(byText('Plain item').kind).toBe('item')
     expect(ch2).toContain('lang="en"')
   })
 })
+
+describe('epub cover', () => {
+  /** The test book with a cover page (an image with English alt text) and an author. */
+  async function withCover(cover?: 'source' | 'title') {
+    const { dir, src, out } = await setup()
+    const zip = await JSZip.loadAsync(await fs.readFile(src))
+    let opf = await zip.file('OEBPS/content.opf')!.async('string')
+    opf = opf
+      .replace('<dc:language>', '<dc:creator>Jane Roe</dc:creator><dc:language>')
+      .replace('</manifest>', '<item id="cov" href="images/cover.png" media-type="image/png" properties="cover-image"/><item id="covp" href="text/cover.xhtml" media-type="application/xhtml+xml"/></manifest>')
+      .replace('<spine toc="ncx">', '<spine toc="ncx"><itemref idref="covp"/>')
+    zip.file('OEBPS/content.opf', opf)
+    zip.file('OEBPS/images/cover.png', PNG)
+    zip.file('OEBPS/text/cover.xhtml', '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title></head><body><div><img src="../images/cover.png" alt="Cover of The Test Book"/></div></body></html>')
+    await fs.writeFile(src, await zip.generateAsync({ type: 'uint8array' }))
+    const adapter = adapterFor(src)
+    const ir = await adapter.read(src)
+    const tr = new Map<string, string>([['m.1', 'Probna knjiga']])
+    await adapter.write(ir, tr, src, out, { targetLanguage: 'hr', cover })
+    return { dir, out, zip: await JSZip.loadAsync(await fs.readFile(out)) }
+  }
+
+  it('translates the alt text of the cover and keeps the source image by default', async () => {
+    const { zip } = await withCover()
+    const page = await zip.file('OEBPS/text/cover.xhtml')!.async('string')
+    expect(page).toContain('alt="Naslovnica: Probna knjiga"')
+    expect(page).toContain('src="../images/cover.png"')
+    expect(zip.file('OEBPS/translated-cover.svg')).toBeNull()
+  })
+
+  it('uses just the title as alt text for a language without a known cover word', async () => {
+    const { src, out } = await setup()
+    const adapter = adapterFor(src)
+    const zip = await JSZip.loadAsync(await fs.readFile(src))
+    zip.file('OEBPS/text/ch2.xhtml', '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p><img src="../images/pic.png" alt="Cover of The Test Book"/></p></body></html>')
+    await fs.writeFile(src, await zip.generateAsync({ type: 'uint8array' }))
+    const ir = await adapter.read(src)
+    await adapter.write(ir, new Map([['m.1', 'Xyz']]), src, out, { targetLanguage: 'xx' })
+    expect(await (await JSZip.loadAsync(await fs.readFile(out))).file('OEBPS/text/ch2.xhtml')!.async('string')).toContain('alt="Xyz"')
+  })
+
+  it('cover title: a title page replaces the source cover image', async () => {
+    const { zip } = await withCover('title')
+    const svg = await zip.file('OEBPS/translated-cover.svg')!.async('string')
+    expect(svg).toContain('Probna')
+    expect(svg).toContain('Jane Roe')
+    const page = await zip.file('OEBPS/text/cover.xhtml')!.async('string')
+    expect(page).toContain('src="../translated-cover.svg"')
+    expect(page).toContain('alt="Naslovnica: Probna knjiga"')
+    const opf = await zip.file('OEBPS/content.opf')!.async('string')
+    expect(opf).toContain('href="translated-cover.svg" media-type="image/svg+xml" properties="cover-image"')
+    expect(opf).not.toContain('id="cov" href="images/cover.png" media-type="image/png" properties')
+  })
+  it('cover title on a book without a cover adds a cover page first in the reading order', async () => {
+    const { src, out } = await setup()
+    const adapter = adapterFor(src)
+    const ir = await adapter.read(src)
+    await adapter.write(ir, new Map([['m.1', 'Probna knjiga']]), src, out, { targetLanguage: 'hr', cover: 'title' })
+    const zip = await JSZip.loadAsync(await fs.readFile(out))
+    expect(zip.file('OEBPS/translated-cover.svg')).not.toBeNull()
+    expect(await zip.file('OEBPS/translated-cover.xhtml')!.async('string')).toContain('src="translated-cover.svg"')
+    expect(await zip.file('OEBPS/content.opf')!.async('string')).toContain('<spine toc="ncx"><itemref idref="translated-cover-page"/>')
+    expect((await adapter.read(out)).sections.length).toBeGreaterThan(0)
+  })
+})

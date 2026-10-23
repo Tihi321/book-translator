@@ -224,7 +224,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     await run({ type: 'setBrief', projectId: a.projectId, brief: a.brief })
     return { saved: true }
   })
-  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath }))
+  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)'), cover: z.enum(['source', 'title']).optional().describe('EPUB only. source (default): keep the cover image and translate its alt text. title: replace it by a plain title page with the translated title and the author (the source cover has the original title drawn on it).') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath, cover: a.cover }))
 
   // ---- the client provider: you answer the app's model calls ----
 

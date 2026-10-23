@@ -179,10 +179,10 @@ async function serviceFor(argv: string[]): Promise<{ service: EngineService; id:
 export async function exportProject(argv: string[]): Promise<number> {
   const s = await serviceFor(argv)
   if (!s) {
-    out('Usage: npm run engine -- export <projectId> [--out <file>]')
+    out('Usage: npm run engine -- export <projectId> [--out <file>] [--cover title]')
     return 2
   }
-  out(`output: ${await s.service.export(s.id, argValue(argv, 'out'))}`)
+  out(`output: ${await s.service.export(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined })}`)
   return 0
 }
 

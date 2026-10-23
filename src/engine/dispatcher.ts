@@ -534,7 +534,7 @@ export class CommandDispatcher {
         await s.updateGlossary(cmd.projectId, cmd.entries)
         return undefined
       case 'export': {
-        const out = await s.export(cmd.projectId, cmd.outPath)
+        const out = await s.export(cmd.projectId, cmd.outPath, { cover: cmd.cover })
         return { path: out, rel: this.exportRel(out) }
       }
       case 'deleteProject':
