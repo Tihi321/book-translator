@@ -88,16 +88,48 @@ export function mergeGlossary(base: readonly GlossaryEntry[], extra: readonly Gl
   return out
 }
 
-/** The entries whose source term occurs in the text (case-insensitive). */
+const wordRe = new Map<string, RegExp | null>()
+
+/** A whole-word, case-insensitive matcher for a glossary source term: letters and digits on either side break the match, spaces in the term match any run of white space. */
+function termRegExp(term: string): RegExp | null {
+  const key = normalizeTerm(term)
+  let re = wordRe.get(key)
+  if (re === undefined) {
+    const body = key
+      .split(' ')
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('\\s+')
+    re = body ? new RegExp('(?<![\\p{L}\\p{N}])' + body + '(?![\\p{L}\\p{N}])', 'iu') : null
+    wordRe.set(key, re)
+  }
+  return re
+}
+
+/** The entries whose source term occurs in the text as a whole word or phrase (case-insensitive, Unicode-aware: "Da" is not found in "day"). */
 export function relevantEntries(entries: readonly GlossaryEntry[], text: string, limit = 60): GlossaryEntry[] {
-  const hay = text.normalize('NFC').toLowerCase()
+  const hay = text.normalize('NFC')
   const out: GlossaryEntry[] = []
   for (const e of entries) {
-    const s = e.source.normalize('NFC').toLowerCase().trim()
-    if (s && hay.includes(s)) out.push(e)
+    const re = termRegExp(e.source)
+    if (re && re.test(hay)) out.push(e)
     if (out.length >= limit) break
   }
   return out
+}
+
+/**
+ * True when the translation has the glossary target, also in an inflected form: every word of the target counts as present when its stem
+ * is (the word minus its last 2 letters when it has 7 or more, minus the last letter when it has 5 or 6, whole when shorter).
+ */
+export function hasTarget(translation: string, target: string): boolean {
+  const hay = translation.normalize('NFC').toLowerCase()
+  const words = target.normalize('NFC').toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return true
+  return words.every((w) => {
+    const letters = Array.from(w)
+    const cut = letters.length >= 7 ? 2 : letters.length >= 5 ? 1 : 0
+    return hay.includes(letters.slice(0, letters.length - cut).join(''))
+  })
 }
 
 export function formatEntries(entries: readonly GlossaryEntry[]): string {

@@ -155,6 +155,11 @@ describe('deterministic QA checks', () => {
     expect(kinds([seg('a', src)], { a: 'Prilično duga rečenica koja bi trebala imati prilično dug prijevod.' })).toEqual([])
   })
 
+  it('accepts an inflected glossary target and ignores a source term inside another word', () => {
+    expect(kinds([seg('a', 'Alice walked home through the park.')], { a: 'Vidjela sam Alisu kako šeće parkom.' })).toEqual([])
+    expect(kinds([seg('a', 'Malice walked home through the park.')], { a: 'Ana je šetala kući kroz park.' })).toEqual([])
+  })
+
   it('flags a missing glossary term as minor', () => {
     expect(kinds([seg('a', 'Alice walked home through the park.')], { a: 'Ana je šetala kući kroz park.' })).toEqual(['a:glossary:minor'])
     expect(kinds([seg('a', 'Alice walked home through the park.')], { a: 'Alisa je šetala kući kroz park.' })).toEqual([])

@@ -3,7 +3,7 @@ import { stripTags, textOutsideTags, validateTags } from '../formats/inline'
 import type { GlossaryEntry, IssueType, QaIssue, SegmentRec } from '../../shared/project'
 import { chatFn } from './env'
 import type { AgentEnv } from './env'
-import { formatEntries, normalizeTerm, relevantEntries } from './glossary'
+import { formatEntries, hasTarget, normalizeTerm, relevantEntries } from './glossary'
 import { chatJson } from './llm'
 import { buildMessages } from './prompts'
 import { describeParse, formatSegments, parseSegments } from './segments'
@@ -63,7 +63,7 @@ export function deterministicChecks(
       else if (ratio > MAX_RATIO) issues.push({ segId: s.id, type: 'addition', severity: 'minor', comment: `The translation is much longer than the source (${Math.round(ratio * 100)}% of its length); text may have been added.` })
     }
     for (const g of relevantEntries(glossary, s.text)) {
-      if (!tgt.toLowerCase().includes(g.target.toLowerCase())) {
+      if (!hasTarget(tgt, g.target)) {
         issues.push({ segId: s.id, type: 'glossary', severity: 'minor', comment: `Glossary term "${g.source}" should be "${g.target}", which is not in the translation.`, suggestion: g.target })
       }
     }
