@@ -202,6 +202,7 @@ export async function projectStatus(argv: string[]): Promise<number> {
   for (const c of chunks) {
     if (c.state === 'failed') out(`  chunk ${c.index} failed: ${c.error}`)
     for (const i of c.qa.issues.filter((x) => x.severity === 'major')) out(`  chunk ${c.index} ${i.segId} ${i.type}: ${i.comment}`)
+    for (const i of c.qa.issues.filter((x) => x.severity === 'minor')) out(`  chunk ${c.index} ${i.segId} ${i.type} (minor): ${i.comment}`)
   }
   return 0
 }

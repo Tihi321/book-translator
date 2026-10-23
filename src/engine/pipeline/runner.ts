@@ -356,7 +356,7 @@ export class ProjectRunner {
     if (settings.enabled.qa) {
       await this.setState(chunk, 'reviewing')
       let issues = await reviewChunk(env, segs, chunk.final, { unit })
-      const bad = new Set(issues.filter(isMajor).map((i) => i.segId))
+      const bad = new Set((settings.fixMinorIssues === true ? issues : issues.filter(isMajor)).map((i) => i.segId))
       if (bad.size > 0) {
         await this.setState(chunk, 'fixing')
         const fixed = await fixChunk(env, segs, chunk.final, issues.filter((i) => bad.has(i.segId)), { unit })

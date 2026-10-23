@@ -369,6 +369,21 @@ describe('proofreader and QA', () => {
     expect((await r.service.store.listChunks(id))[0]!.qa.issues).toHaveLength(1)
   })
 
+  it('sends minor issues to the fixer too with fixMinorIssues', async () => {
+    r = await rig()
+    r.mock.on({ role: 'qa' }, (req) => {
+      const user = lastUser(req)
+      if (unitOf(req) !== 'chunk-1' || user.includes('[fixed]')) return '{"issues":[]}'
+      return JSON.stringify({ issues: [{ segId: segsIn(user, 'pair')[0]!.id, type: 'mistranslation', severity: 'minor', comment: 'Slightly off.' }] })
+    })
+    const id = await r.create({ enabled: { glossary: false, proofreader: false, qa: true }, fixMinorIssues: true })
+    expect((await r.service.start(id)).status).toBe('done')
+    expect(r.calls('translator', 'fix').map((c) => c.unit)).toEqual(['chunk-1'])
+    const chunk = (await r.service.store.listChunks(id))[0]!
+    expect(chunk.final[chunk.segments[0]!.id]).toContain('[fixed]')
+    expect(chunk.qa.issues).toEqual([])
+  })
+
   it('uses deterministic checks when the QA model answers nonsense', async () => {
     r = await rig()
     r.mock.on({ role: 'qa' }, 'not json')

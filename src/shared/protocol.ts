@@ -307,11 +307,11 @@ export type Command =
   /** The waiting and leased requests of the `client` provider. */
   | { type: 'listClientTasks' }
   /** Leases the oldest waiting `client` task that matches (an MCP client answers it with `submitClientTask`). */
-  | { type: 'getClientTask'; role?: string; project?: string; task?: string }
+  | { type: 'getClientTask'; role?: string; project?: string; task?: string; leaseMinutes?: number }
   /** Answers a `client` task. A reply that fails the task's schema is not accepted and the task stays leased. */
   | { type: 'submitClientTask'; taskId: string; text: string }
-  /** Gives a leased `client` task back to the queue. */
-  | { type: 'releaseClientTask'; taskId: string }
+  /** Gives a leased `client` task back to the queue, or (with `project` and/or `role`, no `taskId`) every leased task that matches. */
+  | { type: 'releaseClientTask'; taskId?: string; project?: string; role?: string }
 
 export type CommandType = Command['type']
 
@@ -352,7 +352,7 @@ export interface CommandResults {
   listClientTasks: ClientTaskCounts & { tasks: ClientTaskSummary[] }
   getClientTask: ClientTaskResult
   submitClientTask: { accepted: true } | { accepted: false; problems: string[] }
-  releaseClientTask: { released: boolean }
+  releaseClientTask: { released: boolean | number }
 }
 
 export type CommandOf<K extends CommandType> = Extract<Command, { type: K }>

@@ -89,6 +89,29 @@ describe('ClientTaskQueue', () => {
     expect(q.release('nope#1')).toBe(false)
   })
 
+  it('leases for 10 minutes by default, renews a lease on a refused answer, and releases leased tasks by project', () => {
+    let now = 0
+    const q = new ClientTaskQueue({ now: () => now })
+    q.add({ messages: MSGS, schema: SCHEMA }, { job: 'a', role: 'translator', project: 'p' })
+    q.add({ messages: MSGS }, { job: 'b', role: 'qa', project: 'p' })
+    q.add({ messages: MSGS }, { job: 'c', role: 'qa', project: 'other' })
+    const a = q.lease({ role: 'translator' })!
+    expect((clientTaskResult(a) as { leaseMinutes: number }).leaseMinutes).toBe(10)
+    now += 9 * 60_000
+    expect(q.submit('a#1', 'not json')).toMatchObject({ accepted: false })
+    now += 9 * 60_000 // 18 minutes after the lease, but the refused answer started it again
+    expect(q.counts()).toEqual({ waiting: 2, leased: 1 })
+    now += 2 * 60_000
+    expect(q.counts()).toEqual({ waiting: 3, leased: 0 })
+    q.lease({ role: 'qa', project: 'p' }, 90 * 1000)
+    q.lease({ role: 'qa', project: 'other' })
+    q.lease({ role: 'translator' })
+    expect(q.releaseLeased({ project: 'p', role: 'qa' })).toBe(1)
+    expect(q.counts()).toEqual({ waiting: 1, leased: 2 })
+    expect(q.releaseLeased({ project: 'p' })).toBe(1)
+    expect(q.releaseLeased({ project: 'p' })).toBe(0)
+  })
+
   it('numbers the calls of a job and checks a schema on submit, keeping the task leased on failure', async () => {
     const q = new ClientTaskQueue()
     const first = q.add({ messages: MSGS, schema: SCHEMA }, { job: 'j' })
@@ -320,9 +343,19 @@ describe('client provider over MCP', () => {
     expect(task.user).toContain('<seg id=')
     expect(task.system.length).toBeGreaterThan(0)
     expect(task.messages).toBeUndefined()
-    expect(task.leaseMinutes).toBe(30)
+    expect(task.leaseMinutes).toBe(10)
     expect(await call(c, 'release_client_task', { taskId: task.taskId })).toEqual({ released: true })
     expect(await call(c, 'release_client_task', { taskId: 'zzz#1' })).toEqual({ released: false })
+
+    // a role filter: nothing of another role ends the wait; a leased task can be freed by project, with a shorter lease asked for
+    const t0b = Date.now()
+    const qaWait = await call<{ clientTasks: { waiting: number; role?: string }; timedOut: boolean }>(c, 'wait_for_progress', { projectId: id, timeoutSec: 1, role: 'qa' })
+    expect(Date.now() - t0b).toBeGreaterThanOrEqual(900)
+    expect(qaWait).toMatchObject({ timedOut: true, clientTasks: { waiting: 0, role: 'qa' } })
+    const again = await call<{ taskId: string; leaseMinutes: number }>(c, 'get_client_task', { role: 'translator', leaseMinutes: 3 })
+    expect(again.leaseMinutes).toBe(3)
+    expect(await call(c, 'release_client_task', { project: id })).toEqual({ released: 1 })
+    await expect(call(c, 'release_client_task', {})).rejects.toThrow(/taskId/)
 
     // answer every task like the mock translator would, until the project is done
     const stop = answerLoop(r!)
