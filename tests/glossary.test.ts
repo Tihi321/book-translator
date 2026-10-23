@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mergeGlossary, parseGlossary, relevantEntries, serializeBrief, serializeGlossary } from '../src/engine/pipeline/glossary'
+import { mergeBriefText, mergeGlossary, parseGlossary, relevantEntries, serializeBrief, serializeGlossary } from '../src/engine/pipeline/glossary'
 import type { GlossaryEntry } from '../src/shared/project'
 
 const entries: GlossaryEntry[] = [
@@ -53,5 +53,22 @@ Bob | Bob | person | m |
     const md = serializeBrief({ genre: 'fiction', tone: 'light', characters: [{ name: 'Alice', gender: 'f', note: 'protagonist' }] })
     expect(md).toContain('- Genre: fiction')
     expect(md).toContain('- Alice (f): protagonist')
+  })
+})
+
+describe('mergeBriefText', () => {
+  const gen = { genre: 'fiction', tone: 'light', pov: 'third person', characters: [{ name: 'Alice', gender: 'f' }, { name: 'Bob' }] }
+  it('keeps the user text and adds only what is missing', () => {
+    const out = mergeBriefText('- Tone: grim\n- Bob is the villain\nKeep French lines.', gen)
+    expect(out).toContain('- Tone: grim')
+    expect(out).toContain('Keep French lines.')
+    expect(out).not.toContain('light')
+    expect(out).toContain('- Genre: fiction')
+    expect(out).toContain('- Narrator and point of view: third person')
+    expect(out).toContain('- Alice (f)')
+    expect(out).not.toContain('- Bob\n')
+  })
+  it('uses the generated brief when the user has none', () => {
+    expect(mergeBriefText('  ', gen)).toBe(serializeBrief(gen))
   })
 })

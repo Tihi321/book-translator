@@ -137,6 +137,33 @@ export function serializeBrief(b: Brief): string {
   return lines.join('\n') + '\n'
 }
 
+/**
+ * Merges a generated brief into the user's brief text: the user's text stays as it is, and only what it lacks is added
+ * (a field line whose label it does not have, characters whose name it does not mention). An empty brief text becomes the generated one.
+ */
+export function mergeBriefText(existing: string, generated: Brief): string {
+  const have = existing.trim()
+  if (!have) return serializeBrief(generated)
+  const lower = have.toLowerCase()
+  const fields: [string, string | undefined, string[]][] = [
+    ['Genre', generated.genre, ['genre']],
+    ['Tone', generated.tone, ['tone']],
+    ['Register', generated.register, ['register']],
+    ['Narrator and point of view', generated.pov, ['point of view', 'narrator', 'pov']],
+    ['Address (formal or informal)', generated.address, ['address', 'formal']]
+  ]
+  const add: string[] = []
+  for (const [label, value, keys] of fields) {
+    if (value?.trim() && !keys.some((k) => lower.includes(k))) add.push(`- ${label}: ${value.trim()}`)
+  }
+  const chars = generated.characters.filter((c) => c.name.trim() && !lower.includes(c.name.trim().toLowerCase()))
+  if (chars.length > 0) {
+    if (!/^#+\s*characters/im.test(have)) add.push('', '## Characters', '')
+    for (const c of chars) add.push(`- ${c.name}${c.gender ? ` (${c.gender})` : ''}${c.note ? `: ${c.note}` : ''}`)
+  }
+  return add.length === 0 ? have + '\n' : `${have}\n\n${add.join('\n').replace(/^\n+/, '')}\n`
+}
+
 // ---- the glossary builder agent ----
 
 const str = z.string().optional()

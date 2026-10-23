@@ -75,6 +75,18 @@ describe('pipeline end to end (mock models)', () => {
     expect(await fs.readFile(await r.service.export(id), 'utf8')).toContain('[hr]')
   })
 
+  it('keeps the brief the user set when the glossary pass returns another', async () => {
+    r = await rig()
+    const id = await r.create({ enabled: { glossary: true, proofreader: false, qa: false } })
+    await r.service.setBrief(id, '- Tone: dry and cold\n- Rules: keep French lines as they are')
+    expect((await r.service.start(id)).status).toBe('done')
+    const brief = await fs.readFile(r.service.store.file(id, 'brief.md'), 'utf8')
+    expect(brief).toContain('- Tone: dry and cold')
+    expect(brief).toContain('keep French lines as they are')
+    expect(brief).not.toContain('Tone: light')
+    expect(brief).toContain('Genre: fiction')
+  })
+
   it('translates without the glossary when the builder cannot answer', async () => {
     r = await rig()
     r.mock.on({ role: 'glossary' }, 'I do not know JSON')
