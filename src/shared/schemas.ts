@@ -110,6 +110,13 @@ export const defaultsSchema = z.looseObject({
   defaultMaxChunkTokens: z.number().int().positive().default(1500),
   languages: z.array(z.object({ code: z.string().min(1), name: z.string().min(1), rtl: z.boolean().optional() })).default([]),
   /**
+   * The fallback list: arbitrary-length ordered list of models (SCP-19).
+   */
+  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next']),
+  /** One fallback order for every role / agent. False: each list keeps its own order. */
+  fallbackShared: z.boolean().default(false),
+  fallback_shared: z.boolean().optional(),
+  /**
    * The group aliases in an `agentModels` list mean one `provider/model` each, set here. A group is `paid` (every API provider)
    * or a provider id (`strata`, `lmstudio`, a custom provider).
    */

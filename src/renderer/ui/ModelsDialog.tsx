@@ -3,6 +3,20 @@ import { getApi } from '../api'
 import { fmtContext } from '../format'
 import { attempt, useStore } from '../store/store'
 import { CustomProviderForm } from './CustomProviderForm'
+import type { ModelSummary, ProviderSummary } from '../../shared/protocol'
+
+function kindLabel(kind: string, providers: ProviderSummary[]): string {
+  if (kind === 'paid') return 'API'
+  const p = providers.find((x) => x.id === kind)
+  return p?.custom ? p.name : kind
+}
+
+function rowKind(ref: string, models: ModelSummary[], providers: ProviderSummary[]): string {
+  const m = models.find((x) => x.ref === ref)
+  if (m) return m.kind
+  const p = providers.find((x) => x.id === ref.split('/')[0])
+  return p?.local || p?.custom ? p.id : 'paid'
+}
 
 interface Row {
   ref: string
@@ -28,6 +42,8 @@ function formatPrice(r: Row, local: boolean): string {
 /** Which models the pickers offer (config/models.md): detect what a provider has, tick or hide, add a model by its id. */
 export function ModelsDialog({ onClose }: { onClose: () => void }) {
   const models = useStore((s) => s.models)
+  const defaults = useStore((s) => s.defaults)
+  const setDefaults = useStore((s) => s.setDefaults)
   const catalogs = useStore((s) => s.catalogs)
   const detectModels = useStore((s) => s.detectModels)
   const setModels = useStore((s) => s.setModels)
@@ -44,6 +60,83 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
   const current = providers.find((p) => p.id === provider) ?? providers.find((p) => p.available) ?? providers[0]
   const catalog = current ? catalogs[current.id] : undefined
   const local = !!current?.local
+
+  // Fallback models state & actions
+  const shared = defaults?.fallbackShared ?? false
+  const fallbacks = defaults?.fallbacks ?? []
+
+  const saveFallbackSettings = async (patch: { fallbacks?: string[]; fallbackShared?: boolean }) => {
+    const next = await attempt(getApi().request<'setDefaults'>({ type: 'setDefaults', patch }))
+    if (next) setDefaults(next)
+  }
+  const saveFallbacks = (next: string[]) => void saveFallbackSettings({ fallbacks: next })
+  const moveFallback = (i: number, by: number) => {
+    const next = [...fallbacks]
+    ;[next[i], next[i + by]] = [next[i + by]!, next[i]!]
+    void saveFallbacks(next)
+  }
+
+  const allModels = models?.models ?? []
+  const ticked = allModels.filter((m) => m.shown !== false && m.available)
+  const kindsFor = (own: string): string[] => {
+    const kinds = ['paid', ...providers.filter((p) => (p.local || p.custom) && p.kind !== 'client').map((p) => p.id), ...providers.filter((p) => p.kind === 'client').map((p) => p.id)]
+    return kinds.filter((k) => k === own || ticked.some((m) => m.kind === k))
+  }
+  const kindsOfRows = fallbacks.map((r) => rowKind(r, allModels, providers))
+  const seenKinds = new Map<string, number>()
+
+  const fallbackRow = (ref: string, i: number) => {
+    const kind = kindsOfRows[i]!
+    const n = (seenKinds.get(kind) ?? 0) + 1
+    seenKinds.set(kind, n)
+    const alias = n === 1 ? kind : `${kind}-${n}`
+    const refs = ticked.filter((m) => m.kind === kind).map((m) => m.ref)
+    if (!refs.includes(ref)) refs.unshift(ref)
+    return (
+      <div key={i} className="row" style={{ flexWrap: 'nowrap', gap: 6 }} data-testid={`fallback-row-${i}`}>
+        <span className="dim small" style={{ width: 16 }}>{shared ? `${i + 1}.` : ''}</span>
+        <span className="dim small" style={{ width: 70 }} title={`The name roles.md uses for this row: ${alias}`} data-testid={`fallback-alias-${i}`}>
+          {alias}
+        </span>
+        <select
+          value={kind}
+          onChange={(e) => {
+            const first = ticked.find((m) => m.kind === e.target.value)
+            if (first) void saveFallbacks(fallbacks.map((r, j) => (j === i ? first.ref : r)))
+          }}
+          style={{ width: 90 }}
+          data-testid={`fallback-kind-${i}`}
+        >
+          {kindsFor(kind).map((k) => (
+            <option key={k} value={k}>
+              {kindLabel(k, providers)}
+            </option>
+          ))}
+        </select>
+        <select value={ref} onChange={(e) => void saveFallbacks(fallbacks.map((r, j) => (j === i ? e.target.value : r)))} style={{ flex: 1, minWidth: 0 }} data-testid={`fallback-model-${i}`}>
+          {refs.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+        <button disabled={i === 0} onClick={() => void moveFallback(i, -1)} title="Try this row earlier" data-testid={`fallback-up-${i}`}>
+          &uarr;
+        </button>
+        <button disabled={i === fallbacks.length - 1} onClick={() => void moveFallback(i, 1)} title="Try this row later" data-testid={`fallback-down-${i}`}>
+          &darr;
+        </button>
+        <button disabled={fallbacks.length <= 1} onClick={() => void saveFallbacks(fallbacks.filter((_, j) => j !== i))} title="Remove this row" data-testid={`fallback-remove-${i}`}>
+          &times;
+        </button>
+      </div>
+    )
+  }
+
+  const addFallbackRow = () => {
+    const first = ticked.find((m) => m.kind === 'paid') ?? ticked[0]
+    if (first) void saveFallbacks([...fallbacks, first.ref])
+  }
 
   const rows = useMemo<Row[]>(() => {
     if (!current) return []
@@ -97,6 +190,25 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
     <div className="dialog-backdrop" onClick={onClose}>
       <div className="dialog models" onClick={(e) => e.stopPropagation()} data-testid="models-dialog">
         <h3>Models</h3>
+        <div className="dim small">Fallback models: each row is a kind (API, Strata, LM Studio ...) and its model. roles.md names a kind for its first row (paid, strata, lmstudio ...) and kind-2, kind-3 for the next ones.</div>
+        <label className="row small">
+          <input type="checkbox" checked={shared} onChange={(e) => void saveFallbackSettings({ fallbackShared: e.target.checked })} data-testid="order-shared" />
+          One fallback order for every role
+        </label>
+        <div className="stack" style={{ gap: 4 }}>
+          {fallbacks.map((r, i) => fallbackRow(r, i))}
+        </div>
+        <div className="row">
+          <button onClick={addFallbackRow} disabled={ticked.length === 0} data-testid="fallback-add">
+            Add a fallback
+          </button>
+        </div>
+        <div className="dim small">
+          {shared
+            ? "Every role tries these top to bottom: the first is the primary, the rest are fallbacks. A role's own model of the same kind (Strata's -low for the checks) takes that row's place. An agent's own model still goes first. Running jobs switch at once."
+            : 'Each role keeps the order of its list in roles.md. The rows set what paid, paid-2, strata, lmstudio ... stand for.'}
+        </div>
+        <hr />
         <div className="dim small">Tick the models the pickers offer. Saved in config/models.md.</div>
         <div className="models-body">
           <div className="models-providers">

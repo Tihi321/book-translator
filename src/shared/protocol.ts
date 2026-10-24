@@ -66,6 +66,7 @@ export interface ModelSummary {
   provider: string
   model: string
   family: string
+  kind: string
   local: boolean
   /** The provider is usable now. */
   available: boolean
@@ -261,6 +262,8 @@ export interface CustomProviderTest {
 export interface DefaultsPatch {
   agentModels?: Partial<Record<AgentName, string[]>>
   defaultMaxChunkTokens?: number
+  fallbacks?: string[]
+  fallbackShared?: boolean
   /** `provider/model` behind each alias. Merged key by key. */
   groupDefaults?: Partial<Record<string, string>>
   /** The whole group order, replacing the old one. `[]`: each list keeps its own order. */

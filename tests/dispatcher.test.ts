@@ -417,6 +417,20 @@ describe('group defaults in defaults.json', () => {
     expect(reg.resolve('lmstudio')).toBe('lmstudio')
   })
 
+  it('setDefaults saves fallbacks and fallbackShared and cleans custom provider refs', async () => {
+    const { run } = await setup()
+    const updated = await run<DefaultsConfig>({
+      type: 'setDefaults',
+      patch: {
+        fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'deepseek/deepseek-flash'],
+        fallbackShared: true
+      }
+    })
+    expect(updated.fallbacks).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next'])
+    expect(updated.fallbackShared).toBe(true)
+    await expect(run({ type: 'setDefaults', patch: { fallbacks: [] } })).rejects.toThrow(/at least one model/)
+  })
+
   it('setDefaults refuses invalid values and writes nothing', async () => {
     const { r, run } = await setup()
     const file = path.join(r.dir, 'config', 'defaults.json')

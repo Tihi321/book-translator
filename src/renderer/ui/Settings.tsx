@@ -123,6 +123,8 @@ function ProviderRow({ p, edit, onEdit }: { p: ProviderSummary; edit: Edit | und
 interface Draft {
   agents: Partial<Record<AgentName, string[]>>
   chunk?: number
+  fallbacks?: string[]
+  fallbackShared?: boolean
   groups: Partial<Record<Group, string>>
   order?: Group[]
   shared?: boolean
@@ -245,7 +247,7 @@ export function Settings() {
   }, [setModels])
 
   const changed = Object.keys(edits).length > 0
-  const dirty = Object.keys(draft.agents).length > 0 || Object.keys(draft.groups).length > 0 || Object.keys(draft.lm).length > 0 || draft.chunk !== undefined || draft.order !== undefined || draft.shared !== undefined || draft.parallel !== undefined
+  const dirty = Object.keys(draft.agents).length > 0 || Object.keys(draft.groups).length > 0 || Object.keys(draft.lm).length > 0 || draft.chunk !== undefined || draft.order !== undefined || draft.shared !== undefined || draft.parallel !== undefined || draft.fallbacks !== undefined || draft.fallbackShared !== undefined
 
   async function saveProviders() {
     const patches = Object.entries(edits).map(([id, e]) => ({ id, ...e }))
@@ -273,7 +275,7 @@ export function Settings() {
 
   // the group order as shown: the saved order first, then the groups it doesn't name
   const savedOrder = defaults?.modelOrder ?? []
-  const shared = draft.shared ?? savedOrder.length > 0
+  const shared = draft.shared ?? defaults?.fallbackShared ?? (savedOrder.length > 0)
   // the groups that have a ticked model (or a saved default or place in the order), the saved order first, then API, Strata, LM Studio, then the providers
   const present = new Set<Group>([...savedOrder, ...Object.keys(defaults?.groupDefaults ?? {})])
   for (const m of models?.models ?? []) {
@@ -305,6 +307,8 @@ export function Settings() {
         patch: {
           agentModels,
           defaultMaxChunkTokens: draft.chunk,
+          fallbacks: draft.fallbacks,
+          fallbackShared: draft.shared !== undefined ? draft.shared : draft.fallbackShared,
           groupDefaults: Object.keys(draft.groups).length > 0 ? draft.groups : undefined,
           modelOrder: draft.order !== undefined || draft.shared !== undefined ? (shared ? order : []) : undefined,
           lmstudio: Object.keys(draft.lm).length > 0 ? draft.lm : undefined,
