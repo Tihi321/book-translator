@@ -18,6 +18,10 @@ import type { ProviderClient } from './types'
 export interface ProviderInfo {
   id: string
   kind: ProviderEntry['kind']
+  /** Label for the UI (`name` in providers.md, else the id). */
+  name: string
+  /** Added in the Models dialog: its own group, editable and removable there. */
+  custom: boolean
   enabled: boolean
   local: boolean
   baseUrl?: string
@@ -193,6 +197,8 @@ export class ModelRegistry {
       const limit = (v: number | undefined, fallback: number | undefined) => (v === undefined ? fallback : v > 0 ? v : undefined)
       const info: ProviderInfo = {
         id: p.id,
+        name: p.name?.trim() || p.id,
+        custom: p.custom,
         kind: p.kind,
         enabled: p.enabled,
         local: p.local || p.kind === 'client', // answered by an MCP client: no key, never paid
@@ -289,6 +295,12 @@ export class ModelRegistry {
   /** The pickers offer this model (it is not in `hidden` of config/models.md). */
   isShown(ref: string): boolean {
     return !this.modelChoices.hidden.includes(ref)
+  }
+
+  /** `GET /models` on a server that is not in providers.md (yet): how many models it lists. Throws with the reason when it can't be asked. */
+  async testEndpoint(baseUrl: string, apiKey?: string, signal?: AbortSignal): Promise<number> {
+    const client = new OpenAiCompatClient({ id: 'test', baseUrl, apiKey, fetchImpl: this.opts.fetchImpl })
+    return (await client.listModelInfo(signal)).length
   }
 
   /** Every chat model a provider lists (`GET /models`), whether it is in the pickers or not, for the Models dialog. */
@@ -478,13 +490,13 @@ export class ModelRegistry {
     this.defaults = d
   }
 
-  /** A `provider/model`, or an alias (`paid`, `strata`, `lmstudio`) resolved to its default. */
+  /** A `provider/model`, or an alias (a group: `paid`, `strata`, `lmstudio`, a custom provider id) resolved to its default. */
   resolve(ref: string): string {
     return ref.includes('/') ? ref : (this.defaults.aliases[ref] ?? ref)
   }
 
   /**
-   * Sorts a list of refs (aliases kept) by the group order (`modelOrder`): `paid` is every API model, then `strata`, `lmstudio`,
+   * Sorts a list of refs (aliases kept) by the group order (`modelOrder`): `paid` is every API model, then a provider's own group (`strata`, `lmstudio`, a custom provider),
    * keeping the list's own order inside a group; a model in no group goes last. Without an order the list is returned as it is.
    */
   orderRefs(list: readonly string[]): string[] {
@@ -498,12 +510,12 @@ export class ModelRegistry {
     return list.map((ref, i) => ({ ref, i, r: rank(ref) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.ref)
   }
 
-  /** The group of an alias or a `provider/model`: `strata`, `lmstudio`, `paid` for an API provider, undefined for another local one. */
+  /** The group of an alias or a `provider/model`: `paid` for an API provider, else the provider id (`strata`, `lmstudio`, a custom provider). Undefined for the `client` and `mock` providers and an unknown one. */
   groupOf(ref: string): string | undefined {
     const provider = this.resolve(ref).split('/')[0]!
-    if (provider === 'strata' || provider === 'lmstudio') return provider
     const p = this.providers.get(provider)
-    return p && !p.local ? 'paid' : undefined
+    if (p) return p.kind === 'client' || p.kind === 'mock' ? undefined : !p.local && !p.custom ? 'paid' : p.id
+    return provider === 'strata' || provider === 'lmstudio' ? provider : undefined
   }
 
   /** Chat models that can be used right now (provider available, not an embedding model), in registry order. */

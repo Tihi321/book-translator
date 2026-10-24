@@ -35,6 +35,10 @@ export const providerModelSchema = z.looseObject({
 export const providerEntrySchema = z.looseObject({
   id: z.string().min(1),
   kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock', 'client']),
+  /** Label in the UI (the Models dialog, the default-model rows). Falls back to the id. */
+  name: z.string().optional(),
+  /** Added in the Models dialog (Add provider): the form can edit and remove it, and it is its own group. */
+  custom: z.boolean().default(false),
   enabled: z.boolean().default(true),
   local: z.boolean().default(false),
   base_url: z.string().optional(),
@@ -105,10 +109,13 @@ export const defaultsSchema = z.looseObject({
   agentModels: z.record(z.string(), z.array(z.string())).default({}),
   defaultMaxChunkTokens: z.number().int().positive().default(1500),
   languages: z.array(z.object({ code: z.string().min(1), name: z.string().min(1), rtl: z.boolean().optional() })).default([]),
-  /** The aliases `paid`, `strata`, `lmstudio` in an `agentModels` list mean one `provider/model` each, set here. */
-  groupDefaults: z.object({ paid: z.string().optional(), strata: z.string().optional(), lmstudio: z.string().optional() }).default({}),
+  /**
+   * The group aliases in an `agentModels` list mean one `provider/model` each, set here. A group is `paid` (every API provider)
+   * or a provider id (`strata`, `lmstudio`, a custom provider).
+   */
+  groupDefaults: z.record(z.string(), z.string().optional()).default({}),
   /** The groups in the order every agent tries them. Empty: each agent's list keeps its own order. */
-  modelOrder: z.array(z.enum(['paid', 'strata', 'lmstudio'])).default([]),
+  modelOrder: z.array(z.string().min(1)).default([]),
   /** LM Studio models the engine loads itself (`load_models`): parallel requests, context window, idle minutes before unloading. */
   lmstudio: z
     .object({

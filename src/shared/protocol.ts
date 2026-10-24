@@ -24,6 +24,10 @@ export interface ProgressInfo {
 
 export interface ProviderSummary {
   id: string
+  /** Label for the UI: `name` of providers.md, else the id. */
+  name: string
+  /** Added in the Models dialog: editable and removable there, and its own group. */
+  custom: boolean
   kind: string
   enabled: boolean
   local: boolean
@@ -47,6 +51,8 @@ export interface ProviderSummary {
   dayResetsAt: number
   /** LM Studio: the engine loads a model that isn't loaded yet. */
   loadModels: boolean
+  /** The JSON schema is sent as `response_format` (`json_schema` of providers.md). */
+  jsonSchema: boolean
   /** `discover` of providers.md. */
   discover: boolean | 'free'
   /** Enabled and usable now (local, or has a key). */
@@ -101,6 +107,8 @@ export interface CatalogResult {
 
 export interface ModelsInfo {
   providers: ProviderSummary[]
+  /** Every `api_key_env` of the providers (the key names the Settings screen can store a key under). */
+  keyNames: string[]
   models: ModelSummary[]
   /** Result of the last discovery of local servers. */
   discovery: { provider: string; found: number; error?: string }[]
@@ -184,7 +192,7 @@ export type ClientTaskResult =
   | { none: true; waiting: number }
   | {
       taskId: string
-      meta: { job: string; call: number; role: string; task: string; project: string; unit: string }
+      meta: { job: string; call: number; role: string; task: string; project: string; unit: string; client: string }
       /** All system messages, joined. */
       system: string
       /** The user and assistant messages in order, joined. */
@@ -227,13 +235,36 @@ export interface ProviderPatch {
   concurrency?: number | 'auto'
 }
 
+/** The Add provider form of the Models dialog. */
+export interface CustomProviderForm {
+  /** The id of the custom provider to edit. Missing: a new one (its id is the slug of `name`). */
+  id?: string
+  name: string
+  baseUrl: string
+  /** Stored in the credential store. Empty on an edit keeps the stored key. */
+  apiKey?: string
+  /** Free: `local: true` (no key needed, no budget). Otherwise paid: its models need prices. */
+  free: boolean
+  /** Send the JSON schema as `response_format` (default off for a new provider). */
+  jsonSchema: boolean
+  concurrency: number | 'auto'
+  enabled: boolean
+}
+
+/** What `testCustomProvider` found. */
+export interface CustomProviderTest {
+  ok: boolean
+  models?: number
+  error?: string
+}
+
 export interface DefaultsPatch {
   agentModels?: Partial<Record<AgentName, string[]>>
   defaultMaxChunkTokens?: number
   /** `provider/model` behind each alias. Merged key by key. */
-  groupDefaults?: Partial<Record<'paid' | 'strata' | 'lmstudio', string>>
+  groupDefaults?: Partial<Record<string, string>>
   /** The whole group order, replacing the old one. `[]`: each list keeps its own order. */
-  modelOrder?: ('paid' | 'strata' | 'lmstudio')[]
+  modelOrder?: string[]
   lmstudio?: Partial<{ parallel: number; context: number; ttlMinutes: number }>
   parallel?: Partial<{ enabled: boolean; maxAtOnce: 'auto' | number; splitSections: boolean }>
   mcp?: Partial<{ enabled: boolean; port: number }>
@@ -290,6 +321,12 @@ export type Command =
   | { type: 'addModel'; provider: string; id: string; priceIn?: number; priceOut?: number; context?: number }
   /** Sets a provider's limits in config/models.md, over providers.md. 0 for `rpm` or `rpd` means no limit; a field left out keeps its value. */
   | { type: 'setProviderLimits'; provider: string; concurrency?: number; rpm?: number; rpd?: number }
+  /** Adds a custom OpenAI-compatible provider to providers.md (comments kept), or edits the one with `id`. The key goes to the credential store. */
+  | ({ type: 'saveCustomProvider' } & CustomProviderForm)
+  /** Removes a custom provider, its stored key, and its refs in models.md and defaults.json. */
+  | { type: 'removeCustomProvider'; id: string }
+  /** Asks a server for its models (`GET /models`) before it is saved: reachable with a count, or the error. */
+  | { type: 'testCustomProvider'; baseUrl: string; apiKey?: string; id?: string }
   /** Checks the `concurrency: auto` servers now (Strata was just started), instead of at the next 10-second check. */
   | { type: 'checkServers' }
   /** Changes a project's settings (models, agents on or off, parallel, chunk size ...). Refused while the project runs. */
@@ -307,11 +344,11 @@ export type Command =
   /** The waiting and leased requests of the `client` provider. */
   | { type: 'listClientTasks' }
   /** Leases the oldest waiting `client` task that matches (an MCP client answers it with `submitClientTask`). */
-  | { type: 'getClientTask'; role?: string; project?: string; task?: string; leaseMinutes?: number }
+  | { type: 'getClientTask'; client?: string; role?: string; project?: string; task?: string; leaseMinutes?: number }
   /** Answers a `client` task. A reply that fails the task's schema is not accepted and the task stays leased. */
   | { type: 'submitClientTask'; taskId: string; text: string }
   /** Gives a leased `client` task back to the queue, or (with `project` and/or `role`, no `taskId`) every leased task that matches. */
-  | { type: 'releaseClientTask'; taskId?: string; project?: string; role?: string }
+  | { type: 'releaseClientTask'; taskId?: string; client?: string; project?: string; role?: string }
 
 export type CommandType = Command['type']
 
@@ -342,6 +379,9 @@ export interface CommandResults {
   showModels: ModelsInfo
   addModel: ModelsInfo
   setProviderLimits: ModelsInfo
+  saveCustomProvider: ModelsInfo
+  removeCustomProvider: ModelsInfo
+  testCustomProvider: CustomProviderTest
   checkServers: ModelsInfo
   updateProjectSettings: ProjectDetail
   prepareChunks: PrepareChunksResult

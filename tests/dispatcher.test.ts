@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CommandDispatcher, serveEngine } from '../src/engine/dispatcher'
 import { ModelRegistry } from '../src/engine/models/registry'
+import { parseMd } from '../src/shared/md'
 import { ProviderError } from '../src/engine/models/types'
 import type { DefaultsConfig } from '../src/shared/schemas'
 import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineTransport, ModelsInfo, PrepareChunksResult, ProjectDetail, Request, SubmitResult, TranslationTask } from '../src/shared/protocol'
@@ -21,6 +22,7 @@ const MODELS = { glossary: [MODEL], translator: [MODEL], proofreader: [MODEL], q
 async function setup(opts: { keys?: Record<string, string>; fetchImpl?: typeof fetch } = {}) {
   r = await rig({ fetchImpl: opts.fetchImpl })
   const stored: Record<string, string> = { ...(opts.keys ?? {}) }
+  const deleted: string[] = []
   const emitted: EngineEvent[] = []
   const dispatcher = new CommandDispatcher({
     service: r.service,
@@ -29,6 +31,10 @@ async function setup(opts: { keys?: Record<string, string>; fetchImpl?: typeof f
     keys: (name) => stored[name],
     storeKey: (name, value) => {
       stored[name] = value
+    },
+    deleteKey: (name) => {
+      deleted.push(name)
+      delete stored[name]
     }
   })
   const run = <T>(cmd: Command) => dispatcher.handle(cmd) as Promise<T>
@@ -39,7 +45,7 @@ async function setup(opts: { keys?: Record<string, string>; fetchImpl?: typeof f
       await new Promise((res) => setTimeout(res, 10))
     }
   }
-  return { r, dispatcher, run, stored, waitFor, emitted }
+  return { r, dispatcher, run, stored, deleted, waitFor, emitted }
 }
 
 describe('command dispatcher', () => {
@@ -804,5 +810,133 @@ describe('MCP settings and status', () => {
     const { r } = await setup()
     const dispatcher = new CommandDispatcher({ service: r.service, emit: () => undefined, mcpStatus: () => ({ enabled: true, running: true, url: 'http://127.0.0.1:1/mcp', token: 't' }) })
     expect(await dispatcher.handle({ type: 'getMcpStatus' })).toEqual({ enabled: true, running: true, url: 'http://127.0.0.1:1/mcp', token: 't' })
+  })
+})
+
+describe('custom providers', () => {
+  const LIST = { data: [{ id: 'm-a' }, { id: 'm-b' }, { id: 'm-c' }] }
+  const seen: string[] = []
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url)
+    seen.push(`${u} ${String((init?.headers as Record<string, string> | undefined)?.authorization ?? '')}`)
+    if (u.startsWith('http://acp.test')) return new Response(JSON.stringify(LIST), { status: 200 })
+    if (u.startsWith('http://locked.test')) return new Response('{"error":"bad key"}', { status: 401 })
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+  }) as typeof fetch
+  const form = { name: 'ACP proxy (home)', baseUrl: 'http://acp.test/v1', free: true, jsonSchema: false, concurrency: 2, enabled: true } as const
+  const providersFile = (dir: string) => path.join(dir, 'config', 'providers.md')
+
+  it('saveCustomProvider adds an entry with its own id, name and key name, keeping the comments of the file', async () => {
+    const { r, run, stored } = await setup({ fetchImpl })
+    const before = await fs.readFile(providersFile(r.dir), 'utf8')
+    const info = await run<ModelsInfo>({ type: 'saveCustomProvider', ...form, apiKey: ' sk-acp ' })
+    expect(info.providers.find((p) => p.id === 'acp-proxy-home')).toMatchObject({ name: 'ACP proxy (home)', custom: true, local: true, enabled: true, baseUrl: 'http://acp.test/v1', apiKeyEnv: 'CUSTOM_ACP_PROXY_HOME_API_KEY', hasKey: true, jsonSchema: false, concurrency: 2, available: true })
+    expect(info.keyNames).toContain('CUSTOM_ACP_PROXY_HOME_API_KEY')
+    expect(info.keyNames).toContain('DEEPSEEK_API_KEY')
+    expect(stored.CUSTOM_ACP_PROXY_HOME_API_KEY).toBe('sk-acp')
+    expect(JSON.stringify(info)).not.toContain('sk-acp')
+    const text = await fs.readFile(providersFile(r.dir), 'utf8')
+    expect(text).toContain('# to verify')
+    expect(text).toContain('# Answered by an MCP client')
+    expect(text).toContain('## Fields of a provider')
+    expect(text).not.toContain('sk-acp')
+    // before `mock`, and the other entries are as they were
+    const ids = (parseMd(text).data.providers as { id: string }[]).map((p) => p.id)
+    expect(ids.indexOf('acp-proxy-home')).toBe(ids.indexOf('mock') - 1)
+    // every other entry is unchanged (the yaml writer may only re-space the comments)
+    const withoutNew = (parseMd(text).data.providers as { id: string }[]).filter((p) => p.id !== 'acp-proxy-home')
+    expect(withoutNew).toEqual(parseMd(before).data.providers)
+    // the registry has it, and the setSecret allowlist takes its key name
+    const again = await run<ModelsInfo>({ type: 'setSecret', name: 'CUSTOM_ACP_PROXY_HOME_API_KEY', value: 'sk-two' })
+    expect(again.providers.find((p) => p.id === 'acp-proxy-home')).toMatchObject({ hasKey: true })
+    expect(stored.CUSTOM_ACP_PROXY_HOME_API_KEY).toBe('sk-two')
+  })
+
+  it('edits only a custom entry; an empty key on an edit keeps the stored one', async () => {
+    const { run, stored } = await setup({ fetchImpl })
+    await run({ type: 'saveCustomProvider', ...form, apiKey: 'sk-acp' })
+    const info = await run<ModelsInfo>({ type: 'saveCustomProvider', id: 'acp-proxy-home', ...form, name: 'ACP renamed', baseUrl: 'https://acp.test/v1', free: false, jsonSchema: true, concurrency: 'auto', enabled: false })
+    expect(info.providers.find((p) => p.id === 'acp-proxy-home')).toMatchObject({ name: 'ACP renamed', baseUrl: 'https://acp.test/v1', local: false, jsonSchema: true, concurrencyAuto: true, enabled: false, hasKey: true, custom: true })
+    expect(stored.CUSTOM_ACP_PROXY_HOME_API_KEY).toBe('sk-acp')
+    expect(info.providers.filter((p) => p.name === 'ACP renamed')).toHaveLength(1)
+    await expect(run({ type: 'saveCustomProvider', id: 'deepseek', ...form })).rejects.toThrow(/not a custom provider/)
+    await expect(run({ type: 'saveCustomProvider', id: 'nope', ...form })).rejects.toThrow(/unknown provider/)
+  })
+
+  it('refuses an empty name, a seed id, a duplicate, a bad URL and a bad parallel', async () => {
+    const { r, run } = await setup({ fetchImpl })
+    const before = await fs.readFile(providersFile(r.dir), 'utf8')
+    await expect(run({ type: 'saveCustomProvider', ...form, name: '  ' })).rejects.toThrow(/name is empty/)
+    await expect(run({ type: 'saveCustomProvider', ...form, name: '!!!' })).rejects.toThrow(/letter or a digit/)
+    await expect(run({ type: 'saveCustomProvider', ...form, name: 'DeepSeek' })).rejects.toThrow(/already/)
+    await expect(run({ type: 'saveCustomProvider', ...form, name: 'ACP' })).rejects.toThrow(/already/) // the seed's acp
+    await expect(run({ type: 'saveCustomProvider', ...form, name: 'Custom' })).rejects.toThrow(/already/)
+    await expect(run({ type: 'saveCustomProvider', ...form, baseUrl: 'ftp://x/v1' })).rejects.toThrow(/http/)
+    await expect(run({ type: 'saveCustomProvider', ...form, baseUrl: 'not a url' })).rejects.toThrow(/not a URL/)
+    await expect(run({ type: 'saveCustomProvider', ...form, concurrency: 0 })).rejects.toThrow(/parallel/)
+    await run({ type: 'saveCustomProvider', ...form })
+    await expect(run({ type: 'saveCustomProvider', ...form })).rejects.toThrow(/already/)
+    expect(before).toBeTruthy()
+  })
+
+  it('removeCustomProvider removes the entry and its key, and cleans models.md and defaults.json', async () => {
+    const { r, run, stored, deleted } = await setup({ fetchImpl })
+    await run({ type: 'saveCustomProvider', ...form, apiKey: 'sk-acp' })
+    await run({ type: 'saveCustomProvider', ...form, name: 'Other box', baseUrl: 'http://other.test/v1' })
+    const id = 'acp-proxy-home'
+    await run({ type: 'addModel', provider: id, id: 'picked-1' })
+    await run({ type: 'addModel', provider: 'other-box', id: 'keep-me' })
+    await run({ type: 'setProviderLimits', provider: id, rpm: 5 })
+    await run({ type: 'setProviderLimits', provider: 'other-box', rpm: 7 })
+    const modelsFile = path.join(r.dir, 'config', 'models.md')
+    await fs.writeFile(modelsFile, (await fs.readFile(modelsFile, 'utf8')).replace(/hidden: \[\]/, `hidden:\n  - ${id}/gone\n  - deepseek/deepseek-flash`), 'utf8')
+    await run({ type: 'setDefaults', patch: { groupDefaults: { [id]: `${id}/picked-1`, paid: 'deepseek/deepseek-flash' }, modelOrder: ['paid', id, 'strata'], agentModels: { translator: [id, `${id}/picked-1`, MODEL], qa: [`${id}/picked-1`] } } })
+
+    const info = await run<ModelsInfo>({ type: 'removeCustomProvider', id })
+    expect(info.providers.some((p) => p.id === id)).toBe(false)
+    expect(info.providers.some((p) => p.id === 'other-box')).toBe(true)
+    expect(info.models.some((m) => m.provider === id)).toBe(false)
+    expect(info.models.some((m) => m.ref === 'other-box/keep-me')).toBe(true)
+    expect(deleted).toEqual(['CUSTOM_ACP_PROXY_HOME_API_KEY'])
+    expect(stored.CUSTOM_ACP_PROXY_HOME_API_KEY).toBeUndefined()
+    const text = await fs.readFile(providersFile(r.dir), 'utf8')
+    expect(text).not.toContain(id)
+    expect(text).toContain('# to verify')
+    const models = parseMd(await fs.readFile(modelsFile, 'utf8')).data as { picked: { provider: string }[]; hidden: string[]; limits: Record<string, unknown> }
+    expect(models.picked.map((m) => m.provider)).toEqual(['other-box'])
+    expect(models.hidden).toEqual(['deepseek/deepseek-flash'])
+    expect(Object.keys(models.limits)).toEqual(['other-box'])
+    const defaults = JSON.parse(await fs.readFile(path.join(r.dir, 'config', 'defaults.json'), 'utf8')) as DefaultsConfig
+    expect(defaults.groupDefaults).toMatchObject({ paid: 'deepseek/deepseek-flash' })
+    expect(Object.keys(defaults.groupDefaults)).not.toContain(id)
+    expect(defaults.modelOrder).toEqual(['paid', 'strata'])
+    expect(defaults.agentModels.translator).toEqual([MODEL])
+    expect(defaults.agentModels.qa).toBeUndefined()
+    await expect(run({ type: 'removeCustomProvider', id: 'deepseek' })).rejects.toThrow(/not a custom provider/)
+    await expect(run({ type: 'removeCustomProvider', id })).rejects.toThrow(/unknown provider/)
+  })
+
+  it('testCustomProvider reports the model count, or why the server can not be used, and sends the key', async () => {
+    const { run, stored } = await setup({ fetchImpl })
+    seen.length = 0
+    expect(await run({ type: 'testCustomProvider', baseUrl: 'http://acp.test/v1', apiKey: 'sk-t' })).toEqual({ ok: true, models: 3 })
+    expect(seen[seen.length - 1]).toBe('http://acp.test/v1/models Bearer sk-t')
+    expect(await run<{ ok: boolean; error?: string }>({ type: 'testCustomProvider', baseUrl: 'http://locked.test/v1' })).toMatchObject({ ok: false, error: expect.stringMatching(/401|key/i) })
+    expect(await run<{ ok: boolean; error?: string }>({ type: 'testCustomProvider', baseUrl: 'http://down.test/v1' })).toMatchObject({ ok: false })
+    expect(await run({ type: 'testCustomProvider', baseUrl: 'ftp://x' })).toMatchObject({ ok: false, error: expect.stringContaining('http') })
+    // an edit with the key field empty tries the stored key
+    await run({ type: 'saveCustomProvider', ...form, apiKey: 'sk-stored' })
+    expect(stored.CUSTOM_ACP_PROXY_HOME_API_KEY).toBe('sk-stored')
+    await run({ type: 'testCustomProvider', baseUrl: 'http://acp.test/v1', id: 'acp-proxy-home' })
+    expect(seen[seen.length - 1]).toBe('http://acp.test/v1/models Bearer sk-stored')
+  })
+
+  it('a custom provider lists its models with Detect models and ticks them like any other', async () => {
+    const { run } = await setup({ fetchImpl })
+    await run({ type: 'saveCustomProvider', ...form })
+    const cat = await run<CatalogResult>({ type: 'detectModels', provider: 'acp-proxy-home' })
+    expect(cat.models.map((m) => m.id)).toEqual(['m-a', 'm-b', 'm-c'])
+    const shown = await run<ModelsInfo>({ type: 'showModels', provider: 'acp-proxy-home', refs: ['acp-proxy-home/m-a'], show: true })
+    expect(shown.models.find((m) => m.ref === 'acp-proxy-home/m-a')).toMatchObject({ local: true, shown: true, available: true })
   })
 })

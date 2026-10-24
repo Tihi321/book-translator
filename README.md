@@ -40,6 +40,14 @@ Providers and their models are listed in `config/providers.md` in the data folde
 
 A running app or engine reads `config/providers.md`, `config/models.md` and `config/defaults.json` again within a few seconds of an edit, and before it lists models, analyzes, creates, starts or retries. No restart is needed. A project that is running follows the reload: a request waiting for a free slot uses the new concurrency (and fails over to the next model if its provider was removed), the next attempt of a call uses the new client, prices and `extra_body` (a model removed or turned off goes to the next model in its list), and the number of chunks it runs at once follows the new concurrency. A request that was already sent finishes as sent, and the chunk plan stays: a smaller chunk budget only logs a warning for the pending chunks that no longer fit. A file that can't be read (a YAML mistake) keeps the previous providers and is logged once; fix it and it loads.
 
+### Add your own provider
+
+Any OpenAI-compatible server (LM Studio on another port, llama.cpp, vLLM, the ACP proxy ...) can be added without editing the file: Settings, **Models...**, **+ Add provider**. The form has Name, Base URL, API key (optional, never shown again), Free (local), Send JSON schema (default off), Parallel (a number or auto), Enabled and a **Test** button that asks the server for its models ("reachable, 12 models") before you save. **Edit** and **Remove** appear for the providers added this way. The entry is written to `config/providers.md` with `custom: true` and a `name` (the label in the dialog, the settings table and the default-model rows); your comments and hand edits in the file stay. The key goes to the credential store as `CUSTOM_<ID>_API_KEY`. **Remove** also deletes that key and the provider's ticked models, hidden models and limits in `config/models.md`, and its group default, place in the order and models in `config/defaults.json`; a project that names it keeps the name and shows it as unknown.
+
+- **Free** means `local: true`: no key needed, nothing counted as money. Unticked, the provider is paid and its models need a price (**Detect models** lists them with the prices the server gives; **Add a model by its id** asks for both prices).
+- A provider you add is its own group in "Default models for a new translation": its row is labelled with its name, can be moved in the fallback order, and its default model can stand in as an alias (`acp-home`) in any model list. The API row (`paid`) still means every paid provider that is not a custom one. Groups in `defaults.json` (`groupDefaults`, `modelOrder`) are open names now: `paid`, a provider id.
+- The seed has an `acp` entry for the ACP proxy (`http://127.0.0.1:7461/v1`), off until you start the proxy and enable it. Start the proxy with `PROXY_IGNORE_SAMPLING=1` (the app sends `temperature`, `max_tokens` and `stream_options`); it is text only, and `PROXY_TIMEOUT_MS` must cover your longest request. Driving Antigravity this way may break its terms of use: see the creative-hub ROADMAP section "Antigravity models and the ACP proxy". An existing data folder gets `acp` at its next start (once; delete it and it stays gone). The old disabled `custom` placeholder is not in the seed any more; a data folder that has it keeps it and it works like any other provider.
+
 API keys are never written to files. A key is looked up in an environment variable named in `api_key_env` (for example `DEEPSEEK_API_KEY`), then in the Windows Credential Manager (service `book-translator`). Set one of these ways:
 
 - Settings screen: type the key and press Save key (it goes to the credential store and is never shown again).
@@ -116,7 +124,7 @@ Tools:
 - Running: `start_translation`, `pause_translation`, `cancel_translation`, `wait_for_progress`
 - Review: `get_chunk`, `edit_chunk`, `retry_chunk`, `update_glossary`, `set_brief`, `export_project`
 - Translator role: `prepare_chunks`, `get_translation_task`, `submit_translation`
-- Client provider: `list_client_tasks`, `get_client_task`, `submit_client_task`, `release_client_task`
+- Client provider: `list_client_tasks`, `get_client_task`, `submit_client_task`, `release_client_task` (`get_client_task` and `release_client_task` take an optional `client`, see [named clients](#named-clients-claude-code-and-antigravity))
 - Prompts: `translate_book_yourself`, `translate_with_full_pipeline`
 
 Safety:
@@ -149,6 +157,27 @@ The entry as the seed has it:
         family: claude
         context: 200000
         vision: true
+      - id: antigravity
+        family: gemini
+        context: 1000000
+        vision: true
+```
+
+#### Named clients: Claude Code and Antigravity
+
+The `client` provider has one model per MCP client: `client/claude-code` and `client/antigravity` (more with "Add a model by its id" on the `client` provider). Each task carries the client it was made for (the model id), and `get_client_task` hands out only the tasks of the client that asks: its optional `client` argument is the model id, and a call without it means `claude-code`, so Claude Code's prompts and skills keep working and never take Antigravity's jobs. `list_client_tasks` and `wait_for_progress` count every client's tasks; `release_client_task` frees the leased tasks of every client unless `client` is given. A project is set up for one client by naming its model: `agentModels: { translator: ["client/antigravity"], ... }` (`clientOnly: true` stays `client/claude-code`).
+
+An existing data folder gets `client/antigravity` (context 1000000) at its next start, once.
+
+#### Antigravity CLI as a client
+
+1. Turn the MCP server on (above) and copy the URL and the token from the card.
+2. Add them to Antigravity CLI's MCP config (a JSON config with url and headers, the same shape as the snippet above; the exact file depends on the CLI version). You log in to Antigravity yourself; nothing here does that.
+3. Put the project's agents on `client/antigravity` (`create_project` or `update_project_settings` with `agentModels`), then `start_translation`.
+4. Give Antigravity this loop prompt:
+
+```text
+Repeat until the project status is done: call wait_for_progress for the project (it returns at once when a task waits), call get_client_task with client: "antigravity", write the answer as its output field says, and call submit_client_task. First call release_client_task with client: "antigravity" and the project, to free what an earlier run held.
 ```
 
 The `translate` command of the CLI refuses a project with an agent on `client`, since the CLI has nobody to answer. A request is dropped when the project is paused or cancelled or the app restarts (a later `submit_client_task` for it says the task is gone). The run asks again when it is started again.

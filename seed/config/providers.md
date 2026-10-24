@@ -120,16 +120,19 @@ providers:
     concurrency: 1
     discover: true
     models: []
-  # Any other OpenAI-compatible server (llama.cpp server, vLLM, text-generation-webui ...). Edit base_url, then enable it.
-  - id: custom
+  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-compatible server. Off until you start the proxy.
+  # See "The ACP proxy" below. Any other OpenAI-compatible server is added in the Models dialog (Add provider).
+  - id: acp
+    name: ACP proxy
     kind: openai-compat
     enabled: false
     local: true
-    base_url: http://localhost:8080/v1
-    concurrency: 1
+    base_url: http://127.0.0.1:7461/v1
+    concurrency: 2
+    json_schema: false
     discover: true
     models: []
-  # Answered by an MCP client (Claude Code): a request waits in a queue until the client takes it (get_client_task) and answers it (submit_client_task).
+  # Answered by an MCP client (Claude Code, Antigravity CLI): a request waits in a queue until the client takes it (get_client_task) and answers it (submit_client_task).
   # Nothing is spent and no key is needed. It is enabled because it costs nothing and does nothing until an MCP client answers. Give a project `clientOnly: true` (create_project / update_project_settings) to put all agents on `client/claude-code` and refuse every other model.
   # An agent left on it with no client connected waits for ever: switch the project back when the client is done.
   - id: client
@@ -141,6 +144,10 @@ providers:
       - id: claude-code
         family: claude
         context: 200000
+        vision: true
+      - id: antigravity           # Antigravity CLI: it passes client: "antigravity" to get_client_task
+        family: gemini
+        context: 1000000
         vision: true
   - id: mock
     kind: mock
@@ -161,6 +168,8 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 
 - `id`: the name used in model references. A model is written `provider/model`, for example `lmstudio/qwen2.5-14b-instruct`.
 - `kind`: `openai-compat` (any OpenAI-style API), `anthropic`, `gemini`, `client` (an MCP client answers: see the `client` entry) or `mock` (scripted, for tests).
+- `name`: the label the app shows for the provider (the Models dialog, the default-model rows). Without it the id is shown.
+- `custom`: `true` on a provider added with **Add provider** in the Models dialog. The dialog can edit and remove only these entries (it rewrites just them and keeps your comments). A custom provider is always its own group in the model order, whether it is free (`local: true`) or paid, and its key is stored under `CUSTOM_<ID>_API_KEY`. The seed has no custom entries; an older data folder may still have the disabled `custom` placeholder, which works as any other provider.
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing.
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
@@ -170,7 +179,7 @@ Prices are examples. Verify them on each provider's pricing page. The DeepSeek n
 - `rpm`: optional requests-per-minute limit.
 - `rpd`: optional requests per day, counted from midnight UTC (when OpenRouter's daily limit starts again). The count is kept in memory only. A provider that reached it, or that answers that its daily limit is used up, is skipped until then: its work goes to the next model in the list.
 - The **Models** dialog in Settings sets requests at once, per minute and per day for each provider. It saves them in `limits` of `config/models.md`, which win over the values here (0 means no limit).
-- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. LM Studio, Ollama and a custom server are discovered. If the server is not running, discovery fails quietly and the list stays as written here. `discover: free` adds only the models the provider lists at price 0. A model of a paid provider is only added with the price the provider lists, so the cost estimate is right: one listed without a price is left out (add it below with its price). Models that answer with something besides text (music, images) are left out.
+- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here. LM Studio, Ollama, the ACP proxy and a custom server are discovered. If the server is not running, discovery fails quietly and the list stays as written here. `discover: free` adds only the models the provider lists at price 0. A model of a paid provider is only added with the price the provider lists, so the cost estimate is right: one listed without a price is left out (add it below with its price). Models that answer with something besides text (music, images) are left out.
 - `discover_skip`: discovery leaves out models whose id contains one of these words (any case). LM Studio skips `dflash`, which it lists but can't load here.
 - `load_models`: (LM Studio) before a request to a model that isn't loaded, the app loads it with the `lmstudio` settings of `config/defaults.json` (parallel, context window, idle minutes), using `lms load` (or LM Studio's API when `lms` isn't installed). A model that is already loaded is used as it is. A model entry can override the context and parallel count with `load_context` and `load_parallel`. A model LM Studio doesn't have fails at once and the next model is tried.
 
@@ -180,9 +189,18 @@ One key (`OPENROUTER_API_KEY`, stored in the Settings screen) gives many models.
 
 ## The client provider
 
-`kind: client` sends no request to a server. The app puts each model call (glossary, translation, proofreading, QA review, QA fix) in a queue and waits, with no time limit, until an MCP client such as Claude Code takes it with `get_client_task` and answers with `submit_client_task`. The model is `client/claude-code`. It costs nothing, needs no key and counts as local. It is enabled in a new data folder.
+`kind: client` sends no request to a server. The app puts each model call (glossary, translation, proofreading, QA review, QA fix) in a queue and waits, with no time limit, until an MCP client such as Claude Code takes it with `get_client_task` and answers with `submit_client_task`. The models are `client/claude-code` and `client/antigravity`: each task carries the model it was made for, and a client only gets the tasks of its own name (`get_client_task` takes `client`, default `claude-code`; Antigravity CLI passes `client: "antigravity"`). Add more names with "Add a model by its id" on the `client` provider. It costs nothing, needs no key and counts as local. It is enabled in a new data folder.
 
 A data folder that already exists gets the entry at the next start: the app adds a provider the seed gained later to this file once (before `mock`), without changing the entries, comments and order you have. A provider you delete is not added back (`config/seed-state.json` lists the ones the seed has offered). If you delete `client` and want it again, copy it from the seed file.
+
+## The ACP proxy
+
+`acp` points at the api-acp-proxy (`http://127.0.0.1:7461/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API. It is off until you start the proxy and set `enabled: true`.
+
+- Start the proxy with `PROXY_IGNORE_SAMPLING=1`: the app sends `temperature`, `max_tokens` and `stream_options`, which the proxy has to ignore.
+- It is text only: no vision.
+- `PROXY_TIMEOUT_MS` (5 minutes by default) must cover your longest request. A translation of a long chunk can take a while.
+- Terms risk: driving Antigravity this way may break its terms of use. Read the section "Antigravity models and the ACP proxy" of the creative-hub ROADMAP before you rely on it.
 
 ## Fields of a model
 
@@ -207,4 +225,3 @@ Strata is a local Qwen3.8-Flash-Next server on `http://127.0.0.1:8080/v1`. It ne
 - The IQ3_S quant needs about 84 GB of memory. It can't run next to the big LM Studio models. Keep only small models loaded in LM Studio while Strata runs.
 - Thinking is on by default in Strata and is slow. `qwen3.8-flash-next` sends `reasoning_effort: none`. `qwen3.8-flash-next-low` sends `low`, which gives steadier answers for checks.
 - `json_schema: false`: when Strata can't produce valid JSON for a schema, it answers 502 `structured_output_failed`. The app would retry and then move to a paid model. Without the schema, the app's JSON repair step deals with a bad answer.
-- The disabled `custom` entry also points at port 8080. Don't enable both.

@@ -1,24 +1,19 @@
 import { useEffect, useState } from 'react'
 import type { ParallelSettings } from '../../shared/project'
-import type { McpStatus, ModelSummary, ProviderSummary } from '../../shared/protocol'
+import type { McpStatus, ProviderSummary } from '../../shared/protocol'
 import { AGENTS } from '../../shared/agents'
 import type { AgentName } from '../../shared/agents'
 import { getApi } from '../api'
 import { attempt, useStore } from '../store/store'
 import { ModelListEditor } from './ModelListEditor'
+import { BASE_GROUPS, groupLabel, groupOfModel } from './ModelSelect'
 import { ModelsDialog } from './ModelsDialog'
 import { ParallelFields } from './ParallelFields'
 
 const AGENT_LABEL: Record<AgentName, string> = { glossary: 'Glossary builder', translator: 'Translator', proofreader: 'Proofreader', qa: 'QA reviewer' }
 
-type Group = 'paid' | 'strata' | 'lmstudio'
-const DEFAULT_ORDER: Group[] = ['paid', 'strata', 'lmstudio']
-/** The groups behind the aliases: their name on screen and which models they may point at. */
-const GROUPS: Record<Group, { label: string; pick: (m: ModelSummary) => boolean }> = {
-  paid: { label: 'API', pick: (m) => !m.local },
-  strata: { label: 'Strata', pick: (m) => m.provider === 'strata' },
-  lmstudio: { label: 'LM Studio', pick: (m) => m.provider === 'lmstudio' }
-}
+/** A group is `paid` (every API provider) or a provider's id (Strata, LM Studio, a custom provider). */
+type Group = string
 
 interface Edit {
   enabled?: boolean
@@ -79,8 +74,8 @@ function ProviderRow({ p, edit, onEdit }: { p: ProviderSummary; edit: Edit | und
     <tr data-testid={`provider-${p.id}`}>
       <td><input type="checkbox" checked={enabled} onChange={(e) => onEdit({ ...edit, enabled: e.target.checked })} title="Enabled" /></td>
       <td>
-        <b>{p.id}</b>
-        <div className="dim small">{p.local ? 'local' : 'API'} &middot; {p.kind}</div>
+        <b>{p.name}</b>
+        <div className="dim small">{p.name !== p.id ? `${p.id} \u00b7 ` : ''}{p.local ? 'local' : 'API'} &middot; {p.kind}{p.custom ? ' \u00b7 custom' : ''}</div>
       </td>
       <td><input value={edit?.baseUrl ?? p.baseUrl ?? ''} onChange={(e) => onEdit({ ...edit, baseUrl: e.target.value })} /></td>
       <td>
@@ -279,7 +274,15 @@ export function Settings() {
   // the group order as shown: the saved order first, then the groups it doesn't name
   const savedOrder = defaults?.modelOrder ?? []
   const shared = draft.shared ?? savedOrder.length > 0
-  const order: Group[] = draft.order ?? (savedOrder.length > 0 ? [...savedOrder, ...DEFAULT_ORDER.filter((g) => !savedOrder.includes(g))] : DEFAULT_ORDER)
+  // the groups that have a ticked model (or a saved default or place in the order), the saved order first, then API, Strata, LM Studio, then the providers
+  const present = new Set<Group>([...savedOrder, ...Object.keys(defaults?.groupDefaults ?? {})])
+  for (const m of models?.models ?? []) {
+    const g = groupOfModel(models, m)
+    if (g && m.shown !== false) present.add(g)
+  }
+  const known: Group[] = [...savedOrder, ...BASE_GROUPS, ...(models?.providers ?? []).map((p) => p.id)]
+  const groups: Group[] = [...new Set(known)].filter((g) => present.has(g))
+  const order: Group[] = draft.order ?? groups
   const groupOf = (g: Group) => draft.groups[g] ?? defaults?.groupDefaults[g] ?? ''
   const parallel: ParallelSettings = draft.parallel ?? defaults?.parallel ?? { enabled: true, maxAtOnce: 'auto', splitSections: false }
   const lm = { ...defaults?.lmstudio, ...draft.lm }
@@ -322,14 +325,14 @@ export function Settings() {
 
   /** One group's row: its place in the order, its default model (the models it may point at), and moving it. */
   function groupRow(g: Group, i: number) {
-    const { label, pick } = GROUPS[g]
+    const label = groupLabel(models, g)
     const value = groupOf(g)
-    const refs = (models?.models ?? []).filter((m) => m.shown !== false && pick(m)).map((m) => m.ref)
+    const refs = (models?.models ?? []).filter((m) => m.shown !== false && groupOfModel(models, m) === g).map((m) => m.ref)
     if (value && !refs.includes(value)) refs.unshift(value)
     return (
       <div key={g} className="row" style={{ flexWrap: 'nowrap', gap: 6 }} data-testid={`order-${g}`}>
         <span className="dim" style={{ width: 16 }}>{shared ? `${i + 1}.` : ''}</span>
-        <span style={{ width: 70 }}>{label}</span>
+        <span style={{ width: 90 }} title={label}>{label}</span>
         <select className="grow" value={value} onChange={(e) => setDraft((d) => ({ ...d, groups: { ...d.groups, [g]: e.target.value } }))} data-testid={`group-${g}`}>
           <option value="">(none)</option>
           {refs.map((r) => (
@@ -390,7 +393,7 @@ export function Settings() {
           <h3>Default models for a new translation</h3>
           {saveButton}
         </div>
-        <div className="dim small">Each agent has an ordered list: the first model is tried first, the rest are fallbacks. A group default (API, Strata, LM Studio) can stand in for a model in any list.</div>
+        <div className="dim small">Each agent has an ordered list: the first model is tried first, the rest are fallbacks. A group default (API, Strata, LM Studio, or a provider you added) can stand in for a model in any list.</div>
         <div className="stack" style={{ gap: 4 }}>
           {order.map(groupRow)}
         </div>
