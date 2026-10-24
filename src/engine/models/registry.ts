@@ -105,19 +105,47 @@ export const DEFAULT_CONTEXT = 8192
 /** The context of Claude Code, the usual client: a `client` model with no `context` of its own or its provider's plans with this. */
 export const CLIENT_DEFAULT_CONTEXT = 200_000
 
-/** Group aliases (`paid`, `strata`, `lmstudio`) -> `provider/model`, the group order, and how LM Studio models are loaded. From config/defaults.json. */
+/** The fallback list of defaults.json (SCP-19: an open list), and how LM Studio models are loaded. */
 export interface ModelDefaults {
-  aliases: Record<string, string>
-  /** The groups `paid`, `strata`, `lmstudio` in the order every list tries them. Empty: each list keeps its own order. */
+  /** `provider/model` refs, first row first. A kind name (`paid`, `strata`, `lmstudio`, `client` ...) stands for the first row of that kind, `<kind>-<n>` for the n-th. */
+  fallbacks?: string[]
+  /** One fallback order for every role / agent (`fallbackShared`). False: each list keeps its own order. */
+  shared?: boolean
+  aliases?: Record<string, string>
   order?: string[]
   lmLoad: { parallel: number; context: number; ttlMinutes: number }
 }
 
-/** The aliases, group order and LM Studio load settings of a defaults.json. */
-export function modelDefaultsOf(d: Pick<DefaultsConfig, 'groupDefaults' | 'modelOrder' | 'lmstudio'>): ModelDefaults {
+/** The fallback list, aliases and LM Studio load settings of a defaults.json. */
+export function modelDefaultsOf(
+  d: Pick<DefaultsConfig, 'groupDefaults' | 'modelOrder' | 'lmstudio'> & Partial<Pick<DefaultsConfig, 'fallbacks' | 'fallbackShared'>> & { fallback_shared?: boolean }
+): ModelDefaults & { fallbacks: string[]; shared: boolean } {
   const aliases: Record<string, string> = {}
-  for (const [k, v] of Object.entries(d.groupDefaults)) if (v) aliases[k] = v
-  return { aliases, order: d.modelOrder, lmLoad: { parallel: d.lmstudio.parallel, context: d.lmstudio.context, ttlMinutes: d.lmstudio.ttlMinutes } }
+  for (const [k, v] of Object.entries(d.groupDefaults ?? {})) if (v) aliases[k] = v
+
+  let fallbacks = d.fallbacks
+  if (!fallbacks || fallbacks.length === 0) {
+    if (d.modelOrder && d.modelOrder.length > 0) {
+      fallbacks = d.modelOrder.map((g) => d.groupDefaults?.[g]).filter((x): x is string => Boolean(x))
+    }
+    if (!fallbacks || fallbacks.length === 0) {
+      fallbacks = Object.values(d.groupDefaults ?? {}).filter((x): x is string => Boolean(x))
+    }
+    if (!fallbacks || fallbacks.length === 0) {
+      fallbacks = ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next']
+    }
+  }
+
+  const shared = d.fallbackShared ?? d.fallback_shared ?? false
+  const lm = d.lmstudio ?? { parallel: 4, context: 131072, ttlMinutes: 60 }
+
+  return {
+    fallbacks,
+    shared,
+    aliases,
+    order: d.modelOrder,
+    lmLoad: { parallel: lm.parallel, context: lm.context, ttlMinutes: lm.ttlMinutes }
+  }
 }
 
 export class ModelRegistry {
@@ -137,7 +165,7 @@ export class ModelRegistry {
   /** `configSignature()` of the files the last successful `load` read, for `configChanged`. */
   private configStamp = ''
   /** Until defaults.json is read: the defaults it has when it says nothing. */
-  private defaults: ModelDefaults = modelDefaultsOf(defaultsSchema.parse({}))
+  private defaults: ModelDefaults & { fallbacks: string[]; shared: boolean } = modelDefaultsOf(defaultsSchema.parse({}))
 
   constructor(
     private readonly dataDir: string,
@@ -485,29 +513,116 @@ export class ModelRegistry {
     return { parallel: m?.loadParallel ?? d.parallel, context: m?.loadContext ?? d.context, ttlMinutes: d.ttlMinutes }
   }
 
-  /** Sets the group aliases, the group order and the LM Studio load settings. Call `load()` after it so model context windows follow. */
+  /** Sets the fallback list and the LM Studio load settings. Call `load()` after it so model context windows follow. */
   setDefaults(d: ModelDefaults): void {
-    this.defaults = d
+    let fallbacks = d.fallbacks
+    if (!fallbacks || fallbacks.length === 0) {
+      if (d.order && d.order.length > 0) {
+        fallbacks = d.order.map((g) => d.aliases?.[g]).filter((x): x is string => Boolean(x))
+      }
+      if (!fallbacks || fallbacks.length === 0) {
+        fallbacks = Object.values(d.aliases ?? {}).filter((x): x is string => Boolean(x))
+      }
+      if (!fallbacks || fallbacks.length === 0) {
+        fallbacks = ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next']
+      }
+    }
+    this.defaults = {
+      ...d,
+      fallbacks,
+      shared: d.shared ?? false
+    }
   }
 
-  /** A `provider/model`, or an alias (a group: `paid`, `strata`, `lmstudio`, a custom provider id) resolved to its default. */
+  /** The fallback list, first row first. */
+  fallbackRefs(): string[] {
+    return this.defaults.fallbacks
+  }
+
+  /** The kind of a row or model, by its provider: the provider's id for a local or custom one (a client too), `paid` for an API provider or one that providers.md does not have. */
+  private kindOfRef(ref: string): string {
+    const p = this.providers.get(ref.split('/')[0]!)
+    return p?.local || p?.custom ? p.id : 'paid'
+  }
+
+  /** The kind of an alias or a `provider/model`: `paid` for every API model, otherwise the provider's id. */
+  kindOf(ref: string): string {
+    return this.kindOfRef(this.resolve(ref))
+  }
+
+  /** What each alias stands for: a kind name is its first row, `<kind>-<n>` its n-th. */
+  aliasMap(): Map<string, string> {
+    const map = new Map<string, string>()
+    const count = new Map<string, number>()
+    for (const ref of this.defaults.fallbacks) {
+      const kind = this.kindOfRef(ref)
+      const n = (count.get(kind) ?? 0) + 1
+      count.set(kind, n)
+      if (n === 1) map.set(kind, ref)
+      map.set(`${kind}-${n}`, ref)
+    }
+    return map
+  }
+
+  /** A `provider/model`, or an alias (`paid`, `paid-2`, `strata`, `lmstudio` ...) resolved to its row. An alias with no row stays as it is. */
   resolve(ref: string): string {
-    return ref.includes('/') ? ref : (this.defaults.aliases[ref] ?? ref)
+    return ref.includes('/') ? ref : (this.aliasMap().get(ref) ?? this.defaults.aliases?.[ref] ?? ref)
+  }
+
+  unresolvedAliases(): string[] {
+    const map = this.aliasMap()
+    const out = new Set<string>()
+    for (const list of Object.values(this.defaults.aliases ?? {})) {
+      if (!list.includes('/') && !map.has(list)) out.add(list)
+    }
+    return [...out]
   }
 
   /**
-   * Sorts a list of refs (aliases kept) by the group order (`modelOrder`): `paid` is every API model, then a provider's own group (`strata`, `lmstudio`, a custom provider),
-   * keeping the list's own order inside a group; a model in no group goes last. Without an order the list is returned as it is.
+   * Sorts a list of refs. Without `fallbackShared` it keeps its order, aliases kept. With it, every row of the fallback list in its order, except that
+   * a concrete model the list names takes the place of the first row of its kind not taken yet (a model that is itself a row keeps it; an alias
+   * of the row it replaced is dropped); a model with no row of its kind, and the other aliases, follow in the list's own order, duplicates dropped. A client model goes first.
    */
   orderRefs(list: readonly string[]): string[] {
-    const order = this.defaults.order ?? []
-    if (order.length === 0) return [...list]
-    const rank = (ref: string) => {
-      const g = this.groupOf(ref)
-      const i = g ? order.indexOf(g) : -1
-      return i < 0 ? order.length : i
+    if (!this.defaults.shared) {
+      const order = this.defaults.order ?? []
+      if (order.length === 0) return [...list]
+      const rank = (ref: string) => {
+        if (this.providers.get(this.resolve(ref).split('/')[0]!)?.kind === 'client') return -1
+        const g = this.groupOf(ref)
+        const i = g ? order.indexOf(g) : -1
+        return i < 0 ? order.length : i
+      }
+      return list.map((ref, i) => ({ ref, i, r: rank(ref) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.ref)
     }
-    return list.map((ref, i) => ({ ref, i, r: rank(ref) })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.ref)
+    const rows = [...this.defaults.fallbacks]
+    const taken = new Set<number>()
+    const isClient = (ref: string) => this.providers.get(this.resolve(ref).split('/')[0]!)?.kind === 'client'
+    const placed = new Set<string>()
+    const replaced = new Set<string>() // rows a role's own model took the place of
+    for (const c of list) {
+      if (!c.includes('/') || isClient(c)) continue
+      const same = rows.findIndex((r, i) => r === c && !taken.has(i))
+      const kind = this.kindOfRef(c)
+      const at = same >= 0 ? same : rows.findIndex((r, i) => !taken.has(i) && this.kindOfRef(r) === kind)
+      if (at < 0) continue
+      if (rows[at] !== c) replaced.add(rows[at]!)
+      rows[at] = c
+      taken.add(at)
+      placed.add(c)
+    }
+    const out: string[] = []
+    const seen = new Set<string>()
+    const add = (ref: string) => {
+      const r = this.resolve(ref)
+      if (seen.has(r)) return
+      seen.add(r)
+      out.push(r)
+    }
+    for (const c of list) if (isClient(c)) add(c)
+    for (const r of rows) add(r)
+    for (const c of list) if (!placed.has(c) && !replaced.has(this.resolve(c))) add(c)
+    return out
   }
 
   /** The group of an alias or a `provider/model`: `paid` for an API provider, else the provider id (`strata`, `lmstudio`, a custom provider). Undefined for the `client` and `mock` providers and an unknown one. */

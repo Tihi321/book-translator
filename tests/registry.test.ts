@@ -438,7 +438,7 @@ describe('group aliases and order', () => {
 
   it('takes the aliases, order and load settings from a defaults.json', async () => {
     const d = defaultsSchema.parse({ groupDefaults: { paid: 'deepseek/deepseek-flash', lmstudio: '' }, modelOrder: ['strata'], lmstudio: { parallel: 2 } })
-    expect(modelDefaultsOf(d)).toEqual({
+    expect(modelDefaultsOf(d)).toMatchObject({
       aliases: { paid: 'deepseek/deepseek-flash' },
       order: ['strata'],
       lmLoad: { parallel: 2, context: 131072, ttlMinutes: 60 }
@@ -541,5 +541,44 @@ describe('custom providers', () => {
     expect(await s.registry.testEndpoint('http://good/v1', 'k')).toBe(2)
     expect(seen[seen.length - 1]).toContain('http://good/v1/models Bearer k')
     await expect(s.registry.testEndpoint('http://bad/v1')).rejects.toThrow()
+  })
+})
+describe('fallbacks as an open list (BTT-22 / SCP-19)', () => {
+  const lm = { parallel: 1, context: 8192, ttlMinutes: 30 }
+  const rows = ['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro']
+
+  it('a kind is an alias for its first row and kind-n for the n-th; an alias with no row names nothing', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    s.registry.setDefaults({ fallbacks: rows, shared: false, lmLoad: lm })
+    expect(s.registry.kindOf('deepseek/deepseek-flash')).toBe('paid')
+    expect(s.registry.kindOf('lmstudio/gemma')).toBe('lmstudio')
+    expect(s.registry.kindOf('client/claude-code')).toBe('client')
+    expect(s.registry.kindOf('nowhere/x')).toBe('paid')
+    expect(s.registry.resolve('paid')).toBe('deepseek/deepseek-flash')
+    expect(s.registry.resolve('paid-2')).toBe('openrouter/google/gemma-4-31b-it:free')
+    expect(s.registry.resolve('paid-3')).toBe('deepseek/deepseek-v4-pro')
+    expect(s.registry.resolve('lmstudio')).toBe('lmstudio/gemma')
+    expect(s.registry.resolve('strata')).toBe('strata')
+    expect(s.registry.resolve('lmstudio-2')).toBe('lmstudio-2')
+  })
+
+  it('a shared order gives every role the rows top to bottom, its own model of a kind taking that row', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    s.registry.setDefaults({ fallbacks: rows, shared: true, lmLoad: lm })
+    // an alias with no row goes last
+    expect(s.registry.orderRefs(['strata', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro', 'strata'])
+    // a concrete strata model with no strata row goes last
+    expect(s.registry.orderRefs(['strata/qwen3.8-flash-next-low', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low'])
+    // a model that is a row keeps it
+    expect(s.registry.orderRefs(['deepseek/deepseek-flash', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro'])
+    // another API model takes the first free API row
+    expect(s.registry.orderRefs(['openai/gpt-5', 'paid'])).toEqual(['openai/gpt-5', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro'])
+    // client model goes first
+    expect(s.registry.orderRefs(['deepseek/deepseek-flash', 'client/claude-code'])[0]).toBe('client/claude-code')
+    // with a Strata row, -low takes that row's place
+    s.registry.setDefaults({ fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma'], shared: true, lmLoad: lm })
+    expect(s.registry.orderRefs(['strata/qwen3.8-flash-next-low', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next-low', 'lmstudio/gemma'])
   })
 })

@@ -2,13 +2,39 @@ import { useStore } from '../store/store'
 import type { AliasOption } from './ModelSelect'
 import { groupLabel, ModelSelect, pickDefault } from './ModelSelect'
 
-/** The alias options for the groups that have a default model set (API, Strata, LM Studio, and a custom provider's group). */
+/** The alias options for the fallback list: kind for the first row, kind-n for the n-th row. */
 export function useAliasOptions(): AliasOption[] {
-  const groups = useStore((s) => s.defaults?.groupDefaults)
+  const defaults = useStore((s) => s.defaults)
   const models = useStore((s) => s.models)
-  return Object.entries(groups ?? {})
-    .filter(([, ref]) => ref)
-    .map(([g, ref]) => ({ value: g, label: `${groupLabel(models, g)} default (${ref})` }))
+  const fallbacks = defaults?.fallbacks ?? []
+  const providers = models?.providers ?? []
+  const count = new Map<string, number>()
+  const seen = new Set<string>()
+  const options: AliasOption[] = []
+
+  for (const ref of fallbacks) {
+    const m = models?.models.find((x) => x.ref === ref)
+    const p = providers.find((x) => x.id === ref.split('/')[0])
+    const kind = m?.kind ?? (p?.local || p?.custom ? p.id : 'paid')
+    const n = (count.get(kind) ?? 0) + 1
+    count.set(kind, n)
+    const alias = n === 1 ? kind : `${kind}-${n}`
+    const name = kind === 'paid' ? 'API' : (p?.custom ? p.name : kind)
+    if (!seen.has(alias)) {
+      seen.add(alias)
+      options.push({ value: alias, label: `${alias} (${name}: ${ref})` })
+    }
+  }
+
+  // Also include any groupDefaults not covered
+  for (const [g, ref] of Object.entries(defaults?.groupDefaults ?? {})) {
+    if (ref && !seen.has(g)) {
+      seen.add(g)
+      options.push({ value: g, label: `${groupLabel(models, g)} default (${ref})` })
+    }
+  }
+
+  return options
 }
 
 interface Props {

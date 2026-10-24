@@ -193,6 +193,7 @@ export class CommandDispatcher {
           provider: m.provider.id,
           model: m.id,
           family: m.family,
+          kind: this.registry.kindOf(m.ref),
           local: m.provider.local,
           available: m.provider.available,
           context: this.registry.contextLength(m.ref),
@@ -584,7 +585,10 @@ export class CommandDispatcher {
       const kept = list.filter((ref) => !mine(ref))
       if (kept.length > 0) agentModels[agent] = kept
     }
-    const next = { ...current, groupDefaults, modelOrder, agentModels }
+    const seedFallbacks = ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next']
+    let fallbacks = (current.fallbacks ?? []).filter((ref) => !mine(ref))
+    if (fallbacks.length === 0) fallbacks = seedFallbacks
+    const next = { ...current, groupDefaults, modelOrder, agentModels, fallbacks }
     if (JSON.stringify(next) === JSON.stringify(current)) return
     await atomicWrite(file, JSON.stringify(next, null, 2) + '\n')
   }
@@ -616,10 +620,19 @@ export class CommandDispatcher {
     const current = await loadDefaults(this.dataDir)
     const groupDefaults: Record<string, string | undefined> = { ...current.groupDefaults, ...(patch.groupDefaults ?? {}) }
     for (const k of Object.keys(groupDefaults)) if (!groupDefaults[k]?.trim()) delete groupDefaults[k]
+    let fallbacks = current.fallbacks
+    if (patch.fallbacks !== undefined) {
+      const deduped = [...new Set(patch.fallbacks.map((f) => f.trim()).filter(Boolean))]
+      if (deduped.length === 0) throw new Error('fallbacks must have at least one model')
+      fallbacks = deduped
+    }
+    const fallbackShared = patch.fallbackShared !== undefined ? patch.fallbackShared : current.fallbackShared
     const next = {
       ...current,
       agentModels: { ...current.agentModels, ...(patch.agentModels ?? {}) },
       defaultMaxChunkTokens: patch.defaultMaxChunkTokens ?? current.defaultMaxChunkTokens,
+      fallbacks,
+      fallbackShared,
       groupDefaults,
       modelOrder: patch.modelOrder ?? current.modelOrder,
       lmstudio: { ...current.lmstudio, ...(patch.lmstudio ?? {}) },
