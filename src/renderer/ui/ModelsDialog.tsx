@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { getApi } from '../api'
 import { fmtContext } from '../format'
 import { attempt, useStore } from '../store/store'
+import { CustomProviderForm } from './CustomProviderForm'
 
 interface Row {
   ref: string
@@ -36,6 +37,9 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
   const [freeOnly, setFreeOnly] = useState(false)
   const [shownOnly, setShownOnly] = useState(false)
   const [add, setAdd] = useState({ id: '', priceIn: '', priceOut: '', context: '' })
+  /** The provider form: 'new', or the id of the custom provider being edited. */
+  const [form, setForm] = useState<'new' | string | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   const current = providers.find((p) => p.id === provider) ?? providers.find((p) => p.available) ?? providers[0]
   const catalog = current ? catalogs[current.id] : undefined
@@ -67,6 +71,16 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
     if (info) setModels(info)
   }
 
+  async function removeProvider() {
+    if (!current?.custom) return
+    const info = await attempt(getApi().request<'removeCustomProvider'>({ type: 'removeCustomProvider', id: current.id }))
+    setRemoving(false)
+    if (info) {
+      setModels(info)
+      setProvider(null)
+    }
+  }
+
   const num = (v: string) => (v.trim() === '' ? undefined : Number(v))
   const addPriceOk = local || (num(add.priceIn) !== undefined && num(add.priceIn)! >= 0 && num(add.priceOut) !== undefined && num(add.priceOut)! >= 0)
   const canAdd = !!current && add.id.trim() !== '' && addPriceOk
@@ -88,16 +102,41 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
           <div className="models-providers">
             {providers.map((p) => (
               <button key={p.id} className={p.id === current?.id ? 'primary' : ''} onClick={() => setProvider(p.id)} data-testid={`models-provider-${p.id}`} title={p.available ? undefined : p.unavailableReason}>
-                <span>{p.id}</span>
+                <span>{p.name}</span>
                 <span className="small">{p.available ? `${(models?.models ?? []).filter((m) => m.provider === p.id && m.shown !== false).length} ticked` : 'n/a'}</span>
               </button>
             ))}
+            <button onClick={() => setForm('new')} data-testid="models-add-provider">+ Add provider</button>
           </div>
-          {current ? (
+          {form !== null ? (
+            <CustomProviderForm
+              key={form}
+              provider={form === 'new' ? undefined : providers.find((p) => p.id === form)}
+              onDone={(id) => {
+                setForm(null)
+                if (id) setProvider(id)
+              }}
+            />
+          ) : current ? (
             <div className="models-pane">
+              {current.custom && (
+                <div className="row small" data-testid="models-custom-actions">
+                  <span className="dim">Added provider</span>
+                  <button onClick={() => setForm(current.id)} data-testid="models-edit-provider">Edit</button>
+                  {removing ? (
+                    <>
+                      <span className="warn">Remove {current.name}, its key and its ticked models?</span>
+                      <button className="primary" onClick={() => void removeProvider()} data-testid="models-remove-confirm">Remove</button>
+                      <button onClick={() => setRemoving(false)}>Keep</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setRemoving(true)} data-testid="models-remove-provider">Remove</button>
+                  )}
+                </div>
+              )}
               <div className="row">
                 <input className="grow" value={filter} placeholder="Filter, e.g. qwen" onChange={(e) => setFilter(e.target.value)} data-testid="models-filter" />
-                <button disabled={!current.available || catalog?.loading} onClick={() => void detectModels(current.id)} title={`Ask ${current.id} for every model it has`} data-testid="models-detect">
+                <button disabled={!current.available || catalog?.loading} onClick={() => void detectModels(current.id)} title={`Ask ${current.name} for every model it has`} data-testid="models-detect">
                   {catalog?.loading ? 'Detecting...' : 'Detect models'}
                 </button>
               </div>

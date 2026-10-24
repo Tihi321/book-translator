@@ -244,21 +244,22 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
 
   tool(
     'list_client_tasks',
-    'The requests the app made to the client provider (model client/claude-code) that wait for you or are leased: waiting, leased and the tasks with job, role, task, project, unit, state and age.',
+    'The requests the app made to the client provider (models client/claude-code, client/antigravity ...) that wait for a client or are leased: waiting, leased and the tasks with job, role, task, project, unit, client, state and age. Every client task is listed; get_client_task gives you only the ones for your client name.',
     {},
     () => run({ type: 'listClientTasks' }),
     true
   )
   tool(
     'get_client_task',
-    'Leases the oldest waiting request of the client provider (for 10 minutes, or leaseMinutes) and returns taskId, meta, system, user, schema (when the answer is JSON), output (what to reply with), leaseMinutes and messages (only for a multi-turn request such as a JSON repair round: answer its last user message), or {none: true, waiting}. Answer it with submit_client_task. A lease that runs out puts the task back in the queue, and an answer that submit_client_task refuses starts the lease again. A task you took and cannot answer (or that a client that stopped took): release_client_task.',
+    'Leases the oldest waiting request of the client provider made for your client (client defaults to claude-code; Antigravity: pass client: "antigravity") (for 10 minutes, or leaseMinutes) and returns taskId, meta, system, user, schema (when the answer is JSON), output (what to reply with), leaseMinutes and messages (only for a multi-turn request such as a JSON repair round: answer its last user message), or {none: true, waiting}. Answer it with submit_client_task. A lease that runs out puts the task back in the queue, and an answer that submit_client_task refuses starts the lease again. A task you took and cannot answer (or that a client that stopped took): release_client_task.',
     {
+      client: z.string().optional().describe('Which client you are: the model id after client/. Default claude-code. Antigravity: pass client: "antigravity". You only get the tasks made for your client name.'),
       role: z.string().optional().describe('glossary, translator, proofreader or qa'),
       project: z.string().optional(),
       task: z.string().optional().describe('For example translate, retry, retry-tags, fix, proofread, glossary, review, recheck'),
       leaseMinutes: z.number().int().min(1).max(60).optional().describe('How long you hold it before it goes back to the queue (default 10)')
     },
-    (a) => run({ type: 'getClientTask', role: a.role, project: a.project, task: a.task, leaseMinutes: a.leaseMinutes })
+    (a) => run({ type: 'getClientTask', client: a.client, role: a.role, project: a.project, task: a.task, leaseMinutes: a.leaseMinutes })
   )
   tool(
     'submit_client_task',
@@ -269,8 +270,8 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   tool(
     'release_client_task',
     'Gives a leased request back to the queue, for another client to take: the one with taskId ({released: true or false}), or, with project and/or role and no taskId, every leased request that matches ({released: how many}). Use the second form at the start of a session to free what an earlier client that stopped still holds, instead of waiting for its lease to run out.',
-    { taskId: z.string().min(1).optional(), project: z.string().optional(), role: z.string().optional() },
-    (a) => run({ type: 'releaseClientTask', taskId: a.taskId, project: a.project, role: a.role })
+    { taskId: z.string().min(1).optional(), client: z.string().optional().describe('Only the leased requests of this client (default: every client). Antigravity: client: "antigravity".'), project: z.string().optional(), role: z.string().optional() },
+    (a) => run({ type: 'releaseClientTask', taskId: a.taskId, client: a.client, project: a.project, role: a.role })
   )
 
   // ---- translate it yourself ----

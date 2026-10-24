@@ -1,9 +1,10 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { parseDocument } from 'yaml'
+import { isMap, isSeq, parseDocument } from 'yaml'
+import type { YAMLMap, YAMLSeq } from 'yaml'
 import { applyModelDefaults, loadDefaults } from './config'
 import { adapterFor, supportedExtensions } from './formats'
-import { resolveKey, setStoredKey } from './models/keys'
+import { deleteStoredKey, resolveKey, setStoredKey } from './models/keys'
 import type { KeyResolver } from './models/keys'
 import type { ListedModel } from './models/openaiCompat'
 import { clientTaskResult } from './models/client'
@@ -12,12 +13,13 @@ import type { ModelRegistry } from './models/registry'
 import { mergeSettings } from './project/store'
 import { EngineService } from './service'
 import { atomicWrite } from './store/atomic'
+import { LEGACY_SEED_PROVIDERS } from './store/migrate'
 import { countTokens } from './tokens'
 import { parseMd, serializeMd, splitFrontmatter } from '../shared/md'
 import type { DocumentIR } from '../shared/ir'
 import { defaultsSchema, providersSchema } from '../shared/schemas'
 import type { DefaultsConfig } from '../shared/schemas'
-import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineInfo, EngineTransport, FileInfo, McpStatus, ModelsInfo, ProviderPatch } from '../shared/protocol'
+import type { AnalyzeResult, CatalogResult, Command, CustomProviderForm, CustomProviderTest, EngineEvent, EngineInfo, EngineTransport, FileInfo, McpStatus, ModelsInfo, ProviderPatch } from '../shared/protocol'
 import { isRequest } from '../shared/protocol'
 
 export interface DispatcherOptions {
@@ -27,6 +29,8 @@ export interface DispatcherOptions {
   keys?: KeyResolver
   /** Stores an API key (the credential store). */
   storeKey?: (name: string, value: string) => void
+  /** Deletes a stored API key (the credential store). */
+  deleteKey?: (name: string) => void
   /** Show the scripted `mock` provider's models (development and tests). */
   showMock?: boolean
   /** The MCP server's state, for `getMcpStatus`. Without it the answer is `running: false`. */
@@ -54,6 +58,22 @@ Which models the model pickers offer. The app writes this file from the **Models
 - \`hidden\`: \`provider/model\` refs the pickers leave out: models from \`providers.md\` or found by \`discover\` that you unticked.
 - \`limits\`: per provider, the limits set in the Models dialog, over the ones in \`providers.md\`: \`concurrency\` (requests at once), \`rpm\` (per minute) and \`rpd\` (per day, from midnight UTC). 0 means no limit.
 `
+
+/** Ids a custom provider can't take: the seed's (and the older seeds'), and the `paid` group. */
+const RESERVED_PROVIDER_IDS = new Set([...LEGACY_SEED_PROVIDERS, 'acp', 'client', 'paid'])
+
+/** `ACP proxy (home)` -> `acp-proxy-home`. Empty when the name has no letter or digit. */
+export function slugOf(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/** The credential-store name of a custom provider's key. */
+export const customKeyName = (id: string): string => `CUSTOM_${id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`
 
 const wordsOf = (text: string) => text.replace(/<\/?\d+\/?>/g, ' ').split(/\s+/).filter(Boolean).length
 
@@ -90,6 +110,7 @@ export class CommandDispatcher {
   private readonly service: EngineService
   private readonly keys: KeyResolver
   private readonly storeKey: (name: string, value: string) => void
+  private readonly deleteKey: (name: string) => void
   private discovery: ModelsInfo['discovery'] = []
   private readonly irCache = new Map<string, DocumentIR>()
   /** The last model list each provider gave `detectModels`, for the prices of the models picked from it. */
@@ -101,6 +122,7 @@ export class CommandDispatcher {
     this.service = opts.service
     this.keys = opts.keys ?? resolveKey
     this.storeKey = opts.storeKey ?? setStoredKey
+    this.deleteKey = opts.deleteKey ?? ((name) => void deleteStoredKey(name))
     // a request that finds a server down, or a provider's daily limit used up, tells the UI
     const router = this.service.router
     router.onProviderDown = (p) => {
@@ -139,8 +161,11 @@ export class CommandDispatcher {
     const ids = new Set(providers.map((p) => p.id))
     const limiter = this.service.router.limiter
     return {
+      keyNames: [...new Set(providers.map((p) => p.apiKeyEnv).filter((k): k is string => !!k))],
       providers: providers.map((p) => ({
         id: p.id,
+        name: p.name,
+        custom: p.custom,
         kind: p.kind,
         enabled: p.enabled,
         local: p.local,
@@ -156,6 +181,7 @@ export class CommandDispatcher {
         dayFull: limiter.dayFull(p),
         dayResetsAt: limiter.dayResetsAt(),
         loadModels: p.loadModels,
+        jsonSchema: p.jsonSchema,
         discover: p.discover,
         available: p.available,
         unavailableReason: p.unavailableReason
@@ -435,6 +461,156 @@ export class CommandDispatcher {
     await atomicWrite(file, next)
   }
 
+  /** providers.md as a yaml document (comments and text kept) with its providers list. */
+  private async readProvidersDoc(): Promise<{ file: string; doc: ReturnType<typeof parseDocument>; body: string; list: YAMLSeq }> {
+    const file = path.join(this.dataDir, 'config', 'providers.md')
+    const { frontmatter, body } = splitFrontmatter(await fs.readFile(file, 'utf8'))
+    if (frontmatter === null) throw new Error('providers.md has no frontmatter')
+    const doc = parseDocument(frontmatter)
+    const list = doc.get('providers')
+    if (!isSeq(list)) throw new Error('providers.md has no providers list')
+    return { file, doc, body, list }
+  }
+
+  private async writeProvidersDoc(p: { file: string; doc: ReturnType<typeof parseDocument>; body: string }): Promise<void> {
+    const check = providersSchema.safeParse(p.doc.toJS())
+    if (!check.success) throw new Error(`providers.md would be invalid: ${check.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
+    await atomicWrite(p.file, `---\n${p.doc.toString({ lineWidth: 0 })}---\n${p.body}`)
+  }
+
+  /** Adds a custom provider to providers.md (before `mock`), or edits the one with `id`. Only entries with `custom: true` are touched. The key goes to the credential store. */
+  private async saveCustomProvider(form: CustomProviderForm): Promise<ModelsInfo> {
+    const name = form.name.trim()
+    if (!name) throw new Error('the name is empty')
+    const baseUrl = form.baseUrl.trim()
+    let url: URL
+    try {
+      url = new URL(baseUrl)
+    } catch {
+      throw new Error(`the base URL is not a URL: ${baseUrl}`)
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('the base URL must start with http:// or https://')
+    const concurrency = form.concurrency
+    if (concurrency !== 'auto' && (!Number.isInteger(concurrency) || concurrency < 1)) throw new Error('parallel must be a whole number of at least 1, or auto')
+    const p = await this.readProvidersDoc()
+    const entries = p.list.items.filter((i): i is YAMLMap => isMap(i))
+    const find = (id: string) => entries.find((e) => e.get('id') === id)
+    let entry: YAMLMap | undefined
+    let id: string
+    if (form.id) {
+      id = form.id
+      entry = find(id)
+      if (!entry) throw new Error(`unknown provider: ${id}`)
+      if (entry.get('custom') !== true) throw new Error(`${id} is not a custom provider: edit config/providers.md for it`)
+    } else {
+      id = slugOf(name)
+      if (!id) throw new Error('the name needs a letter or a digit')
+      if (RESERVED_PROVIDER_IDS.has(id) || find(id)) throw new Error(`there is a provider "${id}" already: pick another name`)
+    }
+    const key = form.apiKey?.trim()
+    const keyName = (entry?.get('api_key_env') as string | undefined) ?? (key ? customKeyName(id) : undefined)
+    if (entry) {
+      entry.set('name', name)
+      entry.set('enabled', form.enabled)
+      entry.set('base_url', baseUrl)
+      entry.set('local', form.free)
+      entry.set('json_schema', form.jsonSchema)
+      entry.set('concurrency', concurrency)
+      if (keyName) entry.set('api_key_env', keyName)
+    } else {
+      const node = p.doc.createNode({
+        id,
+        name,
+        custom: true,
+        kind: 'openai-compat',
+        enabled: form.enabled,
+        base_url: baseUrl,
+        ...(keyName ? { api_key_env: keyName } : {}),
+        local: form.free,
+        json_schema: form.jsonSchema,
+        concurrency,
+        discover: true,
+        models: []
+      })
+      const mock = p.list.items.findIndex((i) => isMap(i) && i.get('id') === 'mock')
+      if (mock === -1) p.list.items.push(node)
+      else p.list.items.splice(mock, 0, node)
+    }
+    await this.writeProvidersDoc(p)
+    if (key && keyName) this.storeKey(keyName, key)
+    this.log('info', `${entry ? 'saved' : 'added'} the custom provider ${id}`)
+    await this.registry.load()
+    await this.syncSlots()
+    return this.discover()
+  }
+
+  /** Removes a custom provider and its stored key, and its refs in models.md (`picked`, `hidden`, `limits`) and defaults.json (group default, order, agent lists). */
+  private async removeCustomProvider(id: string): Promise<ModelsInfo> {
+    const p = await this.readProvidersDoc()
+    const at = p.list.items.findIndex((i) => isMap(i) && i.get('id') === id)
+    const entry = at === -1 ? undefined : (p.list.items[at] as YAMLMap)
+    if (!entry) throw new Error(`unknown provider: ${id}`)
+    if (entry.get('custom') !== true) throw new Error(`${id} is not a custom provider: edit config/providers.md for it`)
+    const keyName = entry.get('api_key_env')
+    p.list.items.splice(at, 1)
+    await this.writeProvidersDoc(p)
+    if (typeof keyName === 'string') this.deleteKey(keyName)
+    await this.cleanDefaults(id)
+    await this.editModelChoices((picked, hidden, limits) => {
+      for (let i = picked.length - 1; i >= 0; i--) if (picked[i]!.provider === id) picked.splice(i, 1)
+      for (const ref of [...hidden]) if (ref.startsWith(`${id}/`)) hidden.delete(ref)
+      delete limits[id]
+    })
+    this.log('info', `removed the custom provider ${id}`)
+    await applyModelDefaults(this.registry, this.dataDir)
+    await this.registry.load()
+    return this.modelsInfo()
+  }
+
+  /** Takes a removed provider out of defaults.json: its group default, its place in the order, and its models in the agent lists. */
+  private async cleanDefaults(id: string): Promise<void> {
+    const file = path.join(this.dataDir, 'config', 'defaults.json')
+    let current: DefaultsConfig
+    try {
+      current = await loadDefaults(this.dataDir)
+    } catch {
+      return // an unreadable defaults.json is left alone
+    }
+    const mine = (ref: string) => ref === id || ref.startsWith(`${id}/`)
+    const groupDefaults = Object.fromEntries(Object.entries(current.groupDefaults).filter(([k, v]) => k !== id && !(v && mine(v))))
+    const modelOrder = current.modelOrder.filter((g) => g !== id)
+    const agentModels: Record<string, string[]> = {}
+    for (const [agent, list] of Object.entries(current.agentModels)) {
+      const kept = list.filter((ref) => !mine(ref))
+      if (kept.length > 0) agentModels[agent] = kept
+    }
+    const next = { ...current, groupDefaults, modelOrder, agentModels }
+    if (JSON.stringify(next) === JSON.stringify(current)) return
+    await atomicWrite(file, JSON.stringify(next, null, 2) + '\n')
+  }
+
+  /** `GET /models` on the server of the form, before it is saved. Never throws: the answer says what went wrong. */
+  private async testCustomProvider(cmd: Extract<Command, { type: 'testCustomProvider' }>): Promise<CustomProviderTest> {
+    const baseUrl = cmd.baseUrl.trim()
+    try {
+      const url = new URL(baseUrl)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, error: 'the base URL must start with http:// or https://' }
+    } catch {
+      return { ok: false, error: `the base URL is not a URL: ${baseUrl}` }
+    }
+    let apiKey = cmd.apiKey?.trim() || undefined
+    // an edit with the key field left empty tries the stored key
+    if (!apiKey && cmd.id) {
+      const env = this.registry.providers.get(cmd.id)?.apiKeyEnv
+      if (env) apiKey = this.keys(env)
+    }
+    try {
+      return { ok: true, models: await this.registry.testEndpoint(baseUrl, apiKey) }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  }
+
   private async setDefaults(patch: Extract<Command, { type: 'setDefaults' }>['patch']): Promise<DefaultsConfig> {
     const file = path.join(this.dataDir, 'config', 'defaults.json')
     const current = await loadDefaults(this.dataDir)
@@ -548,6 +724,14 @@ export class CommandDispatcher {
         return this.addModel(cmd)
       case 'setProviderLimits':
         return this.setProviderLimits(cmd)
+      case 'saveCustomProvider': {
+        const { type: _type, ...form } = cmd
+        return this.saveCustomProvider(form)
+      }
+      case 'removeCustomProvider':
+        return this.removeCustomProvider(cmd.id)
+      case 'testCustomProvider':
+        return this.testCustomProvider(cmd)
       case 'checkServers':
         await this.syncSlots()
         return this.modelsInfo()
@@ -579,7 +763,7 @@ export class CommandDispatcher {
       case 'listClientTasks':
         return { ...s.clientQueue.counts(), tasks: s.clientQueue.list() }
       case 'getClientTask': {
-        const t = s.clientQueue.lease({ role: cmd.role, project: cmd.project, task: cmd.task }, cmd.leaseMinutes ? cmd.leaseMinutes * 60_000 : undefined)
+        const t = s.clientQueue.lease({ client: cmd.client, role: cmd.role, project: cmd.project, task: cmd.task }, cmd.leaseMinutes ? cmd.leaseMinutes * 60_000 : undefined)
         return t ? clientTaskResult(t) : { none: true as const, waiting: s.clientQueue.counts().waiting }
       }
       case 'submitClientTask':
@@ -587,7 +771,7 @@ export class CommandDispatcher {
       case 'releaseClientTask':
         if (cmd.taskId) return { released: s.clientQueue.release(cmd.taskId) }
         if (!cmd.project && !cmd.role) throw new Error('give a taskId, or a project and/or role to release every leased task of')
-        return { released: s.clientQueue.releaseLeased({ project: cmd.project, role: cmd.role }) }
+        return { released: s.clientQueue.releaseLeased({ client: cmd.client, project: cmd.project, role: cmd.role }) }
       default: {
         const never: never = cmd
         throw new Error(`unknown command: ${(never as { type?: string }).type}`)

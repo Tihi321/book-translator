@@ -184,3 +184,91 @@ describe('seed migration', () => {
     expect(after.replace(/ {2}# a provider of a later version\r?\n {2}- id: newone\r?\n {4}kind: mock\r?\n {4}models:\r?\n {6}- id: n\r?\n/, '')).toBe(before)
   })
 })
+
+describe('seed migration of acp and antigravity (BTT-21)', () => {
+  /** A folder from before BTT-21: no `acp`, no `client/antigravity`, a state that lists the providers it was offered and no models. */
+  async function makeBefore21(dir: string): Promise<string> {
+    const file = path.join(dir, 'config', 'providers.md')
+    const { frontmatter, body } = splitFrontmatter(await fs.readFile(file, 'utf8'))
+    const doc = parseDocument(frontmatter!)
+    const providers = doc.get('providers') as YAMLSeq
+    providers.items = providers.items.filter((i) => (i as YAMLMap).get('id') !== 'acp')
+    const client = providers.items.find((i) => (i as YAMLMap).get('id') === 'client') as YAMLMap
+    const models = client.get('models') as YAMLSeq
+    models.items = models.items.filter((i) => (i as YAMLMap).get('id') !== 'antigravity')
+    doc.commentBefore = ' my note'
+    await fs.writeFile(file, `---\n${doc.toString({ lineWidth: 0 })}---\n${body}`, 'utf8')
+    const ids = (providers.items as YAMLMap[]).map((i) => String(i.get('id')))
+    await fs.writeFile(path.join(dir, 'config', 'seed-state.json'), JSON.stringify({ providers: ids.sort() }), 'utf8')
+    return body
+  }
+
+  it('a fresh folder has both, with antigravity noted in the state', async () => {
+    const { dir, cleanup } = await tempDir()
+    cleanups.push(cleanup)
+    await initDataFolder(dir, SEED_DIR)
+    expect(await providerIds(dir)).toContain('acp')
+    expect(await providerIds(dir)).not.toContain('custom')
+    const state = JSON.parse(await fs.readFile(path.join(dir, 'config', 'seed-state.json'), 'utf8')) as { providers: string[]; models: string[] }
+    expect(state.providers).toContain('acp')
+    expect(state.models).toEqual(['client/antigravity'])
+  })
+
+  it('adds acp and client/antigravity once, keeping the edits, the comments and the body', async () => {
+    const { dir, cleanup } = await tempDir()
+    cleanups.push(cleanup)
+    await initDataFolder(dir, SEED_DIR)
+    const body = await makeBefore21(dir)
+    const res = await initDataFolder(dir, SEED_DIR)
+    expect(res.warnings).toEqual([])
+    expect(res.migrated).toEqual(['acp', 'client/antigravity'])
+    const file = path.join(dir, 'config', 'providers.md')
+    const text = await fs.readFile(file, 'utf8')
+    expect(text).toContain('# my note')
+    expect(text).toContain('# Answered by an MCP client')
+    expect(splitFrontmatter(text).body).toBe(body)
+    const ids = await providerIds(dir)
+    expect(ids.indexOf('acp')).toBe(ids.indexOf('mock') - 1)
+    const parsed = parseMdWith(text, providersSchema, file)
+    expect(parsed.data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: false, local: true, base_url: 'http://127.0.0.1:7461/v1' })
+    expect(parsed.data.providers.find((p) => p.id === 'client')!.models.map((m) => m.id)).toEqual(['claude-code', 'antigravity'])
+    const registry = new ModelRegistry(dir, { keys: () => 'k' })
+    await registry.load()
+    expect(registry.contextLength('client/antigravity')).toBe(1000000)
+    expect(registry.getModel('client/antigravity')!.provider.kind).toBe('client')
+    // the second start changes nothing
+    const again = await initDataFolder(dir, SEED_DIR)
+    expect(again.migrated).toEqual([])
+    expect(await fs.readFile(file, 'utf8')).toBe(text)
+  })
+
+  it('does not bring back an antigravity model the user deleted, nor an acp provider', async () => {
+    const { dir, cleanup } = await tempDir()
+    cleanups.push(cleanup)
+    await initDataFolder(dir, SEED_DIR)
+    await makeBefore21(dir)
+    await initDataFolder(dir, SEED_DIR)
+    const file = path.join(dir, 'config', 'providers.md')
+    const { frontmatter, body } = splitFrontmatter(await fs.readFile(file, 'utf8'))
+    const doc = parseDocument(frontmatter!)
+    const providers = doc.get('providers') as YAMLSeq
+    providers.items = providers.items.filter((i) => (i as YAMLMap).get('id') !== 'acp')
+    const models = (providers.items.find((i) => (i as YAMLMap).get('id') === 'client') as YAMLMap).get('models') as YAMLSeq
+    models.items = models.items.filter((i) => (i as YAMLMap).get('id') !== 'antigravity')
+    await fs.writeFile(file, `---\n${doc.toString({ lineWidth: 0 })}---\n${body}`, 'utf8')
+    expect((await initDataFolder(dir, SEED_DIR)).migrated).toEqual([])
+    expect(await providerIds(dir)).not.toContain('acp')
+  })
+
+  it('a folder whose client entry already has antigravity only records it', async () => {
+    const { dir, cleanup } = await tempDir()
+    cleanups.push(cleanup)
+    await initDataFolder(dir, SEED_DIR)
+    await fs.writeFile(path.join(dir, 'config', 'seed-state.json'), JSON.stringify({ providers: ['acp', 'client', 'deepseek', 'mock'] }), 'utf8')
+    const file = path.join(dir, 'config', 'providers.md')
+    const before = await fs.readFile(file, 'utf8')
+    expect((await initDataFolder(dir, SEED_DIR)).migrated).toEqual([])
+    expect(await fs.readFile(file, 'utf8')).toBe(before)
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config', 'seed-state.json'), 'utf8')).models).toEqual(['client/antigravity'])
+  })
+})

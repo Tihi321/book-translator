@@ -130,6 +130,44 @@ describe('ClientTaskQueue', () => {
   })
 })
 
+describe('named clients', () => {
+  it('a task is for one client: a lease without client gets claude-code tasks only', () => {
+    const q = new ClientTaskQueue()
+    q.add({ messages: MSGS, client: 'antigravity' }, { job: 'a', role: 'translator', project: 'p' })
+    q.add({ messages: MSGS }, { job: 'b', role: 'translator', project: 'p' })
+    q.add({ messages: MSGS, client: 'claude-code' }, { job: 'c', role: 'translator', project: 'p' })
+    expect(q.list().map((t) => [t.id, t.client])).toEqual([['a#1', 'antigravity'], ['b#1', 'claude-code'], ['c#1', 'claude-code']])
+    expect(q.lease({})!.id).toBe('b#1')
+    expect(q.lease({ client: 'claude-code' })!.id).toBe('c#1')
+    expect(q.lease({})).toBeNull()
+    expect(q.lease({ client: 'other' })).toBeNull()
+    const t = q.lease({ client: 'antigravity' })!
+    expect(t).toMatchObject({ id: 'a#1', client: 'antigravity' })
+    expect((clientTaskResult(t) as { meta: { client: string } }).meta.client).toBe('antigravity')
+  })
+
+  it('releaseLeased takes every client unless one is named', () => {
+    const q = new ClientTaskQueue()
+    q.add({ messages: MSGS, client: 'antigravity' }, { job: 'a', project: 'p' })
+    q.add({ messages: MSGS }, { job: 'b', project: 'p' })
+    q.lease({ client: 'antigravity' })
+    q.lease({})
+    expect(q.releaseLeased({ client: 'antigravity' })).toBe(1)
+    expect(q.releaseLeased({ project: 'p' })).toBe(1)
+  })
+
+  it('ClientProvider makes the task for the model it was asked for', async () => {
+    const q = new ClientTaskQueue()
+    const provider = new ClientProvider('client', q)
+    const run = collect(provider.chat({ model: 'antigravity', messages: MSGS, meta: { job: 'j', project: 'p' } }))
+    expect(q.lease({})).toBeNull()
+    const t = q.lease({ client: 'antigravity' })!
+    expect(t.client).toBe('antigravity')
+    q.submit(t.id, 'answer')
+    expect((await run).text).toBe('answer')
+  })
+})
+
 describe('clientTaskResult', () => {
   type Msg = { role: 'system' | 'user' | 'assistant'; content: string }
   const lease = (messages: Msg[]) => {
@@ -369,6 +407,22 @@ describe('client provider over MCP', () => {
     }
     expect((await call<{ status: string }>(c, 'wait_for_progress', { projectId: id, timeoutSec: 1 })).status).toBe('done')
     expect(await call(c, 'submit_client_task', { taskId: task.taskId, text: 'late' })).toEqual({ accepted: false, problems: [GONE] })
+  })
+
+  it('get_client_task takes a client: Antigravity gets its own tasks and a call without client only claude-code ones', async () => {
+    const c = await connect()
+    const queue = r!.service.clientQueue
+    queue.add({ messages: MSGS, client: 'antigravity' }, { job: 'ag', role: 'translator', project: 'p' })
+    queue.add({ messages: MSGS }, { job: 'cc', role: 'translator', project: 'p' })
+    const tool = (await c.listTools()).tools.find((t) => t.name === 'get_client_task')!
+    expect(tool.description).toContain('antigravity')
+    const listed = await call<{ tasks: { id: string; client: string }[] }>(c, 'list_client_tasks')
+    expect(listed.tasks.map((t) => [t.id, t.client])).toEqual([['ag#1', 'antigravity'], ['cc#1', 'claude-code']])
+    expect(await call<{ taskId: string; meta: { client: string } }>(c, 'get_client_task', {})).toMatchObject({ taskId: 'cc#1', meta: { client: 'claude-code' } })
+    expect(await call(c, 'get_client_task', {})).toMatchObject({ none: true })
+    expect(await call(c, 'get_client_task', { client: 'other' })).toMatchObject({ none: true })
+    expect(await call<{ taskId: string }>(c, 'get_client_task', { client: 'antigravity' })).toMatchObject({ taskId: 'ag#1' })
+    expect(await call(c, 'release_client_task', { client: 'antigravity', project: 'p' })).toEqual({ released: 1 })
   })
 
   it('shows the prompt for the full pipeline', async () => {

@@ -1,13 +1,14 @@
 import { useStore } from '../store/store'
 import type { AliasOption } from './ModelSelect'
-import { GROUP_ALIASES, ModelSelect, pickDefault } from './ModelSelect'
+import { groupLabel, ModelSelect, pickDefault } from './ModelSelect'
 
-const ALIAS_LABEL = { paid: 'API default', strata: 'Strata default', lmstudio: 'LM Studio default' } as const
-
-/** The alias options for the groups that have a default model set. */
+/** The alias options for the groups that have a default model set (API, Strata, LM Studio, and a custom provider's group). */
 export function useAliasOptions(): AliasOption[] {
   const groups = useStore((s) => s.defaults?.groupDefaults)
-  return GROUP_ALIASES.filter((g) => groups?.[g]).map((g) => ({ value: g, label: `${ALIAS_LABEL[g]} (${groups![g]})` }))
+  const models = useStore((s) => s.models)
+  return Object.entries(groups ?? {})
+    .filter(([, ref]) => ref)
+    .map(([g, ref]) => ({ value: g, label: `${groupLabel(models, g)} default (${ref})` }))
 }
 
 interface Props {

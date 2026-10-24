@@ -16,11 +16,11 @@ describe('ModelRegistry with the seed providers.md', () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
     const ids = [...s.registry.providers.keys()]
-    expect(ids).toEqual(expect.arrayContaining(['deepseek', 'openai', 'openrouter', 'anthropic', 'gemini', 'lmstudio', 'strata', 'ollama', 'custom', 'mock']))
+    expect(ids).toEqual(expect.arrayContaining(['deepseek', 'openai', 'openrouter', 'anthropic', 'gemini', 'lmstudio', 'strata', 'ollama', 'acp', 'client', 'mock']))
     expect(s.registry.getModel('mock/mock-translator')).toBeDefined()
     expect(s.registry.getModel('mock/mock-reviewer')).toBeDefined()
     expect(s.registry.providers.get('ollama')!.available).toBe(false)
-    expect(s.registry.providers.get('custom')!.available).toBe(false)
+    expect(s.registry.providers.get('acp')!.available).toBe(false)
     expect(s.registry.providers.get('mock')!.available).toBe(true)
     expect(s.registry.providers.get('client')).toMatchObject({ available: true, local: true })
     expect(s.registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
@@ -418,7 +418,9 @@ describe('group aliases and order', () => {
     expect(s.registry.groupOf('deepseek/deepseek-v4-pro')).toBe('paid')
     expect(s.registry.groupOf('strata/qwen3.8-flash-next')).toBe('strata')
     expect(s.registry.groupOf('lmstudio/x')).toBe('lmstudio')
-    expect(s.registry.groupOf('ollama/x')).toBeUndefined()
+    expect(s.registry.groupOf('ollama/x')).toBe('ollama') // another local provider is its own group
+    expect(s.registry.groupOf('client/claude-code')).toBeUndefined()
+    expect(s.registry.groupOf('nope/x')).toBeUndefined()
   })
 
   it('orderRefs keeps the list as it is without an order, else sorts by group and keeps the order inside a group', async () => {
@@ -458,5 +460,86 @@ describe('group aliases and order', () => {
     expect(s.registry.loadConfigFor('lmstudio', 'other')).toEqual({ parallel: 4, context: 131072, ttlMinutes: 30 })
     // a model the engine loads is planned with the window it is loaded with
     expect(s.registry.contextLength('lmstudio/big')).toBe(65536)
+  })
+})
+
+describe('custom providers', () => {
+  const entry = (id: string, free: boolean) => `  - id: ${id}
+    name: ${id} name
+    custom: true
+    kind: openai-compat
+    enabled: true
+    base_url: http://127.0.0.1:7461/v1
+    local: ${free}
+    json_schema: false
+    concurrency: 2
+    discover: true
+    models:
+      - id: m1
+        family: qwen
+        price_in: ${free ? 0 : 1}
+        price_out: ${free ? 0 : 2}
+`
+
+  async function withCustom() {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    const file = path.join(s.dir, 'config', 'providers.md')
+    const text = (await fs.readFile(file, 'utf8')).replace(/\r\n/g, '\n')
+    await fs.writeFile(file, text.replace('  - id: mock\n', `${entry('acp-home', true)}${entry('paid-two', false)}  - id: mock\n`), 'utf8')
+    await s.registry.load()
+    return s
+  }
+
+  it('loads a custom: true entry with its name; every other provider falls back to its id', async () => {
+    const s = await withCustom()
+    expect(s.registry.providers.get('acp-home')).toMatchObject({ id: 'acp-home', name: 'acp-home name', custom: true, local: true, kind: 'openai-compat', jsonSchema: false })
+    expect(s.registry.providers.get('deepseek')).toMatchObject({ name: 'deepseek', custom: false })
+  })
+
+  it('is its own group whether it is free or paid, and a seed API provider stays in paid', async () => {
+    const s = await withCustom()
+    expect(s.registry.groupOf('acp-home/m1')).toBe('acp-home')
+    expect(s.registry.groupOf('paid-two/m1')).toBe('paid-two')
+    expect(s.registry.groupOf('deepseek/deepseek-flash')).toBe('paid')
+    expect(s.registry.groupOf('strata/qwen3.8-flash-next')).toBe('strata')
+    expect(s.registry.getModel('acp-home/m1')!.priceIn).toBe(0)
+  })
+
+  it('the alias acp-home resolves from groupDefaults, and the order sorts by it', async () => {
+    const s = await withCustom()
+    const lmLoad = { parallel: 4, context: 131072, ttlMinutes: 60 }
+    s.registry.setDefaults({ aliases: { 'acp-home': 'acp-home/m1', paid: 'deepseek/deepseek-flash' }, order: ['acp-home', 'strata', 'paid'], lmLoad })
+    expect(s.registry.resolve('acp-home')).toBe('acp-home/m1')
+    expect(s.registry.groupOf('acp-home')).toBe('acp-home')
+    expect(s.registry.orderRefs(['paid', 'strata/qwen3.8-flash-next', 'acp-home', 'paid-two/m1'])).toEqual(['acp-home', 'strata/qwen3.8-flash-next', 'paid', 'paid-two/m1'])
+  })
+
+  it('the defaults schema takes open group names, and old values still parse', () => {
+    expect(defaultsSchema.parse({ groupDefaults: { paid: 'a/b', 'acp-home': 'acp-home/m1' }, modelOrder: ['paid', 'strata', 'lmstudio', 'acp-home'] })).toMatchObject({ modelOrder: ['paid', 'strata', 'lmstudio', 'acp-home'] })
+    expect(defaultsSchema.parse({ groupDefaults: { paid: 'a/b' }, modelOrder: ['strata'] }).groupDefaults).toEqual({ paid: 'a/b' })
+  })
+
+  it('the seed acp provider is off, local, text only (no schema) and on port 7461', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    expect(s.registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, custom: false, baseUrl: 'http://127.0.0.1:7461/v1', jsonSchema: false, concurrency: 2, discover: true })
+    expect(s.registry.providers.has('custom')).toBe(false)
+    expect(s.registry.getModel('client/antigravity')).toMatchObject({ context: 1000000 })
+    expect(s.registry.groupOf('acp/x')).toBe('acp')
+  })
+
+  it('testEndpoint counts what GET /models lists and throws the reason otherwise', async () => {
+    const seen: string[] = []
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push(`${String(url)} ${(init?.headers as Record<string, string> | undefined)?.authorization ?? ''}`)
+      if (String(url).startsWith('http://good')) return new Response(JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }] }), { status: 200 })
+      return new Response('nope', { status: 401 })
+    }) as typeof fetch
+    const s = await seededRegistry({ fetchImpl })
+    cleanups.push(s.cleanup)
+    expect(await s.registry.testEndpoint('http://good/v1', 'k')).toBe(2)
+    expect(seen[seen.length - 1]).toContain('http://good/v1/models Bearer k')
+    await expect(s.registry.testEndpoint('http://bad/v1')).rejects.toThrow()
   })
 })

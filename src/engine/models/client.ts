@@ -10,6 +10,9 @@ import type { ChatEvent, ChatMessage, ChatRequest, ProviderClient, RequestMeta }
  */
 export const DEFAULT_LEASE_MS = 10 * 60 * 1000
 
+/** The client a task is for when none is named: Claude Code, whose prompts and skills never pass a `client`. */
+export const DEFAULT_CLIENT = 'claude-code'
+
 /** One model request that waits for a client (Claude Code over MCP) to answer it. Meta fields are '' when the request had none. */
 export interface ClientTask {
   /** `<job>#<call>`. */
@@ -21,6 +24,8 @@ export interface ClientTask {
   task: string
   project: string
   unit: string
+  /** The client model the task is for (the id after `client/`): only a client that asks for it gets it. */
+  client: string
   messages: ChatMessage[]
   /** JSON schema the answer must match (a structured request). */
   schema?: Record<string, unknown>
@@ -41,12 +46,15 @@ export interface ClientTaskSummary {
   task: string
   project: string
   unit: string
+  client: string
   state: 'waiting' | 'leased'
   ageMs: number
   leaseMsLeft?: number
 }
 
 export interface ClientTaskFilter {
+  /** The client asking. Missing means `claude-code`. (`releaseLeased`: missing means every client.) */
+  client?: string
   role?: string
   project?: string
   task?: string
@@ -55,6 +63,8 @@ export interface ClientTaskFilter {
 export type SubmitResult = { accepted: true } | { accepted: false; problems: string[] }
 
 export interface ClientTaskRequest {
+  /** The client model id the task is for. Default `claude-code`. */
+  client?: string
   messages: ChatMessage[]
   schema?: Record<string, unknown>
   maxTokens?: number
@@ -103,6 +113,7 @@ export class ClientTaskQueue {
       task: meta.task ?? '',
       project: meta.project ?? '',
       unit: meta.unit ?? '',
+      client: req.client || DEFAULT_CLIENT,
       messages: req.messages,
       ...(req.schema ? { schema: req.schema } : {}),
       ...(req.maxTokens ? { maxTokens: req.maxTokens } : {}),
@@ -124,6 +135,7 @@ export class ClientTaskQueue {
       task: k.task,
       project: k.project,
       unit: k.unit,
+      client: k.client,
       state: k.leaseUntil === undefined ? ('waiting' as const) : ('leased' as const),
       ageMs: t - k.createdAt,
       ...(k.leaseUntil === undefined ? {} : { leaseMsLeft: Math.max(0, k.leaseUntil - t) })
@@ -142,6 +154,7 @@ export class ClientTaskQueue {
     this.expire()
     for (const { task } of this.entries.values()) {
       if (task.leaseUntil !== undefined) continue
+      if (task.client !== (filter.client || DEFAULT_CLIENT)) continue
       if (filter.role && task.role !== filter.role) continue
       if (filter.project && task.project !== filter.project) continue
       if (filter.task && task.task !== filter.task) continue
@@ -188,6 +201,7 @@ export class ClientTaskQueue {
     let n = 0
     for (const { task } of this.entries.values()) {
       if (task.leaseUntil === undefined) continue
+      if (filter.client && task.client !== filter.client) continue
       if (filter.role && task.role !== filter.role) continue
       if (filter.project && task.project !== filter.project) continue
       if (filter.task && task.task !== filter.task) continue
@@ -286,7 +300,7 @@ export function clientTaskResult(t: ClientTask): ClientTaskResult {
   const segText = !t.schema && (t.role === 'translator' || t.role === 'proofreader')
   return {
     taskId: t.id,
-    meta: { job: t.job, call: t.call, role: t.role, task: t.task, project: t.project, unit: t.unit },
+    meta: { job: t.job, call: t.call, role: t.role, task: t.task, project: t.project, unit: t.unit, client: t.client },
     system,
     user: rest.map((m) => m.content).join('\n\n'),
     ...(multiTurn ? { messages: t.messages.map((m) => ({ role: m.role, content: m.content })) } : {}),
@@ -311,7 +325,7 @@ export class ClientProvider implements ProviderClient {
 
   async *chat(req: ChatRequest): AsyncGenerator<ChatEvent, void, void> {
     if (req.signal?.aborted) throw abortError()
-    const { task, done } = this.queue.add({ messages: req.messages, schema: req.schema, maxTokens: req.maxTokens }, req.meta)
+    const { task, done } = this.queue.add({ client: req.model, messages: req.messages, schema: req.schema, maxTokens: req.maxTokens }, req.meta)
     const onAbort = () => void this.queue.cancel(task.id)
     req.signal?.addEventListener('abort', onAbort, { once: true })
     if (req.signal?.aborted) onAbort()
