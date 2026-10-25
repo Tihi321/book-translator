@@ -67,10 +67,10 @@ export function ProjectSettingsTab({ detail }: { detail: ProjectDetail }) {
           <input type="checkbox" checked={s.fixMinorIssues === true} disabled={locked || !s.enabled.qa} onChange={(e) => set({ fixMinorIssues: e.target.checked })} data-testid="settings-fix-minor" />
           Also fix minor QA issues
         </label>
-        {detail.project.format === 'vn' && (
+        {(detail.project.format === 'vn' || detail.project.format === 'vnp') && (
           <>
             <span />
-            <label className="row small" title="The glossary gives each character a name for the target language; the export writes it into the speaker tags, the ON SCREEN: lines and the bible. Chunks that are already translated keep the names they have.">
+            <label className="row small" title={detail.project.format === 'vnp' ? 'The glossary gives each character and alias name a form for the target language; the translator writes it into the name values and wherever a name appears in the text. Chunks that are already translated keep the names they have.' : 'The glossary gives each character a name for the target language; the export writes it into the speaker tags, the ON SCREEN: lines and the bible. Chunks that are already translated keep the names they have.'}>
               <input type="checkbox" checked={s.localizeNames === true} disabled={locked} onChange={(e) => set({ localizeNames: e.target.checked })} data-testid="settings-localize-names" />
               Localize the character names
             </label>

@@ -28,7 +28,9 @@ Three ways to work:
 
 3. Full pipeline, you answer the app's model calls: create_project (or update_project_settings) with clientOnly true: all four agents (glossary, translator, proofreader, qa) go on client/claude-code and the project refuses every other model, so a paid or local model can never be called by mistake; start_translation, then repeat wait_for_progress (it returns at once when a request waits: clientTasks.waiting) and get_client_task, answer as its output says, and submit_client_task. A JSON answer (glossary, QA) is checked against its schema when submitted. Nothing is spent. The client provider is in config/providers.md and enabled; the app adds it to an older data folder at its next start, and reads an edit of the file again within a few seconds (no restart). Put the project back on real models afterwards (clientOnly false and agentModels), or it waits for a client for ever. The prompt translate_with_full_pipeline has the loop.
 
-Visual-novel book folder: give the folder (book.md, outline.md, chapters/, bible/bible.md, cover-brief.md) as sourcePath. Every script line is one segment and the export is a folder of the same layout with the same lines: SCENE:, ON SCREEN: and speaker tags stay, a spoken line comes as <1>NAME (expression):</1> text (keep the tag, translate the text), the bible and cover brief are copied. Character names stay as they are unless you set localizeNames true (create_project or update_project_settings): then the glossary builder gives each name a form for the target language, you can edit those rows with update_glossary before export_project, and the export writes the names into the speaker tags, the ON SCREEN: lines and the bible's character list. VN Studio can add the exported folder as an edition (vno_add_edition).
+Visual-novel packs v2 (a folder with vn/pack.json and vn/text/<sourceLang>.json): give the folder as sourcePath. This is the preferred way to translate a visual novel: only the text catalog is translated, one segment per catalog value (title, blurb, chapter/scene titles, choices, endings, character and alias names, narration and spoken lines, puzzle names and clues), and the pack template (keys, ids, art fields, puzzle cores) is copied byte for byte. The export is a hand-off bundle <slug>.<lang>/ with edition.json, the unchanged vn/pack.json, the translated vn/text/<lang>.json and the bare catalog.json: VN Studio takes the bundle folder or catalog.json with vno_add_edition. Structural labels (SCENE:, ON SCREEN:, NARRATION:, CG:, INSERT:, SFX:, AMBIENCE:, CLUE:, EVIDENCE:, PUZZLE:, TESTIMONY:) and scene/beat ids are refused by the deterministic QA and by the export, and the export refuses a pack that changed since the project was made. localizeNames translates the catalog's character and alias name values; leave it off to keep the names.
+
+Visual-novel book folders v1 (book.md, outline.md, chapters/, bible/bible.md, cover-brief.md): give the folder (with no vn/pack.json) as sourcePath; it is translated by its script lines. Every script line is one segment and the export is a folder of the same layout with the same lines: SCENE:, ON SCREEN: and speaker tags stay, a spoken line comes as <1>NAME (expression):</1> text (keep the tag, translate the text), the bible and cover brief are copied. CLUE:/EVIDENCE: keep their label and ids (their prose is translated), PUZZLE: and END TESTIMONY stay whole, and TESTIMONY: keeps its label. Character names stay as they are unless you set localizeNames true: then the glossary builder gives each name a form for the target language, you can edit those rows with update_glossary before export_project, and the export writes the names into the speaker tags, the ON SCREEN: lines and the bible's character list. VN Studio can add the exported folder as an edition (vno_add_edition).
 
 Paths are on the machine the app runs on. Projects are named after the file, the language and a hash, so the same file and language give the same project.`
 
@@ -50,7 +52,7 @@ const clientOnly = z
 
 const localizeNames = z
   .boolean()
-  .describe("Visual-novel book folders only (default false). true: the character names are localized: the glossary builder gives each name a form for the target language (type person in glossary.md, which you can edit before export_project), and the export writes it into the speaker tags, the ON SCREEN: lines and the bible's character list, so VN Studio (vno_add_edition) still pairs every line. false: names stay as in the source.")
+  .describe("Visual-novel folders and packs only (default false). true: the character names are localized: the glossary builder gives each name a form for the target language (type person in glossary.md, which you can edit before export_project), and the translator writes it into the catalog's name values and wherever a name appears in the text (a book folder: into the speaker tags, the ON SCREEN: lines and the bible's character list, so VN Studio still pairs every line). false: names stay as in the source.")
   .optional()
 
 const fixMinorIssues = z
@@ -104,7 +106,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   tool(
     'analyze_file',
     'Reads a document and estimates chunks, tokens, cost and time with the default (or given) settings. Creates nothing.',
-    { sourcePath: z.string().describe('Absolute path of the book, or of a visual-novel book folder'), targetLanguage: z.string().optional(), sourceLanguage: z.string().optional() },
+    { sourcePath: z.string().describe('Absolute path of the book, or of a visual-novel pack folder (vn/pack.json + vn/text/<lang>.json) or book folder'), targetLanguage: z.string().optional(), sourceLanguage: z.string().optional() },
     (a) => run({ type: 'analyze', sourcePath: a.sourcePath, targetLanguage: a.targetLanguage, sourceLanguage: a.sourceLanguage }),
     true
   )
@@ -112,7 +114,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     'create_project',
     'Creates a project for a book and a target language (or returns the one that exists for that file and language, with its settings updated). Defaults come from get_defaults. To translate it yourself, set enabledAgents to all false. For a Claude-only translation of the full pipeline set clientOnly true.',
     {
-      sourcePath: z.string().describe('Absolute path of the book, or of a Scriptorium visual-novel book folder (exported as a folder)'),
+      sourcePath: z.string().describe('Absolute path of the book, or of a visual-novel pack folder (vn/pack.json + vn/text/<lang>.json) or book folder (both are exported as a folder)'),
       targetLanguage: z.string().describe('Name or code, for example Croatian or hr'),
       sourceLanguage: z.string().optional(),
       agentModels,
@@ -238,7 +240,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     await run({ type: 'setBrief', projectId: a.projectId, brief: a.brief })
     return { saved: true }
   })
-  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder)'), cover: z.enum(['source', 'title']).optional().describe('EPUB only. source (default): keep the cover image and translate its alt text. title: replace it by a plain title page with the translated title and the author (the source cover has the original title drawn on it).') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath, cover: a.cover }))
+  tool('export_project', 'Writes the translated document (partial progress works: untranslated blocks keep the source text). Returns the file path (a folder for a visual-novel book; for a visual-novel pack v2 the bundle folder with an unchanged vn/pack.json and the translated catalog, plus catalog, lang, keys and warnings).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder; a folder for a visual-novel book or pack)'), cover: z.enum(['source', 'title']).optional().describe('EPUB only. source (default): keep the cover image and translate its alt text. title: replace it by a plain title page with the translated title and the author (the source cover has the original title drawn on it).') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath, cover: a.cover }))
 
   // ---- the client provider: you answer the app's model calls ----
 

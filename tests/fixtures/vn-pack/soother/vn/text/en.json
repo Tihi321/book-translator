@@ -1,0 +1,52 @@
+{
+  "format": "vn-text",
+  "version": 2,
+  "lang": "en",
+  "packHash": "sha256:3428c1bba55ac349d79ce582244cfe34d8d8f719cf7fdbe42e8622c42040832b",
+  "title": "The Soother Fell Into Dragon Land",
+  "blurb": "Petra throws her brother's soother over the mountains and follows it into Dragon Land, where a small orange dragon has already found it and a sleepy one will only trade.",
+  "chapterTitles": {
+    "1": "The Grumpy Throw",
+    "2": "The Kind Trade"
+  },
+  "sceneTitles": {
+    "ch01.s01": "Petra's garden, morning",
+    "ch01.s02": "The bubble-gum volcano, morning",
+    "ch02.s01": "The Golden Cave, night",
+    "ch02.s02": "Petra's garden, dusk"
+  },
+  "choiceTexts": {},
+  "endings": {
+    "2": "happy: the soother comes home and the dragons keep the boot"
+  },
+  "characterNames": {
+    "petra": "Petra",
+    "petra#1": "the girl",
+    "petra#2": "little storm",
+    "mango": "Mango",
+    "grumble": "Grumble"
+  },
+  "beats": {
+    "ch01.s01.b001": "The sun is warm and the clothesline flaps.",
+    "ch01.s01.b003": "Pip will not stop crying.",
+    "ch01.s01.b004": "I have had enough of this soother.",
+    "ch01.s01.b005": "The soother spins up into the green sky.",
+    "ch01.s01.b006": "Oops.",
+    "ch01.s01.b008": "That was Pip's favourite thing.",
+    "ch01.s02.b001": "The sky is green and bubbles pop with a soft plop.",
+    "ch01.s02.b002": "I found it first!",
+    "ch01.s02.b003": "That is my brother's soother.",
+    "ch01.s02.b004": "We can trade for it.",
+    "ch01.s02.b005": "I have a red boot.",
+    "ch02.s01.b001": "The cave walls sparkle like gold and Grumble snores on a pile of treasures.",
+    "ch02.s01.b003": "What is in it for me?",
+    "ch02.s01.b004": "My favourite red boot.",
+    "ch02.s01.b005": "Mmm. A fair trade.",
+    "ch02.s02.b001": "The friendly wind sets Petra down by the clothesline.",
+    "ch02.s02.b003": "Pip, look what I found.",
+    "ch02.s02.b004": "Pip grins and throws the soother again.",
+    "ch02.s02.b005": "Here we go again!",
+    "ch02.s02.b006": "At least the dragons are happy.",
+    "ch02.s02.b007": "Come on, Mango."
+  }
+}

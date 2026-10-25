@@ -1,5 +1,6 @@
 import type { ChatMessage, Usage } from '../models/types'
 import type { AgentName } from '../../shared/schemas'
+import type { DocFormat } from '../../shared/ir'
 import type { GlossaryEntry } from '../../shared/project'
 import type { ChatFn } from './llm'
 
@@ -33,6 +34,8 @@ export interface AgentEnv {
   /** The book brief (brief.md). */
   brief: string
   glossary: GlossaryEntry[]
+  /** The project's format, for the checks that only one format has (a pack's catalog values). */
+  format?: DocFormat
   call: CallFn
   log: (level: 'info' | 'warn' | 'error', message: string) => void
   signal?: AbortSignal

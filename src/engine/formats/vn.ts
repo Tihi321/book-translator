@@ -13,11 +13,12 @@ import { stripTags } from './inline'
  *
  * Every text span is one block, so a line stays a line and the script keeps its line count. What is translated:
  * - frontmatter values: `title`, `blurb`, `summary`, and in `chapters[]` `title`, `summary`, `ending`, `choices[].text` (other keys stay)
- * - chapter scripts: narration, spoken text, the place and time of `SCENE:` lines, `#` headings
+ * - chapter scripts: narration, spoken text, the place and time of `SCENE:` lines, `#` headings, the prose of the puzzle lines (`CLUE:`,
+ *   `EVIDENCE:`, `TESTIMONY:`), whose labels and ids stay
  * - the body of `outline.md`, line by line (list markers stay)
  * What stays as it is: `SCENE:`, `ON SCREEN:` lines (names and looks), speaker tags with their expression, `Narration:`, `---`, stage
- * directions, the body of `book.md`, and `bible/bible.md` and `cover-brief.md`, which are the art reference for the pictures (VN Studio
- * reuses the original's pictures for an edition, and character names have to match the speaker tags).
+ * directions, `PUZZLE:` and `END TESTIMONY`, the body of `book.md`, and `bible/bible.md` and `cover-brief.md`, which are the art reference for
+ * the pictures (VN Studio reuses the original's pictures for an edition, and character names have to match the speaker tags).
  */
 
 /** Script patterns of Scriptorium (with the Croatian keywords VN Studio also reads). Each has prefix, text and suffix groups. */
@@ -30,9 +31,19 @@ const LINE = /^(\s*\**([\p{Lu}][\p{Lu}\p{N}'’ .-]{0,40}?)\**(?:\s*\([^)]{1,120
 const DIRECTION_ONLY = /^\s*\**([\p{Lu}][\p{Lu}\p{N}'’ ./-]{0,40}?)\**\s*[:.]?\**\s*$/u
 const DIRECTION = /^(?:(?:(?:SMASH|MATCH|JUMP|HARD|QUICK) )?CUT(?: (?:TO|BACK TO|NA))?|FADE(?: (?:IN|OUT|TO(?: (?:BLACK|WHITE))?|U CRNO))?|DISSOLVE(?: TO)?|(?:INT|EXT)(?:[ ./].*)?|REZ(?: NA)?|PRIJELAZ(?: NA)?|ZATAMNJENJE)$/u
 const LIST = /^(\s*(?:[-*+]|\d+[.)])\s+)(.*?)(\s*)$/
+/**
+ * The puzzle lines of Scriptorium (`docs/visual-novel.md`, with the Croatian keywords): their ids and labels stay, their prose is translated.
+ * `CLUE: <puzzle>/<clue>: <prose>`, `EVIDENCE: <key>: <prose>`, `PUZZLE: <key> (<kind>)`, `TESTIMONY: <witness>`, `END TESTIMONY`.
+ * Checked before the speaker line, so `CLUE:` is never a character called CLUE.
+ */
+const CLUE = /^(\s*\**\s*(?:clue|trag)\s*:\s*\**\s*[A-Za-z0-9_-]+\s*\/\s*[A-Za-z0-9_-]+\s*:\s*\**\s*)(.*?)(\s*\**\s*)$/iu
+const EVIDENCE = /^(\s*\**\s*(?:evidence|dokaz)\s*:\s*\**\s*[A-Za-z0-9_-]+\s*:\s*\**\s*)(.*?)(\s*\**\s*)$/iu
+const TESTIMONY = /^(\s*\**\s*(?:testimony|svjedo[čc]enje)\s*:\s*\**\s*)(.*?)(\s*\**\s*)$/iu
+const PUZZLE_LINE = /^\s*\**\s*(?:puzzle|zagonetka)\s*:\s*\**\s*[A-Za-z0-9_-]+\s*(?:\(\s*[A-Za-z0-9_-]+\s*\))?\s*\**\s*$/iu
+const END_TESTIMONY = /^\s*\**\s*(?:end\s+testimony|kraj\s+svjedo[čc]enja)\s*\**\s*$/iu
 
 /** What a script line is. Lines whose class would change after translation keep the source text. */
-type LineClass = 'blank' | 'break' | 'heading' | 'scene' | 'cast' | 'direction' | 'line' | 'narration'
+type LineClass = 'blank' | 'break' | 'heading' | 'scene' | 'cast' | 'clue' | 'evidence' | 'puzzle' | 'testimony' | 'testimonyEnd' | 'direction' | 'line' | 'narration'
 
 interface LineParts {
   cls: LineClass
@@ -61,6 +72,15 @@ export function classifyScriptLine(line: string): LineParts {
   m = SCENE.exec(line)
   if (m) return { cls: 'scene', prefix: m[1]!, text: m[2]!, suffix: m[3]! }
   if (CAST.test(line)) return whole('cast', line)
+  // puzzle lines before the speaker line (and before narration): their labels and ids are structure, their prose is text
+  if (END_TESTIMONY.test(line)) return whole('testimonyEnd', line)
+  if (PUZZLE_LINE.test(line)) return whole('puzzle', line)
+  m = CLUE.exec(line)
+  if (m) return { cls: 'clue', prefix: m[1]!, text: m[2]!, suffix: m[3]! }
+  m = EVIDENCE.exec(line)
+  if (m) return { cls: 'evidence', prefix: m[1]!, text: m[2]!, suffix: m[3]! }
+  m = TESTIMONY.exec(line)
+  if (m) return { cls: 'testimony', prefix: m[1]!, text: m[2]!, suffix: m[3]! }
   m = NARRATION.exec(line)
   if (m) return m[2] ? { cls: 'narration', prefix: m[1]!, text: m[2], suffix: m[3]! } : whole('narration', line)
   const d = DIRECTION_ONLY.exec(line)
@@ -106,10 +126,11 @@ function lineSpans(line: string, mode: 'script' | 'prose'): Span[] {
     if (speaker) t = dropSpeaker(t, speaker)
     t = oneLine(stripTags(t))
     if (!t) return undefined
-    // a translation that would read as another kind of line (a narration that now looks like `NAME: ...`) keeps the source line
+    // the kept marker bytes have to come back exactly: the same kind of line, the same prefix and the same suffix. A translation that would read
+    // as another kind of line (a narration that now looks like `NAME: ...`), or that would add or eat a marker (`#`, `*`), keeps the source line.
     if (mode === 'script') {
       const again = classifyScriptLine(prefix + t + suffix)
-      if (again.cls !== cls || again.prefix !== prefix) return undefined
+      if (again.cls !== cls || again.prefix !== prefix || again.suffix !== suffix) return undefined
     }
     return t + suffix + eol
   }
@@ -385,7 +406,7 @@ export function localizeScriptNames(text: string, names: Record<string, string>,
         const prefix = m[1]! + upper(target, lang) + m[3]!
         const rest = parts.text + parts.suffix
         const again = classifyScriptLine(prefix + rest)
-        if (again.cls !== 'line' || again.prefix !== prefix) {
+        if (again.cls !== 'line' || again.prefix !== prefix || again.suffix !== parts.suffix) {
           keep(m[2]!.trim(), target, 'a speaker tag')
           return line
         }
@@ -405,6 +426,17 @@ export function localizeScriptNames(text: string, names: Record<string, string>,
           return m[1]! + target + m[3]!
         })
         return c[1]! + items.join(',') + c[3]! + eol
+      }
+      // `TESTIMONY: <witness>`: the label stays, the witness is a character name
+      if (parts.cls === 'testimony') {
+        const target = names[nameKey(parts.text.trim())]?.trim()
+        if (!target) return line
+        const again = classifyScriptLine(parts.prefix + target + parts.suffix)
+        if (again.cls !== 'testimony' || again.prefix !== parts.prefix || again.suffix !== parts.suffix) {
+          keep(parts.text.trim(), target, 'a witness name')
+          return line
+        }
+        return parts.prefix + target + parts.suffix + eol
       }
       return line
     })

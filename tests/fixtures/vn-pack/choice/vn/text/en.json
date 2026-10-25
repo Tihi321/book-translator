@@ -1,0 +1,55 @@
+{
+  "format": "vn-text",
+  "version": 2,
+  "lang": "en",
+  "packHash": "sha256:144ef5980dc0cec88d01ea22321c361afe4ce3531cf296c6cb7c06e65602a3b6",
+  "title": "The Lighthouse Letters",
+  "blurb": "A keeper's daughter waits on the harbour wall for a boat that does not come, and the letters in the lighthouse tell her which way to row.",
+  "chapterTitles": {
+    "1": "The Late Boat",
+    "2": "The Empty Harbour",
+    "3": "The Letter in the Lamp",
+    "4": "The Lighthouse Answers"
+  },
+  "sceneTitles": {
+    "ch01.s01": "The harbour wall, dusk",
+    "ch02.s01": "The harbour wall, dawn",
+    "ch03.s01": "The lamp room, night",
+    "ch04.s01": "The lamp room, before dawn"
+  },
+  "choiceTexts": {
+    "1:0": "Wait at the harbour wall",
+    "1:1": "Row out to find him",
+    "3:0": "Take the letter to the keeper"
+  },
+  "endings": {
+    "2": "bittersweet: the boat is found, empty",
+    "4": "hopeful: the boat turns for home"
+  },
+  "characterNames": {
+    "mara": "Mara",
+    "mara#1": "the keeper's girl",
+    "kessler": "Kessler"
+  },
+  "beats": {
+    "ch01.s01.b001": "Rain needles the grey water. The lighthouse beam sweeps over the boats.",
+    "ch01.s01.b003": "He said he'd be back before the lamp was lit.",
+    "ch01.s01.b005": "The sea keeps its own time, girl.",
+    "ch01.s01.b006": "Then I will keep mine.",
+    "ch02.s01.b001": "Morning comes grey and quiet. The boat is not there.",
+    "ch02.s01.b003": "I waited all night.",
+    "ch02.s01.b004": "Far out, a hull turns over in the swell.",
+    "ch02.s01.b005": "Someone will come.",
+    "ch03.s01.b001": "The lamp is cold. A letter lies on the logbook.",
+    "ch03.s01.b003": "It is addressed to the keeper.",
+    "ch03.s01.b004": "Open it, then.",
+    "ch03.s01.b005": "The letter says the boat turned south before the storm.",
+    "ch03.s01.b006": "Then the lamp can call it back.",
+    "ch03.s01.b007": "There.",
+    "ch04.s01.b001": "The brass lamp burns bright and the beam reaches the dark water.",
+    "ch04.s01.b003": "You kept your time after all.",
+    "ch04.s01.b004": "And the lamp kept his.",
+    "ch04.s01.b005": "Far out, a small boat turns for home.",
+    "ch04.s01.b006": "The lamp is lit."
+  }
+}

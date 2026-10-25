@@ -6,6 +6,7 @@ import { ModelRegistry } from './models/registry'
 import { countTokens } from './tokens'
 import { countStates } from './project/summary'
 import { EngineService } from './service'
+import type { ExportReport } from './service'
 import { AGENTS } from '../shared/schemas'
 import type { AgentName } from '../shared/schemas'
 import type { ProjectSettings } from '../shared/project'
@@ -89,9 +90,11 @@ export async function translate(argv: string[]): Promise<number> {
   const file = positional(argv)
   const to = argValue(argv, 'to')
   if (!file || !to) {
-    out('Usage: npm run engine -- translate <file> --to <language> [--from <language>] [--model <provider/model>[,fallback]] [--glossary-model ..] [--proofread-model ..] [--qa-model ..]')
+    out('Usage: npm run engine -- translate <file|folder> --to <language> [--from <language>] [--model <provider/model>[,fallback]] [--glossary-model ..] [--proofread-model ..] [--qa-model ..]')
     out('                                         [--no-proofread] [--no-qa] [--no-glossary] [--max-chunk N] [--project <id>] [--pause-after-glossary]')
-    out('                                         [--localize-names]   (visual-novel folders: localized character names)')
+    out('                                         [--localize-names]   (visual-novel folders and packs: localized character names)')
+    out('A Scriptorium visual-novel book folder (book.md + chapters/) is translated by its script lines; a folder with vn/pack.json and')
+    out('vn/text/<sourceLang>.json is a visual-novel pack v2 and only its text catalog is translated (export: <slug>.<lang>/ bundle).')
     return 2
   }
   const { registry, dataDir } = await loadRegistry(argv)
@@ -163,9 +166,17 @@ Choose other models (--model ...), or run the project from an MCP client: start_
     out(`glossary written to ${service.store.file(summary.id, 'glossary.md')}. Edit it, then run the same command to continue.`)
     return 0
   }
-  const outPath = await service.export(summary.id, argValue(argv, 'out'))
-  out(`output: ${outPath}`)
+  const report = await service.exportWithReport(summary.id, argValue(argv, 'out'))
+  printExport(report)
   return result.status === 'done' ? 0 : 1
+}
+
+/** The output line(s) of an export: the path, and for a visual-novel pack the catalog and its language. */
+function printExport(r: ExportReport): void {
+  out(`output: ${r.path}`)
+  if (r.catalog) out(`catalog: ${r.catalog}`)
+  if (r.lang) out(`catalog language: ${r.lang}, ${r.keys ?? 0} value(s)`)
+  for (const w of r.warnings) out(`note: ${w}`)
 }
 
 async function serviceFor(argv: string[]): Promise<{ service: EngineService; id: string } | undefined> {
@@ -175,14 +186,15 @@ async function serviceFor(argv: string[]): Promise<{ service: EngineService; id:
   return { service: new EngineService({ dataDir, registry }), id }
 }
 
-/** `engine export <projectId> [--out <file>]`: writes the document from the chunks translated so far. */
+/** `engine export <projectId> [--out <file|folder>]`: writes the document from the chunks translated so far. */
 export async function exportProject(argv: string[]): Promise<number> {
   const s = await serviceFor(argv)
   if (!s) {
-    out('Usage: npm run engine -- export <projectId> [--out <file>] [--cover title]')
+    out('Usage: npm run engine -- export <projectId> [--out <file|folder>] [--cover title]')
+    out('A visual-novel pack is exported as a folder <slug>.<lang>/ with edition.json, vn/pack.json, vn/text/<lang>.json and catalog.json.')
     return 2
   }
-  out(`output: ${await s.service.export(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined })}`)
+  printExport(await s.service.exportWithReport(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined }))
   return 0
 }
 

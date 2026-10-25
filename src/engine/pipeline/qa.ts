@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { stripTags, textOutsideTags, validateTags } from '../formats/inline'
+import { vnPackSegmentProblem } from '../formats/vnPack'
+import type { DocFormat } from '../../shared/ir'
 import type { GlossaryEntry, IssueType, QaIssue, SegmentRec } from '../../shared/project'
 import { chatFn } from './env'
 import type { AgentEnv } from './env'
@@ -36,13 +38,14 @@ function looksUntranslated(srcRaw: string, src: string, glossary: readonly Gloss
 /**
  * Checks that need no model: length ratio outliers, text left untranslated (source == target), glossary term missing in the
  * translation, inline tag mismatch. Glossary misses are minor (inflected languages rarely match exactly), the rest are major
- * except a long translation.
+ * except a long translation. A visual-novel pack's catalog values (`format: 'vnp'`) also have to stay one line, non-empty and free of
+ * structural labels and ids (the contract's §5 rules), which a model likes to add.
  */
 export function deterministicChecks(
   segs: readonly SegmentRec[],
   final: Record<string, string>,
   glossary: readonly GlossaryEntry[],
-  opts: { sameLanguage?: boolean } = {}
+  opts: { sameLanguage?: boolean; format?: DocFormat } = {}
 ): QaIssue[] {
   const issues: QaIssue[] = []
   for (const s of segs) {
@@ -55,7 +58,11 @@ export function deterministicChecks(
       const bits = [c.missing.length ? `missing ${c.missing.join(' ')}` : '', c.extra.length ? `unexpected ${c.extra.join(' ')}` : '', c.misnested ? 'not nested' : ''].filter(Boolean)
       issues.push({ segId: s.id, type: 'tags', severity: 'major', comment: `Inline tags differ from the source (${bits.join(', ')}).` })
     }
-    if (!opts.sameLanguage && src && src === tgt && looksUntranslated(s.text, src, glossary)) {
+    if (opts.format === 'vnp') {
+      const problem = vnPackSegmentProblem(s.text, tr)
+      if (problem) issues.push({ segId: s.id, type: 'mistranslation', severity: 'major', comment: `This is a visual-novel catalog value: it ${problem}. Keep it one non-empty line, with no structural label (SCENE:, ON SCREEN: ...) and no scene or beat id.` })
+    }
+    if (!opts.sameLanguage && !(opts.format === 'vnp' && s.id.startsWith('char.')) && src && src === tgt && looksUntranslated(s.text, src, glossary)) {
       issues.push({ segId: s.id, type: 'untranslated', severity: 'major', comment: 'The translation is identical to the source text.' })
     } else if (src.length >= MIN_CHARS_FOR_RATIO) {
       const ratio = tgt.length / src.length
@@ -87,7 +94,7 @@ export async function reviewChunk(
   final: Record<string, string>,
   opts: { unit: string; task?: string }
 ): Promise<QaIssue[]> {
-  const issues = deterministicChecks(segs, final, env.glossary, { sameLanguage: env.sourceLanguage.toLowerCase() === env.targetLanguage.toLowerCase() })
+  const issues = deterministicChecks(segs, final, env.glossary, { sameLanguage: env.sourceLanguage.toLowerCase() === env.targetLanguage.toLowerCase(), format: env.format })
   const ids = new Set(segs.map((s) => s.id))
   const gl = relevantEntries(env.glossary, segs.map((s) => s.text).join('\n'))
   const pairs = segs.map((s) => `<pair id="${s.id}">\n<src>${s.text}</src>\n<tgt>${final[s.id] ?? ''}</tgt>\n</pair>`).join('\n')

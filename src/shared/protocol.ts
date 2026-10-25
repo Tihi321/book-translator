@@ -376,7 +376,20 @@ export interface CommandResults {
   retryChunk: undefined
   editChunk: ChunkRecord
   updateGlossary: undefined
-  export: { path: string; rel: string | null }
+  export: {
+    /** The written document, or a visual-novel pack's bundle folder. */
+    path: string
+    /** `path` inside the data folder, for the UI's Open folder; null for an outside path. */
+    rel: string | null
+    /** Visual-novel packs: the bare catalog file in the bundle (`vno_add_edition` takes it directly). */
+    catalog?: string
+    /** Visual-novel packs: the language of the written catalog. */
+    lang?: string
+    /** Visual-novel packs: how many catalog values the bundle carries. */
+    keys?: number
+    /** Visual-novel packs: what the export had to say (untranslated values kept in the source text, ...). */
+    warnings?: string[]
+  }
   deleteProject: undefined
   detectModels: CatalogResult
   showModels: ModelsInfo

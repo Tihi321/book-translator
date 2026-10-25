@@ -1,0 +1,303 @@
+{
+  "format": "vn-pack",
+  "version": 2,
+  "packHash": "sha256:3428c1bba55ac349d79ce582244cfe34d8d8f719cf7fdbe42e8622c42040832b",
+  "book": {
+    "slug": "the-soother-fell-into-dragon-land",
+    "format": "visual-novel",
+    "kind": "linear",
+    "primaryLang": "en",
+    "genre": "fantasy adventure",
+    "style": "Simple words, short sentences, a warm and giggly tone. Nothing scary, every ending happy.",
+    "author": "Culo",
+    "coverBrief": "A small girl in a yellow raincoat and red boots holds a round blue soother up to a green sky, beside a tiny orange dragon with a brown satchel, a bubble-gum volcano puffing pink bubbles behind them. Soft, rounded shapes and warm pastel colours; cozy, giggly and safe.",
+    "sourceHash": "sha256:7522f835d19838a508c9207f3f2b0923d9c339dc1abc28ccf37dc8ecbd08adc7"
+  },
+  "characters": [
+    {
+      "key": "petra",
+      "looks": "Six years old, small and wiry, freckles, bright green eyes, a yellow raincoat and red rain boots. Brave and quick to fix mistakes.",
+      "voice": "Bright and quick, says \"Oops\" and \"I can fix this\".",
+      "aliasKeys": [
+        "petra#1",
+        "petra#2"
+      ]
+    },
+    {
+      "key": "mango",
+      "looks": "A small orange dragon about the size of a cat, big amber eyes, tiny wings and a brown satchel for lost things. Friendly and a bit of a collector.",
+      "voice": "Chatty and excited.",
+      "aliasKeys": []
+    },
+    {
+      "key": "grumble",
+      "looks": "A big sleepy dragon as tall as a house, dusty purple scales and heavy eyelids. He guards the Golden Cave and loves shiny things.",
+      "voice": "Slow and rumbly.",
+      "aliasKeys": []
+    }
+  ],
+  "places": [
+    {
+      "key": "petra_s_garden",
+      "name": "Petra's garden",
+      "looks": "A small cottage garden with a red door, a clothesline of baby clothes and a sandbox, under a soft blue sky."
+    },
+    {
+      "key": "bubble_gum_volcano",
+      "name": "Bubble-gum volcano",
+      "looks": "A tall volcano that bubbles pink and blue gum instead of lava, with candy-leaf trees under a green sky."
+    },
+    {
+      "key": "the_golden_cave",
+      "name": "The Golden Cave",
+      "looks": "A large warm cave whose walls sparkle like gold, with piles of shiny treasures and a sleeping dragon."
+    }
+  ],
+  "chapters": [
+    {
+      "n": 1,
+      "isEnding": false,
+      "choices": [],
+      "scenes": [
+        {
+          "id": "ch01.s01",
+          "placeKey": "petra_s_garden",
+          "placeText": "Petra's garden",
+          "time": "morning",
+          "description": "A cottage garden with a red door and a clothesline. A small cottage garden with a red door, a clothesline of baby clothes and a sandbox, under a soft blue sky.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch01.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "petra",
+                  "look": "yellow raincoat, red boots"
+                },
+                {
+                  "charKey": "mango",
+                  "look": "small orange dragon, brown satchel"
+                }
+              ]
+            },
+            {
+              "id": "ch01.s01.b003",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "grumpy",
+              "ambience": {
+                "text": "birds in the garden"
+              }
+            },
+            {
+              "id": "ch01.s01.b004",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "grumpy",
+              "sfx": {
+                "text": "a baby wailing indoors"
+              }
+            },
+            {
+              "id": "ch01.s01.b005",
+              "type": "narration",
+              "image": {
+                "display": "full",
+                "text": "Petra throws the soother over the mountains"
+              }
+            },
+            {
+              "id": "ch01.s01.b006",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "worried",
+              "aliasKey": "petra#1"
+            },
+            {
+              "id": "ch01.s01.b007",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "petra",
+                  "look": "eyes wide"
+                }
+              ],
+              "image": null
+            },
+            {
+              "id": "ch01.s01.b008",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "small"
+            }
+          ]
+        },
+        {
+          "id": "ch01.s02",
+          "placeKey": "bubble_gum_volcano",
+          "placeText": "The bubble-gum volcano",
+          "time": "morning",
+          "description": "Pink bubbles drift over the candy-leaf trees. A tall volcano that bubbles pink and blue gum instead of lava, with candy-leaf trees under a green sky.",
+          "breakBefore": true,
+          "beats": [
+            {
+              "id": "ch01.s02.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s02.b002",
+              "type": "line",
+              "speakerKey": "mango",
+              "expression": "excited",
+              "image": {
+                "display": "insert",
+                "text": "a blue soother on a cushion of gum"
+              }
+            },
+            {
+              "id": "ch01.s02.b003",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "neutral"
+            },
+            {
+              "id": "ch01.s02.b004",
+              "type": "line",
+              "speakerKey": "mango",
+              "expression": "hopeful",
+              "image": null,
+              "ambience": null
+            },
+            {
+              "id": "ch01.s02.b005",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "neutral"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "isEnding": true,
+      "choices": [],
+      "scenes": [
+        {
+          "id": "ch02.s01",
+          "placeKey": "the_golden_cave",
+          "placeText": "The Golden Cave",
+          "time": "night",
+          "description": "A large warm cave whose walls sparkle like gold, with piles of shiny treasures and a sleeping dragon.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch02.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch02.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "petra",
+                  "look": "muddy boots"
+                },
+                {
+                  "charKey": "grumble",
+                  "look": "sleepy, dusty purple scales"
+                }
+              ]
+            },
+            {
+              "id": "ch02.s01.b003",
+              "type": "line",
+              "speakerKey": "grumble",
+              "expression": "sleepy"
+            },
+            {
+              "id": "ch02.s01.b004",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "brave"
+            },
+            {
+              "id": "ch02.s01.b005",
+              "type": "line",
+              "speakerKey": "grumble",
+              "expression": "happy"
+            }
+          ]
+        },
+        {
+          "id": "ch02.s02",
+          "placeKey": "petra_s_garden",
+          "placeText": "Petra's garden",
+          "time": "dusk",
+          "description": "A small cottage garden with a red door, a clothesline of baby clothes and a sandbox, under a soft blue sky.",
+          "breakBefore": true,
+          "beats": [
+            {
+              "id": "ch02.s02.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch02.s02.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "petra",
+                  "look": "one bare foot, happy"
+                },
+                {
+                  "charKey": "mango",
+                  "look": "proud"
+                }
+              ]
+            },
+            {
+              "id": "ch02.s02.b003",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "happy"
+            },
+            {
+              "id": "ch02.s02.b004",
+              "type": "narration"
+            },
+            {
+              "id": "ch02.s02.b005",
+              "type": "line",
+              "speakerKey": "mango",
+              "expression": "giggling"
+            },
+            {
+              "id": "ch02.s02.b006",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "laughing",
+              "aliasKey": "petra#1",
+              "image": {
+                "display": "full",
+                "text": "Petra and Mango laughing in the garden"
+              }
+            },
+            {
+              "id": "ch02.s02.b007",
+              "type": "line",
+              "speakerKey": "petra",
+              "expression": "laughing",
+              "image": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "puzzles": []
+}

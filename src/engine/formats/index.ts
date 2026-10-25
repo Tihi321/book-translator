@@ -7,6 +7,7 @@ import { epubAdapter } from './epub'
 import { pdfAdapter } from './pdf'
 import { textAdapter } from './text'
 import { hashVnFolder, isVnFolder, VN_BRIEF_NOTE, VN_BRIEF_NOTE_LOCALIZED, vnAdapter } from './vn'
+import { hashVnPackFolder, isVnPack, VN_PACK_BRIEF_NOTE, VN_PACK_BRIEF_NOTE_LOCALIZED, vnPackAdapter } from './vnPack'
 
 interface Registration {
   format: DocFormat
@@ -26,20 +27,23 @@ export function supportedExtensions(): string[] {
   return REGISTRY.flatMap((r) => r.extensions)
 }
 
-/** The format for a file name (or a visual-novel book folder), or undefined if no adapter handles it. */
+/** The format for a file name (or a visual-novel pack folder / book folder), or undefined if no adapter handles it. */
 export function formatOf(file: string): DocFormat | undefined {
+  // a pack first: a Scriptorium book folder that has vn/pack.json is translated as a pack, not by its authored chapters
+  if (isVnPack(file)) return 'vnp'
   if (isVnFolder(file)) return 'vn'
   const ext = path.extname(file).toLowerCase()
   return REGISTRY.find((r) => r.extensions.includes(ext))?.format
 }
 
-/** The adapter for a file, chosen by extension, or the folder adapter for a Scriptorium book folder. Throws for an unsupported type. */
+/** The adapter for a file, chosen by extension, or the folder adapter for a visual-novel pack or book folder. Throws for an unsupported type. */
 export function adapterFor(file: string): FormatAdapter {
+  if (isVnPack(file)) return vnPackAdapter
   if (isVnFolder(file)) return vnAdapter
-  if (isDirectory(file)) throw new Error(`"${file}" is a folder but not a visual-novel book folder (it needs book.md and chapters/)`)
+  if (isDirectory(file)) throw new Error(`"${file}" is a folder but not a visual-novel book folder (it needs book.md and chapters/) or a pack (vn/pack.json and vn/text/<lang>.json)`)
   const ext = path.extname(file).toLowerCase()
   const reg = REGISTRY.find((r) => r.extensions.includes(ext))
-  if (!reg) throw new Error(`unsupported file type "${ext || file}" (supported: ${supportedExtensions().join(', ')}, or a visual-novel book folder)`)
+  if (!reg) throw new Error(`unsupported file type "${ext || file}" (supported: ${supportedExtensions().join(', ')}, a visual-novel pack folder, or a visual-novel book folder)`)
   return reg.adapter
 }
 
@@ -51,14 +55,17 @@ function isDirectory(file: string): boolean {
   }
 }
 
-/** sha256 of a source: the file, or the files of a book folder. */
+/** sha256 of a source: the file, the files of a book folder, or a pack's template and source catalog. */
 export async function hashSource(file: string): Promise<string> {
+  if (isVnPack(file)) return hashVnPackFolder(file)
   return isVnFolder(file) ? hashVnFolder(file) : hashFile(file)
 }
 
-/** What every agent is told about a format, after the book brief (the visual-novel script rules). */
+/** What every agent is told about a format, after the book brief (the visual-novel script or text-catalog rules). */
 export function formatNote(format: DocFormat, opts: { localizeNames?: boolean } = {}): string | undefined {
-  return format === 'vn' ? (opts.localizeNames ? VN_BRIEF_NOTE_LOCALIZED : VN_BRIEF_NOTE) : undefined
+  if (format === 'vn') return opts.localizeNames ? VN_BRIEF_NOTE_LOCALIZED : VN_BRIEF_NOTE
+  if (format === 'vnp') return opts.localizeNames ? VN_PACK_BRIEF_NOTE_LOCALIZED : VN_PACK_BRIEF_NOTE
+  return undefined
 }
 
 /** The book brief with the format's note. */
