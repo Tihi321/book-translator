@@ -2,7 +2,7 @@
 
 ## 2026-10-25 — Book Translator translates only the VN text catalog
 
-Branch `BTT-23_vn-pack` (from `master`), uncommitted. Cross-repo plan/contract: `C:\projects\Personal\creative-hub\.claude\tickets\HUB-16-vn-pack\`.
+Branch `BTT-23_vn-pack` (from `master`), commit `ccf23b1`, pushed to `origin/BTT-23_vn-pack`. Cross-repo plan/contract: `C:\projects\Personal\creative-hub\.claude\tickets\HUB-16-vn-pack\`.
 
 ### What changed
 
