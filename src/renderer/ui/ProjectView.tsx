@@ -173,7 +173,7 @@ export function ProjectView({ id }: { id: string }) {
               {p.status === 'created' ? 'Start' : p.status === 'glossary-review' ? 'Continue' : 'Resume'}
             </button>
           )}
-          {p.format !== 'docx' && p.format !== 'vn' && (
+          {p.format !== 'docx' && p.format !== 'vn' && p.format !== 'vnp' && (
             <>
               <button onClick={() => setView({ name: 'reader', source: { projectId: id, side: 'source' } })} data-testid="read-original">Read original</button>
               <button onClick={() => void readTranslation()} disabled={exporting} title="Exports what is translated so far, then opens it" data-testid="read-translation">Read translation</button>

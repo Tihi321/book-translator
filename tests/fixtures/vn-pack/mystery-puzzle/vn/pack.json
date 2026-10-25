@@ -1,0 +1,328 @@
+{
+  "format": "vn-pack",
+  "version": 2,
+  "packHash": "sha256:84b949af0e939f2e27797f5be87781b32bcc8947cc5dda128b3e6ab1f915617a",
+  "book": {
+    "slug": "the-dinner-party",
+    "format": "mystery-puzzle-visual-novel",
+    "kind": "linear",
+    "primaryLang": "en",
+    "genre": "comic mystery",
+    "style": "Comic mystery, dry and precise, rain-soaked and candle-lit.",
+    "author": "Mara Quill",
+    "coverBrief": "A long dining table lit by candles, one empty chair, a stopped pocket watch beside a plate, rain on the tall windows. Warm candlelight against cold blue shadows.",
+    "sourceHash": "sha256:4e60f51908f87f80179812eadf23635c2326c518d2033444e67283dc438e3e79"
+  },
+  "characters": [
+    {
+      "key": "colonel_ash",
+      "looks": "Sixty, upright, a grey coat and a stiff moustache. A guest with an old grudge.",
+      "voice": "Clipped, cold.",
+      "aliasKeys": []
+    },
+    {
+      "key": "miss_cole",
+      "looks": "Thirty, calm, a dark dress and folded hands. A guest who notices everything.",
+      "voice": "Quiet and precise.",
+      "aliasKeys": []
+    },
+    {
+      "key": "doctor_birch",
+      "looks": "Fifty, rumpled, a leather bag and spectacles. The family doctor.",
+      "voice": "Nervous, eager to please.",
+      "aliasKeys": []
+    }
+  ],
+  "places": [
+    {
+      "key": "the_library",
+      "name": "The library",
+      "looks": "A tall room of shelves and stopped clocks, a cold fireplace and a body on the rug."
+    },
+    {
+      "key": "the_kitchen",
+      "name": "The kitchen",
+      "looks": "A long stone kitchen with a cold stove, copper pans and a window on the rain."
+    }
+  ],
+  "chapters": [
+    {
+      "n": 1,
+      "isEnding": false,
+      "choices": [],
+      "scenes": [
+        {
+          "id": "ch01.s01",
+          "placeKey": "the_library",
+          "placeText": "The library",
+          "time": "night",
+          "description": "Every clock in the room has stopped at nine. A tall room of shelves and stopped clocks, a cold fireplace and a body on the rug.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch01.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "colonel_ash",
+                  "look": "grey coat, stiff"
+                },
+                {
+                  "charKey": "miss_cole",
+                  "look": "dark dress, calm"
+                }
+              ]
+            },
+            {
+              "id": "ch01.s01.b003",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b004",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b005",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b006",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b007",
+              "type": "narration",
+              "image": {
+                "display": "insert",
+                "key": "pocket_watch",
+                "text": "A pocket watch, stopped at 9:10, its glass cracked."
+              }
+            },
+            {
+              "id": "ch01.s01.b008",
+              "type": "line",
+              "speakerKey": "colonel_ash",
+              "expression": "cold",
+              "image": null
+            },
+            {
+              "id": "ch01.s01.b009",
+              "type": "line",
+              "speakerKey": "miss_cole",
+              "expression": "calm"
+            },
+            {
+              "id": "ch01.s01.b010",
+              "type": "line",
+              "speakerKey": "colonel_ash",
+              "expression": "cold",
+              "image": {
+                "display": "insert",
+                "text": "a broken watch glass on the rug"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "isEnding": true,
+      "choices": [],
+      "scenes": [
+        {
+          "id": "ch02.s01",
+          "placeKey": "the_kitchen",
+          "placeText": "The kitchen",
+          "time": "midnight",
+          "description": "A long stone kitchen with a cold stove, copper pans and a window on the rain.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch02.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch02.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "miss_cole",
+                  "look": "calm"
+                },
+                {
+                  "charKey": "doctor_birch",
+                  "look": "nervous, leather bag"
+                }
+              ]
+            },
+            {
+              "id": "ch02.s01.b003",
+              "type": "line",
+              "speakerKey": "miss_cole",
+              "expression": "calm"
+            },
+            {
+              "id": "ch02.s01.b004",
+              "type": "line",
+              "speakerKey": "miss_cole",
+              "expression": "calm"
+            },
+            {
+              "id": "ch02.s01.b005",
+              "type": "line",
+              "speakerKey": "doctor_birch",
+              "expression": "nervous"
+            },
+            {
+              "id": "ch02.s01.b006",
+              "type": "puzzle",
+              "puzzle": "dinner"
+            },
+            {
+              "id": "ch02.s01.b007",
+              "type": "narration"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "puzzles": [
+    {
+      "key": "dinner",
+      "kind": "murdle",
+      "data": {
+        "format": 1,
+        "seed": 4242,
+        "band": "easy",
+        "difficulty": {
+          "steps": 4,
+          "score": 3,
+          "rules": {}
+        },
+        "steps": [],
+        "kind": "murdle",
+        "size": 3,
+        "categories": [
+          {
+            "key": "suspect",
+            "items": [
+              "s1",
+              "s2",
+              "s3"
+            ]
+          },
+          {
+            "key": "weapon",
+            "items": [
+              "w1",
+              "w2",
+              "w3"
+            ]
+          },
+          {
+            "key": "place",
+            "items": [
+              "p1",
+              "p2",
+              "p3"
+            ]
+          }
+        ],
+        "solution": {
+          "s1": {
+            "weapon": "w1",
+            "place": "p1"
+          },
+          "s2": {
+            "weapon": "w2",
+            "place": "p2"
+          },
+          "s3": {
+            "weapon": "w3",
+            "place": "p3"
+          }
+        },
+        "clues": [
+          {
+            "id": "c1",
+            "type": "is",
+            "a": "s1",
+            "b": "w1"
+          },
+          {
+            "id": "c2",
+            "type": "is",
+            "a": "s2",
+            "b": "w2"
+          },
+          {
+            "id": "c3",
+            "type": "is",
+            "a": "s1",
+            "b": "p1"
+          },
+          {
+            "id": "c4",
+            "type": "is",
+            "a": "s2",
+            "b": "p2"
+          }
+        ],
+        "murder": {
+          "place": "p1",
+          "answer": {
+            "suspect": "s1",
+            "weapon": "w1",
+            "place": "p1"
+          }
+        }
+      },
+      "chapter": 2,
+      "clueAt": {
+        "c1": "ch01.s01.b003",
+        "c2": "ch01.s01.b004",
+        "c3": "ch01.s01.b005",
+        "c4": "ch01.s01.b006"
+      },
+      "links": {
+        "s1": {
+          "type": "character",
+          "key": "colonel_ash"
+        },
+        "s2": {
+          "type": "character",
+          "key": "miss_cole"
+        },
+        "s3": {
+          "type": "character",
+          "key": "doctor_birch"
+        },
+        "p1": {
+          "type": "place",
+          "key": "the_library"
+        },
+        "p2": {
+          "type": "place",
+          "key": "the_kitchen"
+        }
+      },
+      "onFail": {
+        "mode": "retry"
+      },
+      "hints": true,
+      "verified": {
+        "unique": true,
+        "deducible": true,
+        "score": 3,
+        "textChecked": true,
+        "by": "vno_puzzle_generate"
+      }
+    }
+  ]
+}

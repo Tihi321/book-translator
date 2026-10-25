@@ -710,8 +710,15 @@ export class CommandDispatcher {
         await s.updateGlossary(cmd.projectId, cmd.entries)
         return undefined
       case 'export': {
-        const out = await s.export(cmd.projectId, cmd.outPath, { cover: cmd.cover })
-        return { path: out, rel: this.exportRel(out) }
+        const report = await s.exportWithReport(cmd.projectId, cmd.outPath, { cover: cmd.cover })
+        return {
+          path: report.path,
+          rel: this.exportRel(report.path),
+          ...(report.catalog ? { catalog: report.catalog } : {}),
+          ...(report.lang ? { lang: report.lang } : {}),
+          ...(report.keys !== undefined ? { keys: report.keys } : {}),
+          ...(report.warnings.length > 0 ? { warnings: report.warnings } : {})
+        }
       }
       case 'deleteProject':
         await s.deleteProject(cmd.projectId)
@@ -742,7 +749,7 @@ export class CommandDispatcher {
         project.settings = mergeSettings(project.settings, cmd.patch)
         await s.store.save(project)
         // chunks that are translated keep the names they were translated with
-        if (project.format === 'vn' && namesBefore !== (project.settings.localizeNames === true) && (await s.store.listChunks(cmd.projectId)).some((c) => c.state === 'done' || c.state === 'flagged')) {
+        if ((project.format === 'vn' || project.format === 'vnp') && namesBefore !== (project.settings.localizeNames === true) && (await s.store.listChunks(cmd.projectId)).some((c) => c.state === 'done' || c.state === 'flagged')) {
           const message = 'localizeNames changed: chunks translated before keep the names they have, retry them to follow the new setting'
           await s.store.log(cmd.projectId, `warn: ${message}`)
           this.opts.emit({ type: 'log', projectId: cmd.projectId, level: 'warn', message })

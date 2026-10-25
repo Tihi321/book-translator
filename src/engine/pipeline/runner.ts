@@ -382,6 +382,7 @@ export class ProjectRunner {
       targetLanguage: s.targetLanguage,
       brief: briefWithNote(brief, this.project.format, { localizeNames: localizesNames(this.project) }),
       glossary,
+      format: this.project.format,
       call: this.makeCall(chunk),
       log: (level, message) => this.log(level, message),
       signal: this.signal

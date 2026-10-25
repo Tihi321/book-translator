@@ -9,8 +9,9 @@ export const KEEP_NAME_NOTE = 'character name: keep it as it is'
 /** The note of a name entry the app added for a name the glossary builder did not give a form for. */
 export const PENDING_NAME_NOTE = 'character name: no localized form yet, change Target to localize it'
 
-/** True for a visual-novel project that localizes its character names. */
-export const localizesNames = (project: Pick<ProjectFile, 'format' | 'settings'>): boolean => project.format === 'vn' && project.settings.localizeNames === true
+/** True for a visual-novel project (a book folder or a pack) that localizes its character names. */
+export const localizesNames = (project: Pick<ProjectFile, 'format' | 'settings'>): boolean =>
+  (project.format === 'vn' || project.format === 'vnp') && project.settings.localizeNames === true
 
 /** A speaker tag at the start of a block (`<1>PETRA (grumpy):</1> ...`): the name in it. */
 const SPEAKER = /^<1>\**\s*([^(:*<]+?)\s*\**(?:\s*\([^)]*\))?\s*:\**\s*<\/1>/

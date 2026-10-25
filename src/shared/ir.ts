@@ -1,7 +1,10 @@
 /** Document IR: what every format adapter reads into and writes from. */
 
-/** `vn`: a Scriptorium visual-novel book folder (see formats/vn.ts). */
-export type DocFormat = 'epub' | 'docx' | 'txt' | 'md' | 'pdf' | 'vn'
+/**
+ * `vn`: a Scriptorium visual-novel book folder (see formats/vn.ts).
+ * `vnp`: a visual-novel book pack v2 (`vn/pack.json` + `vn/text/<lang>.json`, see formats/vnPack.ts).
+ */
+export type DocFormat = 'epub' | 'docx' | 'txt' | 'md' | 'pdf' | 'vn' | 'vnp'
 
 export type BlockKind = 'heading' | 'para' | 'item' | 'caption' | 'cell' | 'toc' | 'meta'
 
@@ -39,6 +42,11 @@ export interface DocumentIR {
     language?: string
     /** Names that must stay as they are in the translation (the characters of a visual novel): seeded into the glossary. */
     names?: string[]
+    /**
+     * The adapter's own identity of the source, when it has one and the source must not change under an export. A visual-novel pack sets its
+     * `packHash`: an export from a pack that changed since the project was made is refused.
+     */
+    sourceHash?: string
   }
   sections: Section[]
 }

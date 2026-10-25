@@ -1,0 +1,316 @@
+{
+  "format": "vn-pack",
+  "version": 2,
+  "packHash": "sha256:144ef5980dc0cec88d01ea22321c361afe4ce3531cf296c6cb7c06e65602a3b6",
+  "book": {
+    "slug": "the-lighthouse-letters",
+    "format": "choice-visual-novel",
+    "kind": "choice",
+    "primaryLang": "en",
+    "genre": "Mystery",
+    "style": "Moody, rain-soaked, warm interiors against cold exteriors.",
+    "author": "Mara Quill",
+    "coverBrief": "A girl in a yellow raincoat stands on a wet stone pier under a dark sky, the lighthouse beam sweeping over grey water, a white envelope in her hand. Moody, cold blues and a warm lamp light.",
+    "sourceHash": "sha256:381bdbdb97e5a00122468cf1e4e0e7d3a1a1c372f502e3dc7bc7893d2b7a7f9b"
+  },
+  "characters": [
+    {
+      "key": "mara",
+      "looks": "Seventeen, small and wiry, dark curly hair tied back with a red scarf, a yellow oilskin raincoat. The lighthouse keeper's daughter, stubborn and brave.",
+      "voice": "Short sentences, dry jokes.",
+      "aliasKeys": [
+        "mara#1"
+      ]
+    },
+    {
+      "key": "kessler",
+      "looks": "Sixty, bald and broad, a grey coat and a pipe. The lighthouse's old engineer.",
+      "voice": "Slow, low, answers a question with a question.",
+      "aliasKeys": []
+    }
+  ],
+  "places": [
+    {
+      "key": "the_harbour_wall",
+      "name": "The harbour wall",
+      "looks": "A long stone pier at dusk, wet black stones, a rusted iron rail and fishing boats bobbing on grey water."
+    },
+    {
+      "key": "the_lamp_room",
+      "name": "The lamp room",
+      "looks": "A round glass room at the top of the lighthouse, a brass lamp, a logbook and a letter on the desk."
+    }
+  ],
+  "chapters": [
+    {
+      "n": 1,
+      "isEnding": false,
+      "choices": [
+        {
+          "index": 0,
+          "to": 2
+        },
+        {
+          "index": 1,
+          "to": 3
+        }
+      ],
+      "scenes": [
+        {
+          "id": "ch01.s01",
+          "placeKey": "the_harbour_wall",
+          "placeText": "The harbour wall",
+          "time": "dusk",
+          "description": "A long stone pier at dusk, wet black stones, a rusted iron rail and fishing boats bobbing on grey water.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch01.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch01.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "mara",
+                  "look": "soaked raincoat, worried"
+                }
+              ]
+            },
+            {
+              "id": "ch01.s01.b003",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "worried",
+              "ambience": {
+                "text": "waves on stone, a far foghorn"
+              }
+            },
+            {
+              "id": "ch01.s01.b004",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "mara",
+                  "look": "startled"
+                },
+                {
+                  "charKey": "kessler",
+                  "look": "grey coat"
+                }
+              ],
+              "sfx": {
+                "text": "running boots on wet stone"
+              }
+            },
+            {
+              "id": "ch01.s01.b005",
+              "type": "line",
+              "speakerKey": "kessler",
+              "expression": "low"
+            },
+            {
+              "id": "ch01.s01.b006",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "worried"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "isEnding": true,
+      "choices": [],
+      "scenes": [
+        {
+          "id": "ch02.s01",
+          "placeKey": "the_harbour_wall",
+          "placeText": "The harbour wall",
+          "time": "dawn",
+          "description": "A long stone pier at dusk, wet black stones, a rusted iron rail and fishing boats bobbing on grey water.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch02.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch02.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "mara",
+                  "look": "tired, hopeful"
+                }
+              ]
+            },
+            {
+              "id": "ch02.s01.b003",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "sad",
+              "ambience": {
+                "text": "gulls over the harbour"
+              }
+            },
+            {
+              "id": "ch02.s01.b004",
+              "type": "narration",
+              "image": {
+                "display": "full",
+                "text": "an empty boat drifting beyond the pier"
+              }
+            },
+            {
+              "id": "ch02.s01.b005",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "quiet",
+              "image": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "n": 3,
+      "isEnding": false,
+      "choices": [
+        {
+          "index": 0,
+          "to": 4
+        }
+      ],
+      "scenes": [
+        {
+          "id": "ch03.s01",
+          "placeKey": "the_lamp_room",
+          "placeText": "The lamp room",
+          "time": "night",
+          "description": "The brass lamp is cold and a letter lies on the logbook. A round glass room at the top of the lighthouse, a brass lamp, a logbook and a letter on the desk.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch03.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch03.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "mara",
+                  "look": "dripping"
+                },
+                {
+                  "charKey": "kessler",
+                  "look": "reading over her shoulder"
+                }
+              ]
+            },
+            {
+              "id": "ch03.s01.b003",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "neutral"
+            },
+            {
+              "id": "ch03.s01.b004",
+              "type": "line",
+              "speakerKey": "kessler",
+              "expression": "quiet",
+              "image": {
+                "display": "insert",
+                "text": "a white envelope with a broken seal"
+              }
+            },
+            {
+              "id": "ch03.s01.b005",
+              "type": "narration"
+            },
+            {
+              "id": "ch03.s01.b006",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "determined"
+            },
+            {
+              "id": "ch03.s01.b007",
+              "type": "line",
+              "speakerKey": "kessler",
+              "expression": "quiet",
+              "sfx": {
+                "text": "a match striking"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "n": 4,
+      "isEnding": true,
+      "choices": [],
+      "scenes": [
+        {
+          "id": "ch04.s01",
+          "placeKey": "the_lamp_room",
+          "placeText": "The lamp room",
+          "time": "before dawn",
+          "description": "A round glass room at the top of the lighthouse, a brass lamp, a logbook and a letter on the desk.",
+          "breakBefore": false,
+          "beats": [
+            {
+              "id": "ch04.s01.b001",
+              "type": "narration"
+            },
+            {
+              "id": "ch04.s01.b002",
+              "type": "cast",
+              "cast": [
+                {
+                  "charKey": "mara",
+                  "look": "hopeful"
+                },
+                {
+                  "charKey": "kessler",
+                  "look": "proud"
+                }
+              ]
+            },
+            {
+              "id": "ch04.s01.b003",
+              "type": "line",
+              "speakerKey": "kessler",
+              "expression": "neutral",
+              "ambience": {
+                "text": "wind in the glass"
+              }
+            },
+            {
+              "id": "ch04.s01.b004",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "happy"
+            },
+            {
+              "id": "ch04.s01.b005",
+              "type": "narration"
+            },
+            {
+              "id": "ch04.s01.b006",
+              "type": "line",
+              "speakerKey": "mara",
+              "expression": "happy",
+              "image": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "puzzles": []
+}

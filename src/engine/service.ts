@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import { chunkBudget, planChunks } from './chunker'
 import { loadDefaults, resolveLanguage } from './config'
 import { adapterFor, briefWithNote, hashSource } from './formats'
+import { vnPackSlug, writeVnPack } from './formats/vnPack'
 import { ModelRouter } from './models/router'
 import type { RouterOptions } from './models/router'
 import { ClientTaskQueue } from './models/client'
@@ -485,29 +486,58 @@ export class EngineService {
 
   /** Writes the translated document to output/. Works with partial progress. Returns the path. */
   async export(id: string, outPath?: string, opts: { cover?: 'source' | 'title' } = {}): Promise<string> {
+    return (await this.exportWithReport(id, outPath, opts)).path
+  }
+
+  /**
+   * Exports and says what was written. A visual-novel pack writes a hand-off bundle (also its bare catalog), so the report carries the bundle path,
+   * the catalog path, the language, how many values it has and the warnings; every other format just has its path.
+   */
+  async exportWithReport(id: string, outPath?: string, opts: { cover?: 'source' | 'title' } = {}): Promise<ExportReport> {
     const project = await this.store.load(id)
     const ir = await this.store.readIr(id)
     const adapter = adapterFor(project.sourcePath) as unknown as AdapterExtras
     const ext = adapter.outputExt ?? path.extname(project.sourcePath)
     const lang = project.settings.targetLanguageCode ?? project.settings.targetLanguage
-    // a book folder is written as a folder `<name>.<lang>`
-    const stem = project.format === 'vn' ? path.basename(project.sourcePath) : path.basename(project.sourcePath, path.extname(project.sourcePath))
+    // a book folder or a pack is written as a folder `<name>.<lang>` (`<slug>.<lang>` for a pack)
+    const stem =
+      project.format === 'vn'
+        ? path.basename(project.sourcePath)
+        : project.format === 'vnp'
+          ? ((await vnPackSlug(project.sourcePath)) ?? path.basename(project.sourcePath))
+          : path.basename(project.sourcePath, path.extname(project.sourcePath))
     const out = outPath ? path.resolve(outPath) : this.store.file(id, 'output', `${stem}.${lang}${ext}`)
     await fs.mkdir(path.dirname(out), { recursive: true })
     const translations = await this.translations(id)
+    const warnings: string[] = []
     const onWarning = (message: string) => {
+      warnings.push(message)
       this.emit({ type: 'log', projectId: id, level: 'warn', message })
       void this.store.log(id, `warn: ${message}`)
     }
+    if (project.format === 'vnp') {
+      const report = await writeVnPack(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning })
+      this.emit({ type: 'log', projectId: id, level: 'info', message: `exported ${translations.size} block(s) to ${report.path} (catalog ${report.lang}, ${report.keys} value(s))` })
+      return { path: report.path, catalog: report.catalogPath, lang: report.lang, keys: report.keys, warnings }
+    }
     // localized character names: the glossary's `person` entries for the characters, written into speaker tags, ON SCREEN lines and the bible
     let names: Record<string, string> | undefined
-    if (localizesNames(project)) {
+    if (project.format === 'vn' && localizesNames(project)) {
       const map = nameMap(await this.store.readGlossary(id), characterLabels(ir))
       for (const g of sharedTargets(map)) onWarning(`${g.sources.join(' and ')} would all be called ${g.target}: give each character its own name in glossary.md`)
       if (Object.keys(map).length > 0) names = map
     }
     await adapter.write(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning, names, cover: opts.cover })
     this.emit({ type: 'log', projectId: id, level: 'info', message: `exported ${translations.size} block(s) to ${out}` })
-    return out
+    return { path: out, warnings }
   }
+}
+
+/** What `exportWithReport` wrote. `catalog`/`lang`/`keys` are a visual-novel pack's bundle; other formats only have a path. */
+export interface ExportReport {
+  path: string
+  catalog?: string
+  lang?: string
+  keys?: number
+  warnings: string[]
 }

@@ -319,6 +319,7 @@ export function NewProject() {
           </div>
         )}
         {f?.format === 'vn' && <div className="note">Visual-novel book folder: every script line is translated as its own segment and the translation is written as a folder with the same layout. Speaker tags, SCENE: and ON SCREEN: lines stay, and the bible and cover brief are copied.</div>}
+        {f?.format === 'vnp' && <div className="note">Visual-novel pack v2: only the text catalog is translated (one segment per catalog value), and the export is a hand-off bundle &lt;slug&gt;.&lt;lang&gt;/ with <span className="mono">edition.json</span>, the unchanged <span className="mono">vn/pack.json</span>, the translated <span className="mono">vn/text/&lt;lang&gt;.json</span> and the bare catalog. The pack's keys, ids and art fields never change.</div>}
         {f?.format === 'pdf' && <div className="note">PDF: the text is extracted, the page layout is not preserved. The translation is written as an EPUB (and Markdown). Scanned PDFs without a text layer are not supported.</div>}
       </div>
 
@@ -360,10 +361,10 @@ export function NewProject() {
                 <input type="checkbox" checked={pauseAfterGlossary} disabled={!enabled.glossary} onChange={(e) => setPauseAfterGlossary(e.target.checked)} />
                 Pause after the glossary, so I can review it
               </label>
-              {f?.format === 'vn' && (
+              {(f?.format === 'vn' || f?.format === 'vnp') && (
                 <>
                   <span />
-                  <label className="row small" title="The glossary gives each character a name for the target language; the export writes it into the speaker tags, the ON SCREEN: lines and the bible. Edit the names in the glossary before you export.">
+                  <label className="row small" title={f?.format === 'vnp' ? 'The glossary gives each character and alias name a form for the target language; the translator writes it into the name values and wherever a name appears in the text. Edit the names in the glossary before you export.' : 'The glossary gives each character a name for the target language; the export writes it into the speaker tags, the ON SCREEN: lines and the bible. Edit the names in the glossary before you export.'}>
                     <input type="checkbox" checked={localizeNames} onChange={(e) => setLocalizeNames(e.target.checked)} data-testid="localize-names" />
                     Localize the character names
                   </label>

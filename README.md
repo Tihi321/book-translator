@@ -11,7 +11,7 @@ Books are larger than any model's context, so the text is split into chunks that
 
 ## Features
 
-- Formats: EPUB, DOCX, TXT, Markdown, PDF (text layer). The output has the same format, except PDF, which becomes EPUB (and Markdown). Also Scriptorium visual-novel book folders, written back as a folder with the same script lines (see [Visual-novel book folders](#visual-novel-book-folders)).
+- Formats: EPUB, DOCX, TXT, Markdown, PDF (text layer). The output has the same format, except PDF, which becomes EPUB (and Markdown). Also Scriptorium visual-novel book folders and visual-novel packs v2 (`vn/pack.json` + `vn/text/<lang>.json`): a pack is translated by its text catalog only and written as an edition bundle (see [Visual-novel book folders](#visual-novel-book-folders)).
 - Inline formatting (bold, italic, links, footnote marks, images) survives: it is carried through the model as numbered tags and restored.
 - Per-agent model choice, with a fallback list per agent (for example local first, API as fallback). Models are grouped Local / API with context size and price.
 - Estimate before you start: chunks, tokens, cost, rough time.
@@ -76,18 +76,18 @@ The engine also runs headless: `npm run engine -- <command>`.
 
 ```text
 models [--data <dir>]                       list configured and discovered models
-parse <file|folder>                         read a document (or a visual-novel book folder) and print its structure
+parse <file|folder>                         read a document (a visual-novel book folder or pack too) and print its structure
 translate <file|folder> --to <language> [--from <language>] [--model <provider/model>[,fallback]]
           [--glossary-model <ref>] [--proofread-model <ref>] [--qa-model <ref>]
           [--no-glossary] [--no-proofread] [--no-qa] [--max-chunk <tokens>]
-          [--project <id>] [--pause-after-glossary] [--localize-names] [--out <file>]
-export <projectId> [--out <file>] [--cover title]  write the document from what is translated so far (EPUB: --cover title swaps the cover for a plain title page)
+          [--project <id>] [--pause-after-glossary] [--localize-names] [--out <file|folder>]
+export <projectId> [--out <file|folder>] [--cover title]  write the document from what is translated so far (EPUB: --cover title swaps the cover for a plain title page; a pack: writes <slug>.<lang>/ with catalog.json)
 status <projectId>                          chunk states, spend, failed chunks and major QA issues
 key-set <ENV_NAME>                          store an API key (npm run key:set <ENV_NAME>)
 headless [--data <dir>] [--port <n>]        run with no window and the MCP server on (npm run headless)
 ```
 
-`--to` takes a language name or code (`Croatian`, `hr`). The same file and language always give the same project, so running `translate` again resumes it (Ctrl+C stops cleanly). `--data <dir>` (or `BOOK_TRANSLATOR_DATA`) selects the data folder. Errors print one line and exit with code 1.
+`--to` takes a language name or code (`Croatian`, `hr`). The same file and language always give the same project, so running `translate` again resumes it (Ctrl+C stops cleanly). A visual-novel pack's project is keyed by the pack hash and its source catalog: editing the pack starts a new project, adding another language's catalog does not. `--data <dir>` (or `BOOK_TRANSLATOR_DATA`) selects the data folder. Errors print one line and exit with code 1.
 
 Example: `npm run engine -- translate book.epub --to hr --model lmstudio/qwen3.6-35b-a3b --qa-model deepseek/deepseek-flash`
 
@@ -225,6 +225,8 @@ The agents' instructions are the Markdown files in `prompts/`. Edit them in any 
 
 A Scriptorium visual novel is a folder (`book.md`, `outline.md`, `chapters/ch-01.md` ..., `bible/bible.md`, `cover-brief.md`) whose chapters are scripts read line by line (`SCENE:`, `ON SCREEN:`, `NAME (expression): words`, narration; grammar in Scriptorium's `docs/visual-novel.md`). VN Studio reads a translated copy of the folder as an edition and pairs it with the original beat by beat, so the translation has to keep every line, in order, with its markers.
 
+A newer Scriptorium book also ships a **language-independent pack** next to the authored files: `vn/pack.json` (the template: keys, ids and art fields) and `vn/text/<sourceLang>.json` (the only translatable text). A folder that has both is translated as a **pack v2**, not by its script lines (the adapter checks for a pack before the book folder); see [Visual-novel packs v2](#visual-novel-packs-v2-language-independent) below. A folder without `vn/pack.json` uses the folder path described here.
+
 Give the folder instead of a file: `npm run engine -- translate <book folder> --to hr`, or `create_project` / `analyze_file` over MCP with the folder as `sourcePath`. The folder is one project (format `vn`). Export writes a folder `<folder name>.<lang>` with the same layout, which VN Studio takes with `vno_add_edition {slug, source: <that folder>, lang}`.
 
 What is translated and what stays:
@@ -244,14 +246,32 @@ What is translated and what stays:
 
 ### Localized character names
 
-Off by default. Turn it on with the checkbox **Localize the character names** (New translation, or the project's settings), `localizeNames: true` in `create_project` / `update_project_settings`, or `--localize-names` on the CLI. It is for visual-novel folders only.
+Off by default. Turn it on with the checkbox **Localize the character names** (New translation, or the project's settings), `localizeNames: true` in `create_project` / `update_project_settings`, or `--localize-names` on the CLI. It is for visual-novel folders and packs.
 
-- The glossary is the name map. The glossary builder is asked for a `person` entry for each character (the bible's names and every speaker of the script) with the form the target language readers should see. A character it gives no form for is listed with its own name, to edit. Edit the rows in the glossary (or with `update_glossary`) before you export.
-- The translator writes the names as the glossary gives them, in narration and in speech. It still copies the speaker tag; the export writes the localized name into it.
-- On export the name is written into the speaker tags (in capitals, with the expression and bold marks as they were), into the names of `ON SCREEN:` lines, and into the `- **Name**` bullets under `## Characters` of `bible/bible.md`, in the same order. Narration, scene lines, places and the rest of the bible stay, and so does the cover brief. Every line keeps its kind, so VN Studio can still pair the lines.
+- The glossary is the name map. The glossary builder is asked for a `person` entry for each character (a book folder: the bible's names and every speaker of the script; a pack: every character and alias name value) with the form the target language readers should see. A character it gives no form for is listed with its own name, to edit. Edit the rows in the glossary (or with `update_glossary`) before you export.
+- The translator writes the names as the glossary gives them, in narration and in speech. In a book folder it still copies the speaker tag; the export writes the localized name into it. In a pack there is nothing to rewrite: the character and alias name values are ordinary catalog values, and the translated text carries the names the glossary gives.
+- On export of a book folder the name is written into the speaker tags (in capitals, with the expression and bold marks as they were), into the names of `ON SCREEN:` lines, and into the `- **Name**` bullets under `## Characters` of `bible/bible.md`, in the same order. Narration, scene lines, places and the rest of the bible stay, and so does the cover brief. Every line keeps its kind, so VN Studio can still pair the lines.
 - A name that cannot be a speaker tag (no capital letters in the language, a colon or bracket in it) keeps its source form in the tags, with a warning. Two characters with the same new name give a warning too.
 - Changing the setting after chunks are translated is allowed, with a warning: those chunks keep the names they were translated with, so retry them. Without it the export is byte for byte the same as before.
 
+### Visual-novel packs v2 (language-independent)
+
+A pack is what Scriptorium publishes for a visual novel: `vn/pack.json` is the template (scene and beat ids, speakers, art descriptions, puzzle cores - never translated) and `vn/text/<lang>.json` is one text catalog per language (the only translatable document). The format is `vnp`, and it is detected before the book folder, so a Scriptorium book with a pack is translated by its catalog, not by its chapters. The contract lives in the hub ticket `HUB-16-vn-pack/contract.md`.
+
+Give the book folder (`books/<slug>/`) as the source, exactly as before:
+
+```text
+npm run engine -- translate books/the-lighthouse-letters --to hr
+npm run engine -- export <projectId>
+```
+
+- **One segment per catalog value**, and the block id is the catalog path: `title`, `blurb`, `chapter.<n>.title`, `choice.<n>.<i>`, `ending.<n>`, `scene.<ch.s>`, `char.<key>` (aliases `char.<key>#<n>`), `beat.<beatId>`, `puzzle.<key>.name.<id>` and `puzzle.<key>.text.<id>`. Keys are opaque and never sent as text; the model gets display text only.
+- **Spoken lines** carry the speaker and expression as the usual `<1>NAME (expression):</1>` tag so the translator knows the voice and grammatical gender (the name comes from `characterNames[aliasKey]` when the beat names an alias); the tag is verified like any inline tag and dropped on write. Narration has no tag.
+- **What must not change**: values are single line and non-empty, with inline markdown emphasis (`*x*`, `**x**`) kept; no structural label (`SCENE:`, `ON SCREEN:`, `NARRATION:`, `CG:`, `INSERT:`, `SFX:`, `AMBIENCE:`, `CLUE:`, `EVIDENCE:`, `PUZZLE:`, `TESTIMONY:`) and no scene/beat id. The deterministic checks flag these in the pipeline (the QA model stays optional), and **the export refuses** a value that breaks them, a key that does not exist in the pack, or a catalog whose key set would differ from the source.
+- **Character names** are catalog values (`char.*`), so they are part of the translation. By default the glossary keeps them as they are (keep rows); with **Localize the character names** the glossary gives each a form for the target language and the translator uses it. No speaker tag or bible rewriting is involved.
+- **The pack hash is the source identity**: the project id is made from `vn/pack.json` plus the source catalog only, so adding another language's catalog keeps the project and editing the pack starts a new one. With a changed pack hash, the export refuses with "create a new project for the new pack", and the bundle's `vn/pack.json` is always byte-identical to the source.
+- **Export** writes `<out>/<slug>.<lang>/`: `edition.json` (`{format:"vn-edition-bundle",version:2,lang,packHash,sourceSlug}`), the unchanged `vn/pack.json`, the translated `vn/text/<lang>.json`, and `catalog.json` (the bare catalog). `export_project` (and `engine export`) also report the catalog path, its language, how many values it carries and any warning (for example values that had no translation yet and kept the source text). VN Studio takes the bundle folder or `catalog.json` with `vno_add_edition`.
+
 ## Tests
 
-`npm test` runs the Vitest suite: chunker, segment parser, inline-tag round trips, every format adapter on generated fixtures (and the visual-novel folder adapter on the `tests/fixtures/books/soother` book), the pipeline end to end with a scripted mock provider (resume, retry, QA fix pass, partial export), the command dispatcher and the renderer store. No network or real model is needed. Checks against real models are done by hand with the CLI.
+`npm test` runs the Vitest suite: chunker, segment parser, inline-tag round trips, every format adapter on generated fixtures (the visual-novel folder adapter on the `tests/fixtures/books/soother` book, the pack adapter on the canonical `tests/fixtures/vn-pack/{soother,choice,mystery-puzzle}` packs), the pipeline end to end with a scripted mock provider (resume, retry, QA fix pass, partial export), the command dispatcher and the renderer store. No network or real model is needed. Checks against real models are done by hand with the CLI.

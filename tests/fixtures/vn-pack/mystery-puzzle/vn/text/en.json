@@ -1,0 +1,63 @@
+{
+  "format": "vn-text",
+  "version": 2,
+  "lang": "en",
+  "packHash": "sha256:84b949af0e939f2e27797f5be87781b32bcc8947cc5dda128b3e6ab1f915617a",
+  "title": "The Dinner Party",
+  "blurb": "A body in the library, a stopped pocket watch and a witness who is too calm. The dinner guests only have to answer one puzzle.",
+  "chapterTitles": {
+    "1": "The Locked Library",
+    "2": "The Calm Witness"
+  },
+  "sceneTitles": {
+    "ch01.s01": "The library, night",
+    "ch02.s01": "The kitchen, midnight"
+  },
+  "choiceTexts": {},
+  "endings": {
+    "2": "solved: the dinner party ends with an accusation"
+  },
+  "characterNames": {
+    "colonel_ash": "Colonel Ash",
+    "miss_cole": "Miss Cole",
+    "doctor_birch": "Doctor Birch"
+  },
+  "beats": {
+    "ch01.s01.b001": "Rain on the tall windows.",
+    "ch01.s01.b003": "The rope was in Colonel Ash's hands, Miss Cole noted.",
+    "ch01.s01.b004": "The poison was Miss Cole's, and everyone knew it.",
+    "ch01.s01.b005": "Colonel Ash had been in the library all evening.",
+    "ch01.s01.b006": "Miss Cole was in the kitchen when the clocks stopped.",
+    "ch01.s01.b007": "A pocket watch, stopped at 9:10, its glass cracked.",
+    "ch01.s01.b008": "Nobody came in. The door was locked.",
+    "ch01.s01.b009": "I was in the kitchen when the clocks stopped.",
+    "ch01.s01.b010": "Then someone is lying.",
+    "ch02.s01.b001": "The stove is cold and the rain has stopped.",
+    "ch02.s01.b003": "I was in the kitchen all evening.",
+    "ch02.s01.b004": "I never touched the poison.",
+    "ch02.s01.b005": "Then it was the rope.",
+    "ch02.s01.b007": "The clock in the hall begins to tick again."
+  },
+  "puzzles": {
+    "dinner": {
+      "names": {
+        "s1": "Colonel Ash",
+        "s2": "Miss Cole",
+        "s3": "Doctor Birch",
+        "w1": "rope",
+        "w2": "poison",
+        "w3": "candlestick",
+        "p1": "library",
+        "p2": "kitchen",
+        "p3": "garden"
+      },
+      "text": {
+        "c1": "The rope was in Colonel Ash's hands, Miss Cole noted.",
+        "c2": "The poison was Miss Cole's, and everyone knew it.",
+        "c3": "Colonel Ash had been in the library all evening.",
+        "c4": "Miss Cole was in the kitchen when the clocks stopped.",
+        "murder": "The body was found in the library."
+      }
+    }
+  }
+}
