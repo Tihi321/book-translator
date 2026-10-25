@@ -4,7 +4,7 @@ What Book Translator still lacks on its own. Work that needs the other tools or 
 
 ## Where it stands (2026-10-25)
 
-- **On branch `BTT-23_vn-pack` (uncommitted):** BTT-23 translates only a VN pack's text catalog (`format: vnp`), validates the key set/pack hash and exports a bundle with a byte-identical template; legacy folder translation stays with a marker-byte safety check. 360 tests, typecheck and lint green; live `analyze_file`/task proof on the real pack. Plan/changelog in `.claude/tickets/BTT-23-vn-pack/`; not merged.
+- **Merged 2026-10-25 (PR #16):** BTT-23 translates only a VN pack's text catalog (`format: vnp`), validates the key set/pack hash and exports a bundle with a byte-identical template; legacy folder translation stays with a marker-byte safety check. 360 tests, typecheck and lint green; live `analyze_file`/task proof on the real pack. Plan/changelog in `.claude/tickets/BTT-23-vn-pack/`.
 - **Merged:** BTT-08 to BTT-14. BTT-11 closed every Book Translator item of the hub roadmap; BTT-13 (the BTT-11 UI checked live, build and installer) and BTT-14 (a providers reload reaches a running project) are in master with PR #11, and PR #12 added this roadmap's findings.
 - **Branch `BTT-15-20_fixes`:** BTT-15 to BTT-20, one commit each, 313 tests pass (not merged yet). Nothing of Book Translator's own is open after it.
 - **Verified live:** the Electron UI of BTT-11 (book folder picker, folder and book-folder drop, `localize-names` checkboxes, a mock run, `yarn build` and `yarn dist`, BTT-13); a VN book folder aligned in VN Studio 381/381 (mock model); a whole book translated into Croatian with Claude doing every model task (*The Clockless God*). Not yet run with a real model or in the UI: the BTT-15 to BTT-20 fixes (tests only).
