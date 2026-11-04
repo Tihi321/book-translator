@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrateProviders, seedHasProviders } from './migrate'
+import { migrateProviders, migrateStrataLoaded, seedHasProviders } from './migrate'
 
 /** Folders created inside the data folder. */
 export const DATA_LAYOUT = ['config', 'prompts', 'projects'] as const
@@ -49,7 +49,7 @@ export interface InitResult {
   createdDirs: number
   copied: string[]
   skipped: string[]
-  /** Providers copied into an existing config/providers.md from the seed (see `migrateProviders`). */
+  /** Providers copied into an existing config/providers.md from the seed (see `migrateProviders`), and `strata-loaded-v1` when that migration changed a file (see `migrateStrataLoaded`). */
   migrated: string[]
   warnings: string[]
 }
@@ -83,8 +83,9 @@ export async function initDataFolder(dataDir: string, seedDir: string | undefine
     await copyTree(seedDir, dataDir, dataDir, result)
     if (seedHasProviders(seedDir)) {
       const m = await migrateProviders(dataDir, seedDir, { fresh: result.copied.includes('config/providers.md') })
-      result.migrated = m.added
-      result.warnings = m.warnings
+      const s = await migrateStrataLoaded(dataDir)
+      result.migrated = [...m.added, ...s.added]
+      result.warnings = [...m.warnings, ...s.warnings]
     }
   }
   for (const rel of DATA_LAYOUT) {

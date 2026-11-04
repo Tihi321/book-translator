@@ -71,7 +71,7 @@ export class OpenAiCompatClient implements ProviderClient {
     }
     if (req.maxTokens) body.max_tokens = req.maxTokens
     if (req.temperature !== undefined) body.temperature = req.temperature
-    if (req.schema && this.opts.jsonSchema !== false) {
+    if (req.schema && (req.jsonSchema ?? this.opts.jsonSchema) !== false) {
       body.response_format = { type: 'json_schema', json_schema: { name: 'result', strict: true, schema: req.schema } }
     }
     const signal = withTimeout(req.signal, this.opts.timeoutMs ?? 15 * 60_000)
@@ -222,6 +222,10 @@ interface OpenAiModelEntry {
   /** USD per token, as strings. */
   pricing?: { prompt?: string; completion?: string; input_cache_read?: string } | null
   architecture?: { output_modalities?: string[] } | null
+  /** Strata: set on a name that stands for another model. */
+  alias_of?: string
+  /** Strata: `n_ctx` is the context window the model runs with. */
+  meta?: { n_ctx?: number } | null
 }
 
 export interface ListedModel {
@@ -232,6 +236,10 @@ export interface ListedModel {
   price?: { in: number; out: number; cachedIn?: number }
   /** False when the server says the model answers with something besides text (music, images). */
   textOnly: boolean
+  /** Strata: this entry is a name for another model (`alias_of`), not the model itself. */
+  aliasOf?: string
+  /** Strata: the context window the model runs with (`meta.n_ctx`). */
+  nCtx?: number
 }
 
 export function listedModel(m: OpenAiModelEntry): ListedModel {
@@ -245,7 +253,9 @@ export function listedModel(m: OpenAiModelEntry): ListedModel {
     maxOutput: m.top_provider?.max_completion_tokens || undefined,
     // a negative price is OpenRouter's "varies" (its auto router): not a price the budget can use
     price: pIn !== undefined && pOut !== undefined && pIn >= 0 && pOut >= 0 ? { in: pIn, out: pOut, cachedIn: perM(m.pricing?.input_cache_read) } : undefined,
-    textOnly: !out || (out.length === 1 && out[0] === 'text')
+    textOnly: !out || (out.length === 1 && out[0] === 'text'),
+    aliasOf: typeof m.alias_of === 'string' && m.alias_of ? m.alias_of : undefined,
+    nCtx: typeof m.meta?.n_ctx === 'number' && m.meta.n_ctx > 0 ? m.meta.n_ctx : undefined
   }
 }
 

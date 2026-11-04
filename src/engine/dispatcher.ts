@@ -183,6 +183,8 @@ export class CommandDispatcher {
         loadModels: p.loadModels,
         jsonSchema: p.jsonSchema,
         discover: p.discover,
+        followsServer: p.hasLoaded,
+        served: p.served,
         available: p.available,
         unavailableReason: p.unavailableReason
       })),
@@ -203,7 +205,9 @@ export class CommandDispatcher {
           discovered: m.discovered,
           shown: this.registry.isShown(m.ref),
           picked: m.picked === true,
-          maxOutput: m.maxOutput
+          maxOutput: m.maxOutput,
+          served: m.servedId,
+          thinking: m.loaded && typeof m.extraBody?.reasoning_effort === 'string' ? m.extraBody.reasoning_effort : undefined
         })),
       discovery: this.discovery
     }
@@ -256,10 +260,12 @@ export class CommandDispatcher {
       this.log('warn', `could not ask the servers for their slots: ${(err as Error).message}`)
       return false
     }
-    for (const c of changed) {
+    for (const c of changed.slots) {
       this.log('info', `${c.provider.id} runs ${c.to} request(s) at once (was ${c.from}), as the server reports`)
       if (c.to > c.from) this.service.router.limiter.wakeAll(c.provider)
     }
+    // the model a server runs changed (Strata restarted with another model): its `loaded` rows follow, the pickers show the new name
+    for (const c of changed.served) this.log('info', `${c.provider.id} now serves ${c.to}${c.from ? ` (was ${c.from})` : ''}`)
     // a server that stops answering is skipped (its work goes to the next model in the list) until it answers again
     let upOrDown = false
     for (const p of this.registry.providers.values()) {
@@ -267,7 +273,7 @@ export class CommandDispatcher {
       upOrDown = true
       this.log(p.down ? 'warn' : 'info', p.down ? `${p.id} is down (${p.baseUrl} does not answer, or has no model loaded), requests use the next model in their list` : `${p.id} answers again`)
     }
-    if (changed.length || upOrDown) {
+    if (changed.slots.length || changed.served.length || upOrDown) {
       this.emitModels()
       return true
     }
@@ -585,7 +591,7 @@ export class CommandDispatcher {
       const kept = list.filter((ref) => !mine(ref))
       if (kept.length > 0) agentModels[agent] = kept
     }
-    const seedFallbacks = ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next']
+    const seedFallbacks = ['deepseek/deepseek-flash', 'strata/default']
     let fallbacks = (current.fallbacks ?? []).filter((ref) => !mine(ref))
     if (fallbacks.length === 0) fallbacks = seedFallbacks
     const next = { ...current, groupDefaults, modelOrder, agentModels, fallbacks }

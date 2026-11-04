@@ -159,7 +159,7 @@ describe('command dispatcher', () => {
     const { run } = await setup()
     const d = await run<{ agentModels: Record<string, string[]>; languages: unknown[]; defaultMaxChunkTokens: number }>({ type: 'getDefaults' })
     expect(d.languages.length).toBeGreaterThan(10)
-    expect(d.agentModels.translator?.[0]).toBe('strata/qwen3.8-flash-next')
+    expect(d.agentModels.translator?.[0]).toBe('strata/default')
     const next = await run<typeof d>({ type: 'setDefaults', patch: { agentModels: { qa: ['mock/mock-reviewer'] }, defaultMaxChunkTokens: 900 } })
     expect(next.agentModels.qa).toEqual(['mock/mock-reviewer'])
     expect(next.agentModels.translator).toEqual(d.agentModels.translator)
@@ -359,7 +359,7 @@ describe('models dialog commands', () => {
         throw new ProviderError('HTTP 429: free-models-per-day', 429, true)
       }
     }
-    await r.service.router.complete(['strata/qwen3.8-flash-next', 'openrouter/google/gemini-2.5-flash', 'mock/mock-translator'], { messages: [{ role: 'user', content: 'x' }], meta: { role: 'translator' } })
+    await r.service.router.complete(['strata/default', 'openrouter/google/gemini-2.5-flash', 'mock/mock-translator'], { messages: [{ role: 'user', content: 'x' }], meta: { role: 'translator' } })
     expect(emitted.filter((e) => e.type === 'models')).toHaveLength(2)
     expect(emitted.some((e) => e.type === 'log' && /strata is down/.test(e.message))).toBe(true)
     expect(emitted.some((e) => e.type === 'log' && /openrouter reached its daily limit/.test(e.message))).toBe(true)
@@ -401,7 +401,7 @@ describe('group defaults in defaults.json', () => {
         parallel: { splitSections: true, maxAtOnce: 5 }
       }
     })
-    expect(next.groupDefaults).toEqual({ paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next', lmstudio: 'lmstudio/gemma' })
+    expect(next.groupDefaults).toEqual({ paid: 'deepseek/deepseek-flash', strata: 'strata/default', lmstudio: 'lmstudio/gemma' })
     expect(next.modelOrder).toEqual(['strata', 'paid', 'lmstudio'])
     expect(next.lmstudio).toEqual({ parallel: 2, context: 131072, ttlMinutes: 60 })
     expect(next.parallel).toEqual({ enabled: true, maxAtOnce: 5, splitSections: true })
@@ -422,11 +422,11 @@ describe('group defaults in defaults.json', () => {
     const updated = await run<DefaultsConfig>({
       type: 'setDefaults',
       patch: {
-        fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'deepseek/deepseek-flash'],
+        fallbacks: ['deepseek/deepseek-flash', 'strata/default', 'deepseek/deepseek-flash'],
         fallbackShared: true
       }
     })
-    expect(updated.fallbacks).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next'])
+    expect(updated.fallbacks).toEqual(['deepseek/deepseek-flash', 'strata/default'])
     expect(updated.fallbackShared).toBe(true)
     await expect(run({ type: 'setDefaults', patch: { fallbacks: [] } })).rejects.toThrow(/at least one model/)
   })

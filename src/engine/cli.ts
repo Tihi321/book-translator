@@ -30,7 +30,7 @@ async function loadRegistry(argv: string[]): Promise<{ registry: ModelRegistry; 
 export async function listModels(argv: string[]): Promise<number> {
   const { registry, dataDir } = await loadRegistry(argv)
   out(`data folder: ${dataDir}`)
-  for (const d of await registry.discover()) out(`discovery ${d.provider}: ${d.error ? 'failed (' + d.error + ')' : d.found + ' model(s)'}`)
+  for (const d of await registry.discover()) out(`discovery ${d.provider}: ${d.error ? 'failed (' + d.error + ')' : d.served ? 'serves ' + d.served : d.found + ' model(s)'}`)
   out('')
   for (const p of registry.providers.values()) {
     out(`${p.id} [${p.kind}${p.local ? ', local' : ''}] ${p.available ? 'available' : 'unavailable: ' + (p.unavailableReason ?? '?')}`)

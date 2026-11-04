@@ -386,10 +386,10 @@ export function Settings() {
         </div>
         {(models?.discovery ?? []).map((d) => (
           <div key={d.provider} className="small">
-            <b>{d.provider}</b>: {d.error ? <span className="warn">not reachable ({d.error})</span> : `${d.found} model(s) found`}
+            <b>{d.provider}</b>: {d.error ? <span className="warn">not reachable ({d.error})</span> : d.served ? `runs ${d.served}` : `${d.found} model(s) found`}
           </div>
         ))}
-        <div className="dim small">Local models: load LM Studio models with a context of 32k or more, then press Refresh local models. Strata needs no refresh (128k context, set in its run config).</div>
+        <div className="dim small">Local models: load LM Studio models with a context of 32k or more, then press Refresh local models. Strata needs no refresh: the app asks it which model it runs (context from Strata).</div>
       </div>
 
       <div className="card stack">

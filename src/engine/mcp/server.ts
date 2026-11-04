@@ -62,7 +62,7 @@ const fixMinorIssues = z
 
 /** What a model list needs: not every field of the picker's entries. */
 function trimModels(info: ModelsInfo) {
-  return info.models.map((m) => ({ ref: m.ref, available: m.available, local: m.local, context: m.context, priceInPer1M: m.priceIn, priceOutPer1M: m.priceOut }))
+  return info.models.map((m) => ({ ref: m.ref, available: m.available, local: m.local, context: m.context, priceInPer1M: m.priceIn, priceOutPer1M: m.priceOut, ...(m.served !== undefined ? { served: m.served } : {}) }))
 }
 
 /** Drops the keys whose value is undefined, so a patch only carries what the caller set. */
