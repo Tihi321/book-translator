@@ -157,7 +157,7 @@ describe('ModelRouter provider limits and down servers', () => {
     const router = new ModelRouter(registry, { retries: 2, sleep: noSleep })
     const down: string[] = []
     router.onProviderDown = (p) => down.push(p.id)
-    const refs = ['strata/qwen3.8-flash-next', 'mock/mock-translator']
+    const refs = ['strata/default', 'mock/mock-translator']
     const r = await router.complete(refs, { messages: [{ role: 'user', content: 'x' }] })
     expect(r.model.ref).toBe('mock/mock-translator')
     expect(strata.calls).toBe(1)
@@ -174,7 +174,7 @@ describe('ModelRouter provider limits and down servers', () => {
     const { registry } = await setup()
     registry.markDown(registry.providers.get('strata')!)
     const router = new ModelRouter(registry, { retries: 0, sleep: noSleep })
-    expect(router.resolve(['strata/qwen3.8-flash-next']).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next'])
+    expect(router.resolve(['strata/default']).map((m) => m.ref)).toEqual(['strata/default'])
   })
 
   it('still retries an unreachable error on a server that is not auto', async () => {
@@ -197,7 +197,7 @@ describe('ModelRouter provider limits and down servers', () => {
     // strata is second: it goes down while the first model fails
     router.limiter.markDayFull(registry.providers.get('openrouter')!)
     const events = []
-    for await (const ev of router.chat(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'mock/mock-translator'], { messages: [] })) {
+    for await (const ev of router.chat(['deepseek/deepseek-flash', 'strata/default', 'mock/mock-translator'], { messages: [] })) {
       events.push(ev)
       if (ev.type === 'attempt') registry.markDown(registry.providers.get('strata')!)
     }
@@ -239,19 +239,19 @@ describe('ModelRouter aliases and group order', () => {
 
   it('resolves aliases to the default models', async () => {
     const { registry } = await setup()
-    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, lmLoad })
     const router = new ModelRouter(registry)
-    expect(router.resolve(['strata', 'paid', 'lmstudio', 'deepseek/deepseek-flash']).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next', 'deepseek/deepseek-flash'])
+    expect(router.resolve(['strata', 'paid', 'lmstudio', 'deepseek/deepseek-flash']).map((m) => m.ref)).toEqual(['strata/default', 'deepseek/deepseek-flash'])
   })
 
   it('sorts the list by the group order and keeps the order inside a group', async () => {
     const { registry } = await setup()
-    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['strata', 'paid'], lmLoad })
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, order: ['strata', 'paid'], lmLoad })
     const router = new ModelRouter(registry)
-    const refs = ['paid', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'strata']
-    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['strata/qwen3.8-flash-next-low', 'strata/qwen3.8-flash-next', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'])
-    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: [], lmLoad })
-    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low', 'strata/qwen3.8-flash-next'])
+    const refs = ['paid', 'deepseek/deepseek-v4-pro', 'strata/default-low', 'strata']
+    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['strata/default-low', 'strata/default', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'])
+    registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, order: [], lmLoad })
+    expect(router.resolve(refs).map((m) => m.ref)).toEqual(['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'strata/default-low', 'strata/default'])
   })
 
   it('calls the model an alias stands for', async () => {

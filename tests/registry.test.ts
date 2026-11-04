@@ -24,9 +24,9 @@ describe('ModelRegistry with the seed providers.md', () => {
     expect(s.registry.providers.get('mock')!.available).toBe(true)
     expect(s.registry.providers.get('client')).toMatchObject({ available: true, local: true })
     expect(s.registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
-    expect(s.registry.contextLength('strata/qwen3.8-flash-next')).toBe(131072)
-    expect(s.registry.getModel('strata/qwen3.8-flash-next')?.extraBody).toEqual({ reasoning_effort: 'none' })
-    expect(s.registry.getModel('strata/qwen3.8-flash-next-low')?.extraBody).toEqual({ reasoning_effort: 'low' })
+    expect(s.registry.contextLength('strata/default')).toBe(131072)
+    expect(s.registry.getModel('strata/default')?.extraBody).toEqual({ reasoning_effort: 'none' })
+    expect(s.registry.getModel('strata/default-low')?.extraBody).toEqual({ reasoning_effort: 'low' })
   })
 
   it('marks API providers unavailable without a key', async () => {
@@ -328,9 +328,9 @@ describe('concurrency: auto and server slots', () => {
     const s = await seededRegistry({ fetchImpl })
     cleanups.push(s.cleanup)
     const changed = await s.registry.syncServerSlots()
-    expect(changed.find((c) => c.provider.id === 'strata')).toMatchObject({ from: 1, to: 4 })
+    expect(changed.slots.find((c) => c.provider.id === 'strata')).toMatchObject({ from: 1, to: 4 })
     expect(s.registry.providers.get('strata')).toMatchObject({ concurrency: 4, down: false })
-    expect((await s.registry.syncServerSlots()).find((c) => c.provider.id === 'strata')).toBeUndefined()
+    expect((await s.registry.syncServerSlots()).slots.find((c) => c.provider.id === 'strata')).toBeUndefined()
     serving = 99
     await s.registry.syncServerSlots()
     expect(s.registry.providers.get('strata')!.concurrency).toBe(16)
@@ -354,24 +354,44 @@ describe('concurrency: auto and server slots', () => {
     expect(s.registry.providers.get('lmstudio')).toMatchObject({ concurrency: 6, down: false })
   })
 
-  it('marks a server that does not answer as down with 1 slot, and up again when it answers', async () => {
+  it('marks a server that does not answer as down with 1 slot, and up again when it answers; its loaded rows follow the model it runs', async () => {
     let up = true
+    let model = 'deepseek-v4.1-flash'
     const fetchImpl = (async (url: string | URL | Request) => {
       if (!up) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
-      if (String(url).includes('8080')) return new Response(JSON.stringify({ concurrency: { serving: 4 } }), { status: 200 })
+      const u = String(url)
+      if (u.includes('8080/v1/models')) return new Response(JSON.stringify({ data: [{ id: model, meta: { n_ctx: 65536 } }, { id: 'default', alias_of: model }] }), { status: 200 })
+      if (u.includes('8080')) return new Response(JSON.stringify({ concurrency: { serving: 4 }, model }), { status: 200 })
       return new Response('{}', { status: 404 })
     }) as typeof fetch
     const s = await seededRegistry({ fetchImpl })
     cleanups.push(s.cleanup)
-    await s.registry.syncServerSlots()
+    const first = await s.registry.syncServerSlots()
     expect(s.registry.providers.get('strata')).toMatchObject({ concurrency: 4, down: false })
+    expect(first.served).toMatchObject([{ to: 'deepseek-v4.1-flash' }])
+    // the loaded rows take the served model's profile; the variant's thinking level stays
+    const row = s.registry.getModel('strata/default')!
+    const low = s.registry.getModel('strata/default-low')!
+    expect(row).toMatchObject({ servedId: 'deepseek-v4.1-flash', family: 'deepseek', context: 131072, extraBody: { reasoning_effort: 'none' } })
+    expect(low).toMatchObject({ servedId: 'deepseek-v4.1-flash', family: 'deepseek', extraBody: { reasoning_effort: 'low' } })
+    expect(s.registry.getModel('strata/qwen3.8-flash-next-low')).toBe(low) // the old ref is an alias
+    expect(s.registry.resolve('strata/qwen3.8-flash-next')).toBe('strata/default')
+    // discovery only learns the model: no strata/<real id> appears
+    await s.registry.discover()
+    expect([...s.registry.models.keys()].filter((r) => r.startsWith('strata/'))).toEqual(['strata/default', 'strata/default-low'])
+    // a switch (restart with another quant) changes the same objects, by the id prefix
+    model = 'qwen3.8-flash-next-iq3_s'
+    expect((await s.registry.syncServerSlots()).served).toMatchObject([{ from: 'deepseek-v4.1-flash', to: 'qwen3.8-flash-next-iq3_s' }])
+    expect(s.registry.getModel('strata/default')).toBe(row)
+    expect(row).toMatchObject({ servedId: 'qwen3.8-flash-next-iq3_s', family: 'qwen' })
     up = false
     const changed = await s.registry.syncServerSlots()
-    expect(changed.find((c) => c.provider.id === 'strata')).toMatchObject({ from: 4, to: 1 })
-    expect(s.registry.providers.get('strata')).toMatchObject({ concurrency: 1, down: true })
+    expect(changed.slots.find((c) => c.provider.id === 'strata')).toMatchObject({ from: 4, to: 1 })
+    expect(s.registry.providers.get('strata')).toMatchObject({ concurrency: 1, down: true, served: 'qwen3.8-flash-next-iq3_s' }) // down keeps what it ran last
     // kept across a reload
     await s.registry.load()
     expect(s.registry.providers.get('strata')!.down).toBe(true)
+    expect(s.registry.getModel('strata/default')!.servedId).toBe('qwen3.8-flash-next-iq3_s')
     up = true
     await s.registry.syncServerSlots()
     expect(s.registry.providers.get('strata')).toMatchObject({ concurrency: 4, down: false })
@@ -403,9 +423,9 @@ describe('group aliases and order', () => {
   it('resolves an alias to its default and leaves provider/model alone', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, lmLoad })
     expect(s.registry.resolve('paid')).toBe('deepseek/deepseek-flash')
-    expect(s.registry.resolve('strata')).toBe('strata/qwen3.8-flash-next')
+    expect(s.registry.resolve('strata')).toBe('strata/default')
     expect(s.registry.resolve('lmstudio')).toBe('lmstudio') // no default set: left as it is
     expect(s.registry.resolve('openai/gpt-5')).toBe('openai/gpt-5')
   })
@@ -416,7 +436,7 @@ describe('group aliases and order', () => {
     s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash' }, lmLoad })
     expect(s.registry.groupOf('paid')).toBe('paid')
     expect(s.registry.groupOf('deepseek/deepseek-v4-pro')).toBe('paid')
-    expect(s.registry.groupOf('strata/qwen3.8-flash-next')).toBe('strata')
+    expect(s.registry.groupOf('strata/default')).toBe('strata')
     expect(s.registry.groupOf('lmstudio/x')).toBe('lmstudio')
     expect(s.registry.groupOf('ollama/x')).toBe('ollama') // another local provider is its own group
     expect(s.registry.groupOf('client/claude-code')).toBeUndefined()
@@ -427,12 +447,12 @@ describe('group aliases and order', () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
     const list = ['paid', 'strata', 'lmstudio/x', 'openai/gpt-5', 'deepseek/deepseek-v4-pro', 'ollama/y']
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, lmLoad })
     expect(s.registry.orderRefs(list)).toEqual(list)
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['strata', 'paid'], lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, order: ['strata', 'paid'], lmLoad })
     // lmstudio is not in the order and ollama is in no group: both go last, in their own order
     expect(s.registry.orderRefs(list)).toEqual(['strata', 'paid', 'openai/gpt-5', 'deepseek/deepseek-v4-pro', 'lmstudio/x', 'ollama/y'])
-    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/qwen3.8-flash-next' }, order: ['lmstudio', 'strata', 'paid'], lmLoad })
+    s.registry.setDefaults({ aliases: { paid: 'deepseek/deepseek-flash', strata: 'strata/default' }, order: ['lmstudio', 'strata', 'paid'], lmLoad })
     expect(s.registry.orderRefs(list)).toEqual(['lmstudio/x', 'strata', 'paid', 'openai/gpt-5', 'deepseek/deepseek-v4-pro', 'ollama/y'])
   })
 
@@ -502,7 +522,7 @@ describe('custom providers', () => {
     expect(s.registry.groupOf('acp-home/m1')).toBe('acp-home')
     expect(s.registry.groupOf('paid-two/m1')).toBe('paid-two')
     expect(s.registry.groupOf('deepseek/deepseek-flash')).toBe('paid')
-    expect(s.registry.groupOf('strata/qwen3.8-flash-next')).toBe('strata')
+    expect(s.registry.groupOf('strata/default')).toBe('strata')
     expect(s.registry.getModel('acp-home/m1')!.priceIn).toBe(0)
   })
 
@@ -512,7 +532,7 @@ describe('custom providers', () => {
     s.registry.setDefaults({ aliases: { 'acp-home': 'acp-home/m1', paid: 'deepseek/deepseek-flash' }, order: ['acp-home', 'strata', 'paid'], lmLoad })
     expect(s.registry.resolve('acp-home')).toBe('acp-home/m1')
     expect(s.registry.groupOf('acp-home')).toBe('acp-home')
-    expect(s.registry.orderRefs(['paid', 'strata/qwen3.8-flash-next', 'acp-home', 'paid-two/m1'])).toEqual(['acp-home', 'strata/qwen3.8-flash-next', 'paid', 'paid-two/m1'])
+    expect(s.registry.orderRefs(['paid', 'strata/default', 'acp-home', 'paid-two/m1'])).toEqual(['acp-home', 'strata/default', 'paid', 'paid-two/m1'])
   })
 
   it('the defaults schema takes open group names, and old values still parse', () => {
@@ -570,7 +590,7 @@ describe('fallbacks as an open list (BTT-22 / SCP-19)', () => {
     // an alias with no row goes last
     expect(s.registry.orderRefs(['strata', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro', 'strata'])
     // a concrete strata model with no strata row goes last
-    expect(s.registry.orderRefs(['strata/qwen3.8-flash-next-low', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro', 'strata/qwen3.8-flash-next-low'])
+    expect(s.registry.orderRefs(['strata/default-low', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro', 'strata/default-low'])
     // a model that is a row keeps it
     expect(s.registry.orderRefs(['deepseek/deepseek-flash', 'paid'])).toEqual(['deepseek/deepseek-flash', 'openrouter/google/gemma-4-31b-it:free', 'lmstudio/gemma', 'deepseek/deepseek-v4-pro'])
     // another API model takes the first free API row
@@ -578,7 +598,7 @@ describe('fallbacks as an open list (BTT-22 / SCP-19)', () => {
     // client model goes first
     expect(s.registry.orderRefs(['deepseek/deepseek-flash', 'client/claude-code'])[0]).toBe('client/claude-code')
     // with a Strata row, -low takes that row's place
-    s.registry.setDefaults({ fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma'], shared: true, lmLoad: lm })
-    expect(s.registry.orderRefs(['strata/qwen3.8-flash-next-low', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next-low', 'lmstudio/gemma'])
+    s.registry.setDefaults({ fallbacks: ['deepseek/deepseek-flash', 'strata/default', 'lmstudio/gemma'], shared: true, lmLoad: lm })
+    expect(s.registry.orderRefs(['strata/default-low', 'lmstudio', 'paid'])).toEqual(['deepseek/deepseek-flash', 'strata/default-low', 'lmstudio/gemma'])
   })
 })

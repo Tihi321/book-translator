@@ -55,6 +55,10 @@ export interface ProviderSummary {
   jsonSchema: boolean
   /** `discover` of providers.md. */
   discover: boolean | 'free'
+  /** Has `loaded` rows (Strata): they stand for the model it runs, `served`. */
+  followsServer: boolean
+  /** The model it ran when last asked (kept while it is down). */
+  served?: string
   /** Enabled and usable now (local, or has a key). */
   available: boolean
   unavailableReason?: string
@@ -83,6 +87,10 @@ export interface ModelSummary {
   /** It came from `picked` in config/models.md (the Models dialog), not from providers.md. */
   picked: boolean
   maxOutput?: number
+  /** A `loaded` row (`strata/default`): the model the provider serves now, once it has answered. Pickers show it instead of the ref's id. */
+  served?: string
+  /** A `loaded` row: its thinking level (`reasoning_effort` of its `extra_body`), shown as "thinking low" unless `none`. */
+  thinking?: string
 }
 
 /** A model a provider lists, from `detectModels`. */
@@ -112,7 +120,7 @@ export interface ModelsInfo {
   keyNames: string[]
   models: ModelSummary[]
   /** Result of the last discovery of local servers. */
-  discovery: { provider: string; found: number; error?: string }[]
+  discovery: { provider: string; found: number; served?: string; error?: string }[]
 }
 
 export interface FileInfo {

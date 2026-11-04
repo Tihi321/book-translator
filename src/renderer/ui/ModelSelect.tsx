@@ -1,9 +1,17 @@
 import type { ModelSummary, ModelsInfo } from '../../shared/protocol'
 import { fmtContext } from '../format'
 
-export function modelLabel(m: ModelSummary): string {
+/** `Strata: <model>` and `Strata: <model>, thinking low` for a `loaded` row that has been answered for; undefined for any other model. */
+export function servedLabel(m: ModelSummary, models?: ModelsInfo | null): string | undefined {
+  if (!m.served) return undefined
+  const p = models?.providers.find((x) => x.id === m.provider)
+  const name = p && p.name !== p.id ? p.name : m.provider.charAt(0).toUpperCase() + m.provider.slice(1)
+  return `${name}: ${m.served}${m.thinking && m.thinking !== 'none' ? `, thinking ${m.thinking}` : ''}`
+}
+
+export function modelLabel(m: ModelSummary, models?: ModelsInfo | null): string {
   const price = m.local ? 'free' : m.priceIn === 0 && m.priceOut === 0 ? 'free' : `$${m.priceIn}/$${m.priceOut} per 1M`
-  return `${m.model}  |  ${fmtContext(m.context)} ctx${m.local && !m.loaded ? ' (default)' : ''}  |  ${price}`
+  return `${servedLabel(m, models) ?? m.model}  |  ${fmtContext(m.context)} ctx${m.local && !m.loaded && !m.served ? ' (default)' : ''}  |  ${price}`
 }
 
 /** The first of the preferred refs that can be used now, else the first usable model, else ''. */
@@ -85,7 +93,7 @@ export function ModelSelect({ models, value, onChange, disabled, showUnavailable
         <optgroup key={label} label={label}>
           {ms.map((m) => (
             <option key={m.ref} value={m.ref} disabled={!m.available}>
-              {modelLabel(m)}
+              {modelLabel(m, models)}
               {m.available ? '' : '  (unavailable)'}
             </option>
           ))}

@@ -164,6 +164,61 @@ describe('seed migration', () => {
     expect(await fs.readFile(file, 'utf8')).toBe('---\nproviders: [unclosed\n---\n')
   })
 
+  it('strata-loaded-v1 turns the old Strata rows and refs into loaded rows once, keeps your own row, and leaves a deleted strata provider alone', async () => {
+    const { dir, cleanup } = await tempDir()
+    cleanups.push(cleanup)
+    await initDataFolder(dir, SEED_DIR)
+    const file = path.join(dir, 'config', 'providers.md')
+    const stateFile = path.join(dir, 'config', 'seed-state.json')
+    const defaultsFile = path.join(dir, 'config', 'defaults.json')
+    const { frontmatter, body } = splitFrontmatter(await fs.readFile(file, 'utf8'))
+    const doc = parseDocument(frontmatter!)
+    const strataOld = doc.createNode({
+      id: 'strata',
+      kind: 'openai-compat',
+      local: true,
+      base_url: 'http://127.0.0.1:8080/v1',
+      concurrency: 1,
+      discover: false,
+      json_schema: false,
+      models: [
+        { id: 'qwen3.8-flash-next', family: 'qwen' },
+        { id: 'qwen3.8-flash-next-low', family: 'qwen' },
+        { id: 'my-model', family: 'llama' }
+      ]
+    })
+    const providers = doc.get('providers') as YAMLSeq
+    providers.items = providers.items.map((i) => ((i as YAMLMap).get('id') === 'strata' ? strataOld : i))
+    await fs.writeFile(file, `---\n${doc.toString({ lineWidth: 0 })}---\n${body}`, 'utf8')
+    const state = JSON.parse(await fs.readFile(stateFile, 'utf8')) as { migrations?: string[] }
+    delete state.migrations
+    await fs.writeFile(stateFile, JSON.stringify(state), 'utf8')
+    const defaults = (await fs.readFile(defaultsFile, 'utf8')).replace(/"strata\/default-low"/g, '"strata/qwen3.8-flash-next-low"').replace(/"strata\/default"/g, '"strata/qwen3.8-flash-next"')
+    await fs.writeFile(defaultsFile, defaults, 'utf8')
+
+    const res = await initDataFolder(dir, SEED_DIR)
+    expect(res.migrated).toEqual(['strata-loaded-v1'])
+    expect(res.warnings).toEqual([])
+    const strata = parseMdWith(await fs.readFile(file, 'utf8'), providersSchema, file).data.providers.find((p) => p.id === 'strata')!
+    expect(strata).toMatchObject({ concurrency: 'auto', discover: true })
+    expect(strata.models.map((m) => m.id)).toEqual(['default', 'default-low', 'my-model'])
+    expect(strata.models[0]).toMatchObject({ loaded: true, aliases: ['qwen3.8-flash-next'] })
+    expect(strata.profiles.map((p) => p.id)).toEqual(['qwen3.8-flash-next', 'deepseek-v4.1-flash'])
+    const renamed = await fs.readFile(defaultsFile, 'utf8')
+    expect(renamed).not.toContain('qwen3.8-flash-next')
+    expect(renamed).toBe(defaults.replace(/qwen3\.8-flash-next/g, 'default')) // only the refs change, the layout stays
+    // it ran once: a second start changes nothing
+    const text = await fs.readFile(file, 'utf8')
+    expect((await initDataFolder(dir, SEED_DIR)).migrated).toEqual([])
+    expect(await fs.readFile(file, 'utf8')).toBe(text)
+    // no strata provider: nothing is added
+    providers.items = providers.items.filter((i) => (i as YAMLMap).get('id') !== 'strata')
+    await fs.writeFile(file, `---\n${doc.toString({ lineWidth: 0 })}---\n${body}`, 'utf8')
+    await fs.writeFile(stateFile, JSON.stringify(state), 'utf8')
+    await initDataFolder(dir, SEED_DIR)
+    expect(await providerIds(dir)).not.toContain('strata')
+  })
+
   it('adds a provider a later seed has, and nothing else', async () => {
     const { dir, cleanup } = await tempDir()
     const seed = await tempDir()

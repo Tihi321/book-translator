@@ -29,7 +29,28 @@ export const providerModelSchema = z.looseObject({
   extra_body: z.record(z.string(), z.unknown()).nullable().optional(),
   /** `load_models` providers (LM Studio): load this model with this context window and parallel count instead of the defaults' ones. */
   load_context: z.number().int().min(2048).optional(),
-  load_parallel: z.number().int().min(1).max(16).optional()
+  load_parallel: z.number().int().min(1).max(16).optional(),
+  /**
+   * A ref that stands for whatever model the server has loaded (Strata: `default`, `default-low`). Its family, context and extra_body
+   * follow the model the server reports (see `profiles` of the provider). Only works on a provider with `discover: true`.
+   */
+  loaded: z.boolean().default(false),
+  /** Older ids of this row: `provider/<alias>` resolves to it. Not listed as models. */
+  aliases: z.array(z.string()).default([]),
+  /** Overrides the provider's `json_schema` for this model. */
+  json_schema: z.boolean().optional()
+})
+
+/** Settings for a model a provider with `loaded` rows may run, matched by id (the whole id, else the longest prefix). Not a ref, not in the pickers. */
+export const providerProfileSchema = z.looseObject({
+  id: z.string().min(1),
+  family: z.string().optional(),
+  context: z.number().int().positive().optional(),
+  max_output: z.number().int().positive().optional(),
+  json_schema: z.boolean().optional(),
+  extra_body: z.record(z.string(), z.unknown()).nullable().optional(),
+  tools: z.boolean().optional(),
+  vision: z.boolean().optional()
 })
 
 export const providerEntrySchema = z.looseObject({
@@ -68,7 +89,9 @@ export const providerEntrySchema = z.looseObject({
   json_schema: z.boolean().default(true),
   /** LM Studio: the engine loads a model that isn't loaded yet itself, with the parallel, context and idle time from `lmstudio` in config/defaults.json. */
   load_models: z.boolean().default(false),
-  models: z.array(providerModelSchema).default([])
+  models: z.array(providerModelSchema).default([]),
+  /** Settings per model the server may run, for the `loaded` rows of `models` (see `providerProfileSchema`). */
+  profiles: z.array(providerProfileSchema).default([])
 })
 
 export const providersSchema = configBase('providers').extend({
@@ -112,7 +135,7 @@ export const defaultsSchema = z.looseObject({
   /**
    * The fallback list: arbitrary-length ordered list of models (SCP-19).
    */
-  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next']),
+  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/default']),
   /** One fallback order for every role / agent. False: each list keeps its own order. */
   fallbackShared: z.boolean().default(false),
   fallback_shared: z.boolean().optional(),
