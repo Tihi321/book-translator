@@ -115,7 +115,7 @@ providers:
         context: 131072
         extra_body: { reasoning_effort: low }
     profiles:                     # settings per model Strata may run, matched by id prefix; not refs, not in pickers
-      - id: qwen3.8-flash-next    # matches qwen3.8-flash-next-iq3_s and qwen3.8-flash-next-unsloth-ud-iq4_xs
+      - id: qwen3.8-flash-next    # matches qwen3.8-flash-next-unsloth-ud-iq4_xs and any other Qwen3.8-Flash-Next quant
         family: qwen
         context: 131072
       - id: deepseek-v4.1-flash
@@ -230,10 +230,10 @@ The app splits the book into chunks that fit the model's context window. For LM 
 
 Strata is a fast local server on `http://127.0.0.1:8080/v1` with an OpenAI-style API. It needs no key. Set `STRATA_API_KEY` only if you put one in front of it.
 
-- It serves one model per process, on port 8080, chosen by the `run-*.bat` you start in `D:\Strata`: `run-iq3_s.bat` (Qwen3.8-Flash-Next IQ3_S, one request at a time), `run-iq3_s-solo.bat`, `run-iq3_s-parallel.bat` (four at once), `run-unsloth-ud-iq4_xs.bat` (Qwen IQ4_XS), `run-deepseek-v4.1-flash-ist-das-2.00bpw.bat` and `run-deepseek-v4.1-flash-ista-das-coder.bat` (DeepSeek V4.1 Flash). From the creative-hub folder, `scripts\hub.ps1 start strata <variant>` starts one.
+- It serves one model per process, on port 8080, chosen by the `run-*.bat` you start in `D:\Strata`: `run-unsloth-ud-iq4_xs-parallel.bat` (Qwen3.8-Flash-Next IQ4_XS, four requests at once), `run-unsloth-ud-iq4_xs.bat` (Qwen IQ4_XS, one at a time), `run-deepseek-v4.1-flash-ist-das-2.00bpw.bat` and `run-deepseek-v4.1-flash-ista-das-coder.bat` (DeepSeek V4.1 Flash). From the creative-hub folder, `scripts\hub.ps1 start strata <variant>` starts one.
 - Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes (the DeepSeek config allows up to an hour).
 - The app asks Strata which model it runs (`/v1/status`) and uses the matching entry of `profiles` for that model's settings (family, context, extra body). `strata/default` and `strata/default-low` follow it: after you restart Strata with another model, the model pickers show the new name within about 10 seconds and `defaults.json` stays the same. The older ids `qwen3.8-flash-next` and `qwen3.8-flash-next-low` still work as aliases, so older projects keep working. When you install a new model, add a profile for it (its `id` is matched as a prefix of the id Strata reports).
-- `context` in a profile must match `--max-context` in the run config (131072 for all six now).
+- `context` in a profile must match `--max-context` in the run config (131072 for all four now).
 - Strata takes most of the GPU memory with any of these models: keep only the nomic embedding model loaded in LM Studio, and no ComfyUI, while it runs.
 - Thinking is on by default in Strata and is slow. `strata/default` sends `reasoning_effort: none`. `strata/default-low` sends `low`, which gives steadier answers for checks.
 - `json_schema: false`: when Strata can't produce valid JSON for a schema, it answers 502 `structured_output_failed`. The app would retry and then move to a paid model. Without the schema, the app's JSON repair step deals with a bad answer.

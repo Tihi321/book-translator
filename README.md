@@ -65,9 +65,9 @@ API keys are never written to files. A key is looked up in an environment variab
 ## Strata notes
 
 - Strata is a local Qwen3.8-Flash-Next server on `http://127.0.0.1:8080/v1`. It needs no key.
-- Start it with `D:\Strata\run-iq3_s.bat`. Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes.
+- Start it with `D:\Strata\run-unsloth-ud-iq4_xs-parallel.bat` (or `scripts\hub.ps1 start strata` from the creative-hub folder). Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes.
 - The default models use Strata first and fall back to DeepSeek (QA falls back to Gemini last). If Strata is not running, the app moves on to the next model.
-- The IQ3_S quant needs about 84 GB of memory. Keep only small models loaded in LM Studio while Strata runs.
+- Strata takes most of the GPU memory. Keep only small models loaded in LM Studio while it runs.
 - Strata is set up with `json_schema: false` in `providers.md`, so glossary and QA JSON comes from the prompt and the app's repair step. See the Strata section in `providers.md`.
 
 ## CLI
