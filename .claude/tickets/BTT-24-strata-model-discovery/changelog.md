@@ -59,3 +59,5 @@ Behaviour: `strata/default` and `strata/default-low` are `loaded` rows. The engi
 ## Polish (checker findings)
 
 - `resolve()` now also maps an alias whose fallback row still names an old ref of a `loaded` row (`strata/qwen3.8-flash-next`) to the row (`strata/default`), as Scriptorium does, so the shared-order list holds `strata/default` once. One assertion added to the existing AC-1 Strata test; it failed before the fix and passes after.
+
+- MCP `list_models` (`trimModels`) now carries `served` (the model id a `loaded` row runs) when set, per plan C1 rule 10. The existing key-shape test still holds (mock has no `served`); no new test.
