@@ -55,3 +55,7 @@ Behaviour: `strata/default` and `strata/default-low` are `loaded` rows. The engi
 
 - Nothing against a running Strata (hub live checks L2, L4); no app started; no user data touched (`~\BookTranslator` is migrated when Book Translator next starts).
 - The picker label and Settings text were typechecked, not looked at in the running app.
+
+## Polish (checker findings)
+
+- `resolve()` now also maps an alias whose fallback row still names an old ref of a `loaded` row (`strata/qwen3.8-flash-next`) to the row (`strata/default`), as Scriptorium does, so the shared-order list holds `strata/default` once. One assertion added to the existing AC-1 Strata test; it failed before the fix and passes after.

@@ -376,6 +376,9 @@ describe('concurrency: auto and server slots', () => {
     expect(low).toMatchObject({ servedId: 'deepseek-v4.1-flash', family: 'deepseek', extraBody: { reasoning_effort: 'low' } })
     expect(s.registry.getModel('strata/qwen3.8-flash-next-low')).toBe(low) // the old ref is an alias
     expect(s.registry.resolve('strata/qwen3.8-flash-next')).toBe('strata/default')
+    // a fallback row that still names the old ref: the shared-order list holds strata/default once
+    s.registry.setDefaults({ fallbacks: ['deepseek/deepseek-flash', 'strata/qwen3.8-flash-next', 'lmstudio/gemma'], shared: true, lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    expect(s.registry.orderRefs(['paid', 'strata', 'lmstudio']).filter((r) => r.startsWith('strata/'))).toEqual(['strata/default'])
     // discovery only learns the model: no strata/<real id> appears
     await s.registry.discover()
     expect([...s.registry.models.keys()].filter((r) => r.startsWith('strata/'))).toEqual(['strata/default', 'strata/default-low'])
