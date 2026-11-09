@@ -1,5 +1,6 @@
 import { validateTags } from '../formats/inline'
 import type { SegmentRec } from '../../shared/project'
+import { ClientOnlyRefusal } from './env'
 import type { AgentEnv } from './env'
 import { formatEntries, relevantEntries } from './glossary'
 import { buildMessages } from './prompts'
@@ -10,6 +11,8 @@ export interface ProofreadResult {
   /** Per segment, the proofread text (the translator's text where the proofreader's was not usable). */
   proofread: Record<string, string>
   changed: number
+  /** Why the proofreader was refused (a model a client-only project may not call); the translation is kept and the chunk is flagged. */
+  refused?: string
 }
 
 /** The proofreader must not add or drop content: a segment whose length changes a lot is kept as the translator wrote it. */
@@ -17,7 +20,7 @@ const MIN_RATIO = 0.6
 const MAX_RATIO = 1.6
 
 /**
- * Fluency pass over the translation, with the source for reference. Never fails the chunk: if the reply does not parse, or a segment
+ * Fluency pass over the translation, with the source for reference. Never fails the chunk (a refused proofreader flags it): if the reply does not parse, or a segment
  * loses its tags or changes size too much, the translator's text is kept for it.
  */
 export async function proofreadChunk(
@@ -36,7 +39,14 @@ export async function proofreadChunk(
     .filter(Boolean)
     .join('\n\n')
   const messages = await buildMessages(env.dataDir, 'proofreader', { sourceLanguage: env.sourceLanguage, targetLanguage: env.targetLanguage, brief: env.brief }, user)
-  const r = await env.call('proofreader', { messages, temperature: 0.2, task: 'proofread', unit: opts.unit }, { onDelta: opts.onDelta })
+  let r: Awaited<ReturnType<AgentEnv['call']>>
+  try {
+    r = await env.call('proofreader', { messages, temperature: 0.2, task: 'proofread', unit: opts.unit }, { onDelta: opts.onDelta })
+  } catch (err) {
+    if (!(err instanceof ClientOnlyRefusal)) throw err
+    env.log('warn', `${opts.unit}: ${err.message}; keeping the translation`)
+    return { ...keep, refused: err.message }
+  }
   const p = parseSegments(r.text, segs.map((s) => s.id))
   if (!p.ok) {
     env.log('warn', `${opts.unit}: proofreader reply unusable (${describeParse(p)}), keeping the translation`)

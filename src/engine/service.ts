@@ -225,7 +225,7 @@ export class EngineService {
     const sourceTokens = chunks.reduce((n, c) => n + c.tokens, 0)
     const perAgent: Estimate['perAgent'] = {}
     const add = (agent: AgentName, tokensIn: number, tokensOut: number) => {
-      const m = this.router.resolve(settings.agentModels[agent] ?? [])[0]
+      const m = this.router.resolve(settings.agentModels[agent] ?? [], { exact: settings.clientOnly === true })[0]
       const costUsd = m && isPaidModel(m) ? computeCost(m, { inputTokens: tokensIn, cachedInputTokens: 0, outputTokens: tokensOut }) : 0
       const tps = !m || m.provider.local ? LOCAL_TPS : API_TPS
       // the glossary passes run one after the other, the other agents run `workers` chunks at once
@@ -238,7 +238,7 @@ export class EngineService {
     if (settings.enabled.proofreader) add('proofreader', sourceTokens + out + n * PROMPT_TOKENS, out)
     if (settings.enabled.qa) add('qa', sourceTokens + out + n * PROMPT_TOKENS, n * 200)
     if (settings.enabled.glossary) {
-      const gm = this.router.resolve(settings.agentModels.glossary ?? [])[0]
+      const gm = this.router.resolve(settings.agentModels.glossary ?? [], { exact: settings.clientOnly === true })[0]
       const gBudget = chunkBudget({ contexts: gm ? [this.registry.contextLength(gm.ref)] : [], userMax: 6000, promptOverhead: 900, glossarySlice: 1500, prevContext: 0, expansion: 0.4 })
       const passes = Math.max(1, Math.ceil(sourceTokens / gBudget))
       add('glossary', sourceTokens + passes * 2400, passes * 500)

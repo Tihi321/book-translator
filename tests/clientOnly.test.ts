@@ -114,7 +114,7 @@ describe('independent reviewer in a client-only project', () => {
     let stop = false
     void (async () => {
       while (!stop) {
-        const t = rg.service.clientQueue.lease()
+        const t = rg.service.clientQueue.lease() ?? rg.service.clientQueue.lease({ client: 'antigravity' })
         if (!t) {
           await new Promise((res) => setTimeout(res, 3))
           continue
@@ -192,6 +192,50 @@ describe('independent reviewer in a client-only project', () => {
       const again = await r.service.store.readChunk(id, 1)
       expect(again.state).toBe('flagged')
       expect(again.error).toMatch(/reviewer client\/claude-code refused/)
+    } finally {
+      w.stop()
+    }
+  })
+
+  it('flags the chunk when the proofreader is refused, and keeps the translation', async () => {
+    const w = await reviewerRig()
+    r = w.rg
+    try {
+      const id = await r.create({ clientOnly: true, enabled: { glossary: false, proofreader: true, qa: false } })
+      const p = await r.service.store.load(id)
+      p.settings.agentModels.proofreader = ['deepseek/deepseek-chat'] // saved by hand: paid
+      await r.service.store.save(p)
+      w.resetFetches()
+      expect((await r.service.start(id)).status).toBe('done')
+      expect(r.mock.calls.length).toBe(0)
+      expect(w.fetches()).toBe(0)
+      const chunks = await r.service.store.listChunks(id)
+      expect(chunks.every((c) => c.state === 'flagged' && /^proofreader deepseek\/deepseek-chat refused: /.test(c.error ?? '') && JSON.stringify(c.final) === JSON.stringify(c.translation))).toBe(true)
+    } finally {
+      w.stop()
+    }
+  })
+
+  it('allows another client/ model as the reviewer at call time', async () => {
+    const w = await reviewerRig()
+    r = w.rg
+    try {
+      const id = await r.create({ clientOnly: true, reviewer: { models: ['client/antigravity'] }, enabled: all })
+      expect((await r.service.start(id)).status).toBe('done')
+      const chunks = await r.service.store.listChunks(id)
+      expect(chunks.every((c) => c.state === 'done' && c.qa.model === 'client/antigravity')).toBe(true)
+    } finally {
+      w.stop()
+    }
+  })
+
+  it('the estimate of a client-only project uses exactly its models, not the shared fallbacks', async () => {
+    const w = await reviewerRig()
+    r = w.rg
+    try {
+      const id = await r.create({ clientOnly: true, reviewer: { models: ['mock/mock-reviewer'] }, enabled: all })
+      r.service.registry.setDefaults({ fallbacks: ['deepseek/deepseek-flash', 'mock/mock-translator'], shared: true, lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+      expect((await r.service.analyze(id)).perAgent.qa!.costUsd).toBe(0)
     } finally {
       w.stop()
     }

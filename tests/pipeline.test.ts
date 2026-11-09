@@ -348,9 +348,12 @@ describe('proofreader and QA', () => {
     const promptFile = path.join(r.dir, 'prompts', 'qa.md')
     await fs.writeFile(promptFile, (await fs.readFile(promptFile, 'utf8')).replace(/score/gi, 'grade'), 'utf8')
     const asked: boolean[] = []
+    const reviews = new Map<string, number>()
     r.mock.on({ role: 'qa' }, (req) => {
-      const first = segsIn(lastUser(req), 'pair')[0]!.id
-      asked.push(lastUser(req).includes('## Score'))
+      if (req.meta?.task === 'review') reviews.set(unitOf(req)!, (reviews.get(unitOf(req)!) ?? 0) + 1)
+      if (unitOf(req) === 'chunk-2' && req.meta?.task === 'review' && reviews.get('chunk-2') === 1) return 'Looks fine to me, no JSON.' // needs the JSON repair round
+      if (req.messages.length === 2) asked.push(lastUser(req).includes('## Score')) // the repair round has more messages
+      const first = segsIn([...req.messages].reverse().find((m) => m.role === 'user' && m.content.includes('<pair '))!.content, 'pair')[0]!.id
       if (unitOf(req) === 'chunk-1') return '{"score":"7.26","issues":[]}' // a numeric string is fine; rounded to 1 decimal
       return JSON.stringify({ score: null, issues: [{ segId: first, type: 'omission', severity: 'major', comment: 'A clause is missing.' }, { segId: first, type: 'glossary', severity: 'minor', comment: 'Term.' }] })
     })
@@ -360,7 +363,8 @@ describe('proofreader and QA', () => {
     expect(chunks.length).toBeGreaterThan(1)
     expect(asked.length).toBeGreaterThan(0)
     expect(asked.every(Boolean)).toBe(true)
-    expect(r.calls('qa').every((c) => c.task !== 'repair')).toBe(true) // score: null is no score, not a bad reply
+    // score: null is no score, not a bad reply (one review call); a reply that is no JSON gets exactly one repair round and is then used
+    expect(Object.fromEntries(reviews)).toEqual(Object.fromEntries(chunks.map((c) => [`chunk-${c.index}`, c.index === 2 ? 2 : 1])))
     expect(chunks[0]!.qa).toMatchObject({ score: 7.3, model: 'mock/mock-reviewer' })
     for (const c of chunks.slice(1)) {
       const majors = c.qa.issues.filter((i) => i.severity === 'major').length

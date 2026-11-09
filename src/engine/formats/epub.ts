@@ -14,7 +14,7 @@ import { stripTags } from './inline'
  * EPUB: blocks come from the spine documents (plus nav and NCX labels and the OPF title). The writer edits the original DOMs
  * in place and copies every other archive entry byte for byte.
  *
- * Block ids: `m.1` (OPF dc:title); `d<i>.<n>` for the i-th document (spine order, then nav, then NCX), `d<i>.t` for its <title>.
+ * Block ids: `m.1` (OPF dc:title), `m.2` (OPF dc:description, the blurb; dc:subject keywords stay as they are); `d<i>.<n>` for the i-th document (spine order, then nav, then NCX), `d<i>.t` for its <title>.
  */
 
 const DC = 'http://purl.org/dc/elements/1.1/'
@@ -294,6 +294,10 @@ function opfTitleEl(opf: Document): Element | undefined {
   return opf.getElementsByTagNameNS(DC, 'title')[0]
 }
 
+function opfDescriptionEl(opf: Document): Element | undefined {
+  return opf.getElementsByTagNameNS(DC, 'description')[0]
+}
+
 function firstHeading(blocks: Block[]): string | undefined {
   const h = blocks.find((b) => b.kind === 'heading')
   return h ? stripTags(h.text) : undefined
@@ -309,7 +313,9 @@ async function read(file: string): Promise<DocumentIR> {
   const titleEl = opfTitleEl(opf)
   const title = titleEl ? collapse(titleEl.textContent ?? '') : ''
   const lang = collapse(opf.getElementsByTagNameNS(DC, 'language')[0]?.textContent ?? '')
-  if (title) sections.push({ id: 's0', blocks: [{ id: 'm.1', kind: 'heading', text: title, tags: [] }] })
+  const description = collapse(opfDescriptionEl(opf)?.textContent ?? '')
+  const meta: Block[] = [...(title ? [{ id: 'm.1', kind: 'heading' as const, text: title, tags: [] }] : []), ...(description ? [{ id: 'm.2', kind: 'para' as const, text: description, tags: [] }] : [])]
+  if (meta.length > 0) sections.push({ id: 's0', blocks: meta })
   for (const [i, e] of entries.entries()) {
     const text = await readText(zip, e.path)
     const doc = text ? parseDoc(text, e) : null
@@ -348,6 +354,9 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
   const t = translations.get('m.1')
   const titleEl = opfTitleEl(opf)
   if (t !== undefined && titleEl) titleEl.textContent = stripTags(t).trim()
+  const d = translations.get('m.2')
+  const descEl = opfDescriptionEl(opf)
+  if (d !== undefined && descEl && stripTags(d).trim()) descEl.textContent = stripTags(d).trim()
   if (lang) {
     const langEl = opf.getElementsByTagNameNS(DC, 'language')[0]
     if (langEl) langEl.textContent = lang

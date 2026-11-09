@@ -214,6 +214,7 @@ export async function projectStatus(argv: string[]): Promise<number> {
   out(`qa score: ${qaScoreLine(qaScoreOf(chunks), chunks.length)}`)
   for (const c of chunks) {
     if (c.state === 'failed') out(`  chunk ${c.index} failed: ${c.error}`)
+    else if (c.state === 'flagged' && c.error) out(`  chunk ${c.index} flagged: ${c.error}`)
     for (const i of c.qa.issues.filter((x) => x.severity === 'major')) out(`  chunk ${c.index} ${i.segId} ${i.type}: ${i.comment}`)
     for (const i of c.qa.issues.filter((x) => x.severity === 'minor')) out(`  chunk ${c.index} ${i.segId} ${i.type} (minor): ${i.comment}`)
   }

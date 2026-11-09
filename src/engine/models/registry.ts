@@ -189,6 +189,8 @@ export class ModelRegistry {
   /** The model each provider with `loaded` rows serves, and its context window when `/models` said, kept across config reloads. */
   private servedIds = new Map<string, string>()
   private servedCtx = new Map<string, number>()
+  /** Problems the last `load` found in providers.md and left out (a refused alias). */
+  warnings: string[] = []
   /** `provider/<alias>` of a `loaded` row -> its ref. */
   private aliasRefs = new Map<string, string>()
   /** `configSignature()` of the files the last successful `load` read, for `configChanged`. */
@@ -249,6 +251,7 @@ export class ModelRegistry {
     const providers = new Map<string, ProviderInfo>()
     const models = new Map<string, ModelInfo>()
     const aliasRefs = new Map<string, string>()
+    const warnings: string[] = []
     for (const p of prov.data.providers) {
       // limits set in the Models dialog (config/models.md) win over providers.md; 0 there means no limit
       const set = choices.limits[p.id] ?? {}
@@ -304,12 +307,21 @@ export class ModelRegistry {
           row.loaded = true
           row.loadedBase = { family: m.family, context: row.context, maxOutput: m.max_output, extraBody: m.extra_body ?? null, jsonSchema: m.json_schema }
           this.applyServed(row)
-          for (const a of m.aliases) aliasRefs.set(`${p.id}/${a}`, ref)
+          for (const a of m.aliases) {
+            // `client/...` is the namespace a client-only project trusts as free: an alias there could stand for a paid model
+            if (a.startsWith('client/') || (p.id === 'client' && p.kind !== 'client')) {
+              warnings.push(`providers.md: alias "${p.id}/${a}" refused: names starting with client/ are reserved for the client provider`)
+              continue
+            }
+            aliasRefs.set(`${p.id}/${a}`, ref)
+          }
         }
       }
     }
     for (const a of [...aliasRefs.keys()]) if (models.has(a)) aliasRefs.delete(a) // a real row with that id wins
     this.aliasRefs = aliasRefs
+    this.warnings = warnings
+    for (const w of warnings) console.warn(w)
     this.providers = providers
     this.models = models
     this.modelChoices = choices
