@@ -181,7 +181,17 @@ describe('independent reviewer in a client-only project', () => {
       expect(r.mock.calls.length).toBe(0)
       expect(w.fetches()).toBe(0)
       expect(await fs.readFile(r.service.store.file(id, 'log.md'), 'utf8')).toMatch(/client-only/)
-      expect((await r.service.store.listChunks(id)).every((c) => c.qa.score === undefined)).toBe(true)
+      // the chunks end flagged, with the reason, and no score
+      const chunks = await r.service.store.listChunks(id)
+      expect(chunks.every((c) => c.state === 'flagged' && c.qa.score === undefined && /reviewer deepseek\/deepseek-chat refused: not free in a client-only project/.test(c.error ?? ''))).toBe(true)
+      // client/claude-code translates, so it may not review either; another client/ ref is not refused
+      p.settings.reviewer = { models: ['client/claude-code'] }
+      p.settings.agentModels.qa = ['client/claude-code']
+      await r.service.store.save(p)
+      await r.service.retryChunk(id, 1)
+      const again = await r.service.store.readChunk(id, 1)
+      expect(again.state).toBe('flagged')
+      expect(again.error).toMatch(/reviewer client\/claude-code refused/)
     } finally {
       w.stop()
     }

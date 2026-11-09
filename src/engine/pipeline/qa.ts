@@ -3,7 +3,7 @@ import { stripTags, textOutsideTags, validateTags } from '../formats/inline'
 import { vnPackSegmentProblem } from '../formats/vnPack'
 import type { DocFormat } from '../../shared/ir'
 import type { GlossaryEntry, IssueType, QaIssue, SegmentRec } from '../../shared/project'
-import { chatFn } from './env'
+import { chatFn, ClientOnlyRefusal } from './env'
 import type { AgentEnv } from './env'
 import { formatEntries, hasTarget, normalizeTerm, relevantEntries } from './glossary'
 import { chatJson } from './llm'
@@ -81,7 +81,7 @@ export function deterministicChecks(
 const str = z.string().optional()
 export const qaReplySchema = z.object({
   /** The reviewer's own grade of the translation, 0 to 10. */
-  score: z.union([z.number(), z.string()]).optional(),
+  score: z.union([z.number(), z.string()]).nullish(),
   issues: z.array(z.object({ segId: z.union([z.string(), z.number()]), type: str, severity: str, comment: str, suggestion: str })).default([])
 })
 
@@ -102,6 +102,8 @@ export interface ReviewResult {
   score?: number
   /** The model that gave the verdict. */
   model?: string
+  /** Why the QA model was refused (a hand-edited reviewer a client-only project may not call); the chunk is flagged. */
+  refused?: string
 }
 
 function sameIssue(a: QaIssue, b: QaIssue): boolean {
@@ -143,7 +145,7 @@ export async function reviewChunk(
   } catch (err) {
     if (env.signal?.aborted || (err as Error).name === 'AbortError') throw err
     env.log('warn', `${opts.unit}: QA model gave no usable answer (${(err as Error).message}); deterministic checks only`)
-    return { issues }
+    return { issues, ...(err instanceof ClientOnlyRefusal ? { refused: err.message } : {}) }
   }
   return { issues, score: score ?? issueScore(issues), ...(model ? { model } : {}) }
 }

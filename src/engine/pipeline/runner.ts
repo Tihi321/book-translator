@@ -11,6 +11,7 @@ import { DEFAULT_PARALLEL, IN_PROGRESS_STATES, isClientRef, reviewerAgents } fro
 import type { DocumentIR } from '../../shared/ir'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
+import { ClientOnlyRefusal } from './env'
 import type { AgentEnv, CallFn } from './env'
 import { buildGlossary, mergeBriefText } from './glossary'
 import { characterLabels, ensureNameEntries, isPlaceholderName, localizesNames } from './names'
@@ -47,7 +48,7 @@ export function budgetFor(registry: ModelRegistry, router: ModelRouter, settings
   const agents = (['translator', 'proofreader', 'qa'] as const).filter((a) => a === 'translator' || settings.enabled[a])
   const contexts: number[] = []
   for (const a of agents) {
-    const m = router.resolve(settings.agentModels[a] ?? [])[0]
+    const m = router.resolve(settings.agentModels[a] ?? [], { exact: settings.clientOnly === true })[0]
     if (m) contexts.push(registry.contextLength(m.ref))
   }
   return chunkBudget({ contexts, userMax: settings.maxChunkTokens })
@@ -57,7 +58,7 @@ export function budgetFor(registry: ModelRegistry, router: ModelRouter, settings
 export function workerCount(router: ModelRouter, settings: ProjectSettings): number {
   const par = { ...DEFAULT_PARALLEL, ...settings.parallel }
   if (!par.enabled) return 1
-  if (par.maxAtOnce === 'auto') return Math.max(1, router.resolve(settings.agentModels.translator ?? [])[0]?.provider.concurrency ?? 1)
+  if (par.maxAtOnce === 'auto') return Math.max(1, router.resolve(settings.agentModels.translator ?? [], { exact: settings.clientOnly === true })[0]?.provider.concurrency ?? 1)
   return Math.min(16, Math.max(1, Math.floor(Number(par.maxAtOnce)) || 1))
 }
 
@@ -163,7 +164,7 @@ export class ProjectRunner {
     const project = this.project
     await this.setProjectStatus('glossary')
     const env = await this.makeEnv(null)
-    const model = router.resolve(project.settings.agentModels.glossary ?? [])[0]
+    const model = router.resolve(project.settings.agentModels.glossary ?? [], { exact: project.settings.clientOnly === true })[0]
     try {
       const localize = localizesNames(project)
       // a name entry that only keeps the name (from before the setting was turned on) is left for the builder to localize
@@ -366,10 +367,11 @@ export class ProjectRunner {
         review = await reviewChunk(env, segs, chunk.final, { unit, task: 'recheck' })
         issues = review.issues
       }
+      if (review.refused) chunk.error = review.refused // shown as the chunk's reason; the QA is skipped, so the chunk is flagged below
       chunk.qa = { issues, ...(review.score !== undefined ? { score: review.score } : {}), ...(review.model ? { model: review.model } : {}) }
     }
 
-    await this.setState(chunk, chunk.qa.issues.some(isMajor) ? 'flagged' : 'done')
+    await this.setState(chunk, chunk.qa.issues.some(isMajor) || chunk.error ? 'flagged' : 'done')
   }
 
   // ---- plumbing ----
@@ -399,9 +401,17 @@ export class ProjectRunner {
       const clientOnly = this.project.settings.clientOnly === true
       if (clientOnly) {
         // a reviewer's free models (local providers) are allowed for the agents the reviewer setting names, nothing else
-        const reviewerRefs = reviewerAgents(this.project.settings).includes(agent) ? (this.project.settings.reviewer?.models ?? []) : []
-        const outside = refs.filter((r) => !isClientRef(r) && !(reviewerRefs.includes(r) && this.deps.registry.isLocalRef(r)))
-        if (outside.length) throw new Error(`project is client-only: the ${agent} agent may not use ${outside.join(', ')} (only client/ models). Turn clientOnly off with update_project_settings to use it.`)
+        const isReviewer = reviewerAgents(this.project.settings).includes(agent)
+        const reviewerRefs = isReviewer ? (this.project.settings.reviewer?.models ?? []) : []
+        // client/claude-code translates, so it never reviews; another client/ model or a local provider's model may
+        const outside = refs.filter((r) => !(isReviewer ? reviewerRefs.includes(r) && r !== 'client/claude-code' && (isClientRef(r) || this.deps.registry.isLocalRef(r)) : isClientRef(r)))
+        if (outside.length) {
+          throw new ClientOnlyRefusal(
+            agent === 'qa'
+              ? `reviewer ${outside.join(', ')} refused: not free in a client-only project (only another client/ model or a local provider's model; client/claude-code translates). Fix it with update_project_settings.`
+              : `project is client-only: the ${agent} agent may not use ${outside.join(', ')} (only client/ models). Turn clientOnly off with update_project_settings to use it.`
+          )
+        }
       }
       const r = await this.deps.router.complete(
         refs,
@@ -433,7 +443,7 @@ export class ProjectRunner {
     chunk.state = state
     this.flushTokens(chunk)
     await this.deps.store.writeChunk(this.project.id, chunk)
-    this.deps.emit({ type: 'chunk.state', projectId: this.project.id, index: chunk.index, state, model: chunk.model, tokens: chunk.tokens, issues: chunk.qa.issues.length })
+    this.deps.emit({ type: 'chunk.state', projectId: this.project.id, index: chunk.index, state, model: chunk.model, tokens: chunk.tokens, issues: chunk.qa.issues.length, ...(chunk.qa.score !== undefined ? { qaScore: chunk.qa.score } : {}) })
     this.emitProgress()
   }
 

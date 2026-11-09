@@ -344,15 +344,23 @@ describe('proofreader and QA', () => {
 
   it('stores the QA score and model per chunk (the grade of the reviewer, else derived from the issues) and sums them up', async () => {
     r = await rig()
+    // a data-folder prompt from before the score existed: the engine asks for it in the user message
+    const promptFile = path.join(r.dir, 'prompts', 'qa.md')
+    await fs.writeFile(promptFile, (await fs.readFile(promptFile, 'utf8')).replace(/score/gi, 'grade'), 'utf8')
+    const asked: boolean[] = []
     r.mock.on({ role: 'qa' }, (req) => {
       const first = segsIn(lastUser(req), 'pair')[0]!.id
+      asked.push(lastUser(req).includes('## Score'))
       if (unitOf(req) === 'chunk-1') return '{"score":"7.26","issues":[]}' // a numeric string is fine; rounded to 1 decimal
-      return JSON.stringify({ issues: [{ segId: first, type: 'omission', severity: 'major', comment: 'A clause is missing.' }, { segId: first, type: 'glossary', severity: 'minor', comment: 'Term.' }] })
+      return JSON.stringify({ score: null, issues: [{ segId: first, type: 'omission', severity: 'major', comment: 'A clause is missing.' }, { segId: first, type: 'glossary', severity: 'minor', comment: 'Term.' }] })
     })
     const id = await r.create({ enabled: { glossary: false, proofreader: false, qa: true } })
     await r.service.start(id)
     const chunks = await r.service.store.listChunks(id)
     expect(chunks.length).toBeGreaterThan(1)
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every(Boolean)).toBe(true)
+    expect(r.calls('qa').every((c) => c.task !== 'repair')).toBe(true) // score: null is no score, not a bad reply
     expect(chunks[0]!.qa).toMatchObject({ score: 7.3, model: 'mock/mock-reviewer' })
     for (const c of chunks.slice(1)) {
       const majors = c.qa.issues.filter((i) => i.severity === 'major').length

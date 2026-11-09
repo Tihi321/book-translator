@@ -49,6 +49,14 @@ export function chatFn(env: Pick<AgentEnv, 'call'>, agent: AgentName, task: stri
   }
 }
 
+/** A model call a client-only project refuses (a ref outside its free models). */
+export class ClientOnlyRefusal extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ClientOnlyRefusal'
+  }
+}
+
 export class ChunkFailure extends Error {
   constructor(message: string) {
     super(message)

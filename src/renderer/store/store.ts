@@ -176,7 +176,7 @@ export const useStore = create<State>()((set, get) => ({
           if (!running) live = patchLive(live, ev.project.id, (l) => ({ ...l, progress: undefined, startedAt: undefined, startOut: undefined, lastAt: undefined, stream: {} }))
           if (openId() === ev.project.id && detail) {
             if (detail.project.status !== ev.project.status) reload = ev.project.id
-            detail = { ...detail, running, project: { ...detail.project, status: ev.project.status, spend: ev.project.spend, settings: detail.project.settings } }
+            detail = { ...detail, running, project: { ...detail.project, status: ev.project.status, spend: ev.project.spend, settings: detail.project.settings }, qa: ev.project.qa }
             detailChanged = true
           }
           break
@@ -195,7 +195,7 @@ export const useStore = create<State>()((set, get) => ({
             const at = list[ev.index - 1]?.index === ev.index ? ev.index - 1 : list.findIndex((c) => c.index === ev.index)
             const cur = list[at]
             if (cur) {
-              list[at] = { ...cur, state: ev.state, model: ev.model ?? cur.model, tokensIn: ev.tokens?.in ?? cur.tokensIn, tokensOut: ev.tokens?.out ?? cur.tokensOut, issues: ev.issues ?? cur.issues }
+              list[at] = { ...cur, state: ev.state, model: ev.model ?? cur.model, tokensIn: ev.tokens?.in ?? cur.tokensIn, tokensOut: ev.tokens?.out ?? cur.tokensOut, issues: ev.issues ?? cur.issues, ...(ev.qaScore !== undefined ? { qaScore: ev.qaScore } : {}) }
               detailChanged = true
             }
           }

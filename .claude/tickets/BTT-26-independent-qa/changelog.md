@@ -41,3 +41,15 @@ UNTESTED: the UI statline in the running app; `get_project` / `wait_for_progress
 
 ### Commit status
 Committed on `BTT-26_independent-qa`, not pushed.
+
+## Polish round 1
+
+From the checker's findings (REQ-0005).
+- A hand-edited reviewer that a client-only project refuses at call time (paid, not local, or `client/claude-code`) now ends the chunk `flagged` with `error` = `reviewer <ref> refused: not free in a client-only project ...` and no score (before: `done`, only a log line). `ClientOnlyRefusal` (`env.ts`) is thrown by `makeCall`; `reviewChunk` returns it as `refused`; `processChunk` sets `chunk.error` and the state. Other QA failures (reviewer down, bad JSON) stay a warning, as AC-1 requires.
+- Call-time guard: for a reviewer agent only refs listed in `reviewer.models` that are not `client/claude-code` and are a `client/` model or a local provider's model pass; other agents still allow only `client/` refs.
+- UI live score: `project.updated` now copies `qa` into the open detail; `chunk.state` carries `qaScore` (protocol, runner, renderer store).
+- Chunk planning (`budgetFor`, `workerCount`, `glossaryStage`) resolves with `exact` for client-only projects.
+- `score: null` in a QA reply is accepted as no score (`nullish()`), no repair round.
+- README (call-time refusal and flagged reason; qa/proofreader stay on the reviewer models when a reviewer is set), ROADMAP (a failed QA has no score).
+- Tests (no new ones): the AC-2 test asserts flagged + reason and the `client/claude-code` hand-edit; the score test uses an old-style prompt without "score" (asserts the `## Score` request, score stored) and a `score: null` reply.
+- Verification: build, typecheck, lint exit 0; `yarn test` 25 files, 368 tests passed. UNTESTED: the live UI statline update in the running app.

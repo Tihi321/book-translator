@@ -294,7 +294,7 @@ export type EngineEvent =
   | { type: 'models'; models: ModelsInfo }
   | { type: 'project.updated'; project: ProjectSummary }
   | { type: 'project.deleted'; projectId: string }
-  | { type: 'chunk.state'; projectId: string; index: number; state: ChunkState; model?: string; tokens?: { in: number; out: number }; issues?: number }
+  | { type: 'chunk.state'; projectId: string; index: number; state: ChunkState; model?: string; tokens?: { in: number; out: number }; issues?: number; qaScore?: number }
   /** Live text of the model reply. `text` is the new piece since the last event (throttled to about 100 ms). */
   | { type: 'chunk.token'; projectId: string; index: number; stage: ChunkState; text: string }
   | ({ type: 'progress'; projectId: string } & ProgressInfo)
