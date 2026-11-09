@@ -39,6 +39,8 @@ export function jsonSchemaOf(schema: ZodType): Record<string, unknown> {
 export interface LlmReply {
   text: string
   costUsd: number
+  /** The ref that answered, when the caller knows it. */
+  model?: string
 }
 
 export type ChatFn = (req: { messages: ChatMessage[]; schema?: Record<string, unknown>; maxTokens?: number; temperature?: number }) => Promise<LlmReply>

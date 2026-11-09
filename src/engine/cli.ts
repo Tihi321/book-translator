@@ -4,7 +4,7 @@ import { resolveKey, setStoredKey, KEYRING_SERVICE } from './models/keys'
 import { scriptDevMock } from './models/devMock'
 import { ModelRegistry } from './models/registry'
 import { countTokens } from './tokens'
-import { countStates } from './project/summary'
+import { countStates, qaScoreLine, qaScoreOf } from './project/summary'
 import { EngineService } from './service'
 import type { ExportReport } from './service'
 import { AGENTS } from '../shared/schemas'
@@ -211,6 +211,7 @@ export async function projectStatus(argv: string[]): Promise<number> {
   out(`${p.name} [${p.id}] ${p.format} -> ${p.settings.targetLanguage}: ${p.status}`)
   out(`chunks: ${chunks.length} (${Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none yet'})`)
   out(`spend: $${p.spend.costUsd.toFixed(4)}, ${p.spend.tokensIn} tokens in, ${p.spend.tokensOut} out`)
+  out(`qa score: ${qaScoreLine(qaScoreOf(chunks), chunks.length)}`)
   for (const c of chunks) {
     if (c.state === 'failed') out(`  chunk ${c.index} failed: ${c.error}`)
     for (const i of c.qa.issues.filter((x) => x.severity === 'major')) out(`  chunk ${c.index} ${i.segId} ${i.type}: ${i.comment}`)

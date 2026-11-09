@@ -766,6 +766,7 @@ export class CommandDispatcher {
         const project = await s.store.load(cmd.projectId)
         const namesBefore = project.settings.localizeNames === true
         project.settings = mergeSettings(project.settings, cmd.patch)
+        s.checkReviewer(project.settings)
         await s.store.save(project)
         // chunks that are translated keep the names they were translated with
         if ((project.format === 'vn' || project.format === 'vnp') && namesBefore !== (project.settings.localizeNames === true) && (await s.store.listChunks(cmd.projectId)).some((c) => c.state === 'done' || c.state === 'flagged')) {

@@ -1,0 +1,8 @@
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"plan.created","request":"scriptorium/REQ-0005","ticket":"BTT-26-independent-qa","detail":"planner returned the plan (draft)"}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"plan.approved","request":"scriptorium/REQ-0005","ticket":"BTT-26-independent-qa","detail":"user approved the plan (Yes, build both)"}
+{"ts":"2026-11-09T13:22:43Z","actor":"implement","type":"implement.started","request":"REQ-0005","ticket":"BTT-26-independent-qa","detail":"branch BTT-26_independent-qa from master"}
+{"ts":"2026-11-09T13:45:25Z","actor":"implement","type":"verify.passed","request":"REQ-0005","ticket":"BTT-26-independent-qa","detail":"typecheck, lint, build, 368 tests pass; AC-6 live run ok"}
+{"ts":"2026-11-09T13:45:25Z","actor":"implement","type":"changelog.written","request":"REQ-0005","ticket":"BTT-26-independent-qa","detail":"changelog.md written"}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"scriptorium/REQ-0005","ticket":"BTT-26-independent-qa","detail":"round 0 FAIL: low findings only; money safety PASS","data":{"verdict":"FAIL","round":0,"low":5,"money_safety":"PASS"}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"checker.verdict","request":"scriptorium/REQ-0005","ticket":"BTT-26-independent-qa","detail":"re-check after polish round 1 (942071b): PASS","data":{"verdict":"PASS","commit":"942071b","tests":368}}
+{"ts":"2026-11-09T00:00:00Z","actor":"director-scribe","type":"ticket.done","request":"scriptorium/REQ-0005","ticket":"BTT-26-independent-qa","detail":"PASS re-check; plan status done"}

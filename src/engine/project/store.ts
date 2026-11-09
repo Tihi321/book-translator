@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { DocumentIR } from '../../shared/ir'
 import { AGENTS } from '../../shared/agents'
 import type { AgentName } from '../../shared/agents'
-import { CLIENT_ONLY_MODEL, DEFAULT_PARALLEL } from '../../shared/project'
+import { CLIENT_ONLY_MODEL, DEFAULT_PARALLEL, reviewerAgents } from '../../shared/project'
 import type { ChunkRecord, GlossaryEntry, ProjectFile, ProjectSettings } from '../../shared/project'
 import { atomicWrite } from '../store/atomic'
 import { parseGlossary, serializeGlossary } from '../pipeline/glossary'
@@ -207,5 +207,6 @@ export function mergeSettings(base: ProjectSettings, patch: Partial<ProjectSetti
   }
   // clientOnly wins over any agentModels given with it or kept from before: every agent sits on the client model
   if (merged.clientOnly) merged.agentModels = Object.fromEntries(AGENTS.map((a) => [a, [CLIENT_ONLY_MODEL]])) as Record<AgentName, string[]>
+  for (const a of reviewerAgents(merged)) merged.agentModels[a] = [...(merged.reviewer?.models ?? [])]
   return merged
 }

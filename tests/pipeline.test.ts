@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ChatRequest } from '../src/engine/models/types'
 import { ProviderError } from '../src/engine/models/types'
 import { parseGlossary } from '../src/engine/pipeline/glossary'
+import { summarize } from '../src/engine/project/summary'
 import { asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
 
@@ -339,6 +340,38 @@ describe('proofreader and QA', () => {
     expect(r.calls('translator', 'fix').map((c) => c.unit)).toEqual(['chunk-2'])
     expect(r.calls('qa').filter((c) => c.unit === 'chunk-2').map((c) => c.task)).toEqual(['review', 'recheck'])
     expect(r.events.some((e) => e.type === 'chunk.state' && e.state === 'fixing' && e.index === 2)).toBe(true)
+  })
+
+  it('stores the QA score and model per chunk (the grade of the reviewer, else derived from the issues) and sums them up', async () => {
+    r = await rig()
+    // a data-folder prompt from before the score existed: the engine asks for it in the user message
+    const promptFile = path.join(r.dir, 'prompts', 'qa.md')
+    await fs.writeFile(promptFile, (await fs.readFile(promptFile, 'utf8')).replace(/score/gi, 'grade'), 'utf8')
+    const asked: boolean[] = []
+    r.mock.on({ role: 'qa' }, (req) => {
+      const first = segsIn(lastUser(req), 'pair')[0]!.id
+      asked.push(lastUser(req).includes('## Score'))
+      if (unitOf(req) === 'chunk-1') return '{"score":"7.26","issues":[]}' // a numeric string is fine; rounded to 1 decimal
+      return JSON.stringify({ score: null, issues: [{ segId: first, type: 'omission', severity: 'major', comment: 'A clause is missing.' }, { segId: first, type: 'glossary', severity: 'minor', comment: 'Term.' }] })
+    })
+    const id = await r.create({ enabled: { glossary: false, proofreader: false, qa: true } })
+    await r.service.start(id)
+    const chunks = await r.service.store.listChunks(id)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every(Boolean)).toBe(true)
+    expect(r.calls('qa').every((c) => c.task !== 'repair')).toBe(true) // score: null is no score, not a bad reply
+    expect(chunks[0]!.qa).toMatchObject({ score: 7.3, model: 'mock/mock-reviewer' })
+    for (const c of chunks.slice(1)) {
+      const majors = c.qa.issues.filter((i) => i.severity === 'major').length
+      expect(c.qa.score).toBe(Math.max(0, 10 - 3 * majors - (c.qa.issues.length - majors)))
+      expect(c.qa.score).toBeLessThan(10)
+    }
+    const mean = Math.round((chunks.reduce((n, c) => n + c.qa.score!, 0) / chunks.length) * 10) / 10
+    const expected = { score: mean, scored: chunks.length, models: ['mock/mock-reviewer'], independent: true }
+    expect(summarize(await r.service.store.load(id), chunks).qa).toEqual(expected)
+    expect((await r.service.detail(id)).qa).toEqual(expected)
+    expect((await r.service.detail(id)).chunks[0]!.qaScore).toBe(7.3)
   })
 
   it('flags the chunk when a major issue remains after the fix pass', async () => {

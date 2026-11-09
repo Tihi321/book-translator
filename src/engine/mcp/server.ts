@@ -4,7 +4,7 @@ import type { EngineBus } from '../bus'
 import type { CommandDispatcher } from '../dispatcher'
 import { NOTHING_LEFT } from '../service'
 import type { EngineService } from '../service'
-import { countStates } from '../project/summary'
+import { countStates, qaScoreOf } from '../project/summary'
 import type { EngineEvent, ModelsInfo, ProgressInfo } from '../../shared/protocol'
 import type { Command } from '../../shared/protocol'
 import type { ProjectFile } from '../../shared/project'
@@ -26,7 +26,7 @@ Three ways to work:
 
 2. Translator: you translate, the app's models are not used and nothing is spent. create_project with enabledAgents all false, then prepare_chunks. Optionally write a glossary (update_glossary) and a brief (set_brief) first. Then repeat get_translation_task and submit_translation until get_translation_task says nothing is left. A submission whose segment ids or inline tags (<1>, </1>, <2/>) do not match is rejected with the reason: fix it and submit again. Finish with export_project. The prompt translate_book_yourself has the full loop. This path does the first pass only: no glossary builder, proofreader or QA.
 
-3. Full pipeline, you answer the app's model calls: create_project (or update_project_settings) with clientOnly true: all four agents (glossary, translator, proofreader, qa) go on client/claude-code and the project refuses every other model, so a paid or local model can never be called by mistake; start_translation, then repeat wait_for_progress (it returns at once when a request waits: clientTasks.waiting) and get_client_task, answer as its output says, and submit_client_task. A JSON answer (glossary, QA) is checked against its schema when submitted. Nothing is spent. The client provider is in config/providers.md and enabled; the app adds it to an older data folder at its next start, and reads an edit of the file again within a few seconds (no restart). Put the project back on real models afterwards (clientOnly false and agentModels), or it waits for a client for ever. The prompt translate_with_full_pipeline has the loop.
+3. Full pipeline, you answer the app's model calls: create_project (or update_project_settings) with clientOnly true: all four agents (glossary, translator, proofreader, qa) go on client/claude-code and the project refuses every other model, so a paid or local model can never be called by mistake; start_translation, then repeat wait_for_progress (it returns at once when a request waits: clientTasks.waiting) and get_client_task, answer as its output says, and submit_client_task. A JSON answer (glossary, QA) is checked against its schema when submitted. Nothing is spent. For an independent check add reviewer {models: ["acp/antigravity/gemini-3.8-flash"]}: QA (and the proofreader with proofread true) then go to those free models (a local provider or another client model) instead of you; paid models are refused, and a reviewer that is down leaves QA to the deterministic checks. get_project and wait_for_progress show the QA score (qa). The client provider is in config/providers.md and enabled; the app adds it to an older data folder at its next start, and reads an edit of the file again within a few seconds (no restart). Put the project back on real models afterwards (clientOnly false and agentModels), or it waits for a client for ever. The prompt translate_with_full_pipeline has the loop.
 
 Visual-novel packs v2 (a folder with vn/pack.json and vn/text/<sourceLang>.json): give the folder as sourcePath. This is the preferred way to translate a visual novel: only the text catalog is translated, one segment per catalog value (title, blurb, chapter/scene titles, choices, endings, character and alias names, narration and spoken lines, puzzle names and clues), and the pack template (keys, ids, art fields, puzzle cores) is copied byte for byte. The export is a hand-off bundle <slug>.<lang>/ with edition.json, the unchanged vn/pack.json, the translated vn/text/<lang>.json and the bare catalog.json: VN Studio takes the bundle folder or catalog.json with vno_add_edition. Structural labels (SCENE:, ON SCREEN:, NARRATION:, CG:, INSERT:, SFX:, AMBIENCE:, CLUE:, EVIDENCE:, PUZZLE:, TESTIMONY:) and scene/beat ids are refused by the deterministic QA and by the export, and the export refuses a pack that changed since the project was made. localizeNames translates the catalog's character and alias name values; leave it off to keep the names.
 
@@ -58,6 +58,11 @@ const localizeNames = z
 const fixMinorIssues = z
   .boolean()
   .describe('Default false: only major QA issues go to the fixer, minor ones stay in the text (they are listed in wait_for_progress and get_chunk). true: the fixer gets the minor ones too, and the chunk is checked again.')
+  .optional()
+
+const reviewer = z
+  .object({ models: z.array(z.string()), proofread: z.boolean().optional() })
+  .describe('Client-only projects: QA (and the proofreader with proofread true) use these free models instead of client/claude-code, for example ["acp/antigravity/gemini-3.8-flash"]. Paid models are refused. models [] turns it off.')
   .optional()
 
 /** What a model list needs: not every field of the picker's entries. */
@@ -120,6 +125,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       agentModels,
       enabledAgents,
       clientOnly,
+      reviewer,
       localizeNames,
       fixMinorIssues,
       maxChunkTokens: z.number().int().min(100).optional().describe('Upper limit of a chunk in source tokens'),
@@ -132,7 +138,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         targetLanguage: a.targetLanguage,
         sourceLanguage: a.sourceLanguage,
         id: a.projectId,
-        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, localizeNames: a.localizeNames, fixMinorIssues: a.fixMinorIssues })
+        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, reviewer: a.reviewer, localizeNames: a.localizeNames, fixMinorIssues: a.fixMinorIssues })
       })
   )
   tool(
@@ -153,6 +159,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       agentModels,
       enabledAgents,
       clientOnly,
+      reviewer,
       localizeNames,
       fixMinorIssues,
       maxChunkTokens: z.number().int().min(100).optional(),
@@ -169,6 +176,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
           agentModels: a.agentModels as never,
           enabled: a.enabledAgents as never,
           clientOnly: a.clientOnly,
+          reviewer: a.reviewer,
           localizeNames: a.localizeNames,
           fixMinorIssues: a.fixMinorIssues,
           maxChunkTokens: a.maxChunkTokens,
@@ -358,7 +366,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
             text: `Translate the book "${a.file}" into ${a.targetLanguage} with Book Translator's full pipeline, answering its model calls yourself.
 
 1. list_models: client/claude-code must be there and available. If it is not, tell me: the client provider is missing or disabled in config/providers.md of the data folder (the seed has it enabled; the app reads an edit of the file within a few seconds).
-2. create_project with sourcePath "${a.file}", targetLanguage "${a.targetLanguage}" and clientOnly true (all four agents go on client/claude-code and no other model can be used, so nothing is spent). Keep the project id.
+2. create_project with sourcePath "${a.file}", targetLanguage "${a.targetLanguage}" and clientOnly true (all four agents go on client/claude-code and no other model can be used, so nothing is spent; optionally reviewer {models: ["acp/antigravity/gemini-3.8-flash"]} for an independent QA by a free model). Keep the project id.
 3. start_translation with that project id.
 4. Loop: wait_for_progress. While clientTasks.waiting is above 0, call get_client_task (project: the id), do what it says (meta.role and meta.task tell the job) and reply as its output says: JSON that matches the schema for glossary and QA, <seg id> segments with the same ids and inline tags (<1>, </1>, <2/>) for translation, proofreading and fixes. submit_client_task with taskId and text. If it comes back with accepted false, fix the problems and submit again. If it says the task is gone, take the next one.
 5. Stop when wait_for_progress says status done (if it says paused, start_translation again). Then export_project and tell me the file path.
@@ -398,6 +406,7 @@ function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotO
     total: chunks.length,
     counts,
     spend: p.spend,
+    qa: qaScoreOf(chunks),
     clientTasks: { ...clientCounts(service, p.id, role), ...(role ? { role } : {}) },
     // minor QA issues stay in the text unless the project's fixMinorIssues setting sends them to the fixer: the first ones are listed here
     minorIssues: minors.length,

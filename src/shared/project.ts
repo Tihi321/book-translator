@@ -47,6 +47,8 @@ export interface ProjectSettings {
   clientOnly?: boolean
   /** Visual-novel book folders only (default off): the character names are localized with the glossary's `person` entries, in speaker tags, `ON SCREEN:` lines and the bible. */
   localizeNames?: boolean
+  /** Client-only projects: the free models that review (QA, and the proofreader with `proofread`) instead of `client/claude-code`. */
+  reviewer?: ReviewerSettings
   /** Default off: only major QA issues go to the fixer. On: the minor ones are sent too (and the chunk is checked again). */
   fixMinorIssues?: boolean
   /** Parallel translation. `maxAtOnce: auto` follows the translator provider's concurrency; `splitSections` also runs the chunks of one section at the same time. */
@@ -55,6 +57,17 @@ export interface ProjectSettings {
 
 /** The one model a client-only project uses for every agent. */
 export const CLIENT_ONLY_MODEL = 'client/claude-code'
+
+export interface ReviewerSettings {
+  models: string[]
+  proofread?: boolean
+}
+
+/** The agents that use `reviewer.models`: none unless the project is client-only and names reviewer models. */
+export function reviewerAgents(s: Pick<ProjectSettings, 'clientOnly' | 'reviewer'>): AgentName[] {
+  if (!s.clientOnly || !s.reviewer?.models.length) return []
+  return s.reviewer.proofread === true ? ['qa', 'proofreader'] : ['qa']
+}
 
 export const isClientRef = (ref: string): boolean => ref.startsWith('client/')
 
@@ -113,7 +126,8 @@ export interface ChunkRecord {
   proofread: Record<string, string>
   /** What is exported: the latest accepted text per segment. */
   final: Record<string, string>
-  qa: { issues: QaIssue[] }
+  /** `score` is the reviewer's grade 0-10, `model` the ref that gave the verdict. */
+  qa: { issues: QaIssue[]; score?: number; model?: string }
   state: ChunkState
   model?: string
   tokens: { in: number; out: number }
@@ -122,6 +136,15 @@ export interface ChunkRecord {
   error?: string
   /** The user edited the text. */
   edited?: boolean
+}
+
+export interface QaScore {
+  /** Mean of the chunk scores, 1 decimal; null when no chunk is scored. */
+  score: number | null
+  scored: number
+  models: string[]
+  /** Scored, and no scored chunk was reviewed by the model that translated it. */
+  independent: boolean
 }
 
 export interface ProjectSummary {
@@ -138,6 +161,7 @@ export interface ProjectSummary {
   done: number
   flagged: number
   failed: number
+  qa: QaScore
   spend: Spend
 }
 

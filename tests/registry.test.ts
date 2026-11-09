@@ -543,10 +543,10 @@ describe('custom providers', () => {
     expect(defaultsSchema.parse({ groupDefaults: { paid: 'a/b' }, modelOrder: ['strata'] }).groupDefaults).toEqual({ paid: 'a/b' })
   })
 
-  it('the seed acp provider is off, local, text only (no schema) and on port 7461', async () => {
+  it('the seed acp provider is off, local, text only (no schema) and on port 8787', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)
-    expect(s.registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, custom: false, baseUrl: 'http://127.0.0.1:7461/v1', jsonSchema: false, concurrency: 2, discover: true })
+    expect(s.registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, custom: false, baseUrl: 'http://127.0.0.1:8787/v1', jsonSchema: false, concurrency: 2, discover: true })
     expect(s.registry.providers.has('custom')).toBe(false)
     expect(s.registry.getModel('client/antigravity')).toMatchObject({ context: 1000000 })
     expect(s.registry.groupOf('acp/x')).toBe('acp')

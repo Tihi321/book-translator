@@ -3,7 +3,7 @@ import { stripTags, textOutsideTags, validateTags } from '../formats/inline'
 import { vnPackSegmentProblem } from '../formats/vnPack'
 import type { DocFormat } from '../../shared/ir'
 import type { GlossaryEntry, IssueType, QaIssue, SegmentRec } from '../../shared/project'
-import { chatFn } from './env'
+import { chatFn, ClientOnlyRefusal } from './env'
 import type { AgentEnv } from './env'
 import { formatEntries, hasTarget, normalizeTerm, relevantEntries } from './glossary'
 import { chatJson } from './llm'
@@ -80,8 +80,31 @@ export function deterministicChecks(
 
 const str = z.string().optional()
 export const qaReplySchema = z.object({
+  /** The reviewer's own grade of the translation, 0 to 10. */
+  score: z.union([z.number(), z.string()]).nullish(),
   issues: z.array(z.object({ segId: z.union([z.string(), z.number()]), type: str, severity: str, comment: str, suggestion: str })).default([])
 })
+
+/** A finite number clamped to 0..10 with one decimal; anything else is no score. */
+export function parseScore(raw: unknown): number | undefined {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim().replace(',', '.')) : NaN
+  return Number.isFinite(n) ? Math.round(Math.min(10, Math.max(0, n)) * 10) / 10 : undefined
+}
+
+/** The grade when the reviewer gave none: 10 minus 3 per major and 1 per minor issue, not below 0. */
+export function issueScore(issues: readonly QaIssue[]): number {
+  return Math.max(0, 10 - 3 * issues.filter((i) => i.severity === 'major').length - issues.filter((i) => i.severity !== 'major').length)
+}
+
+export interface ReviewResult {
+  issues: QaIssue[]
+  /** Absent when the QA model gave no usable answer. */
+  score?: number
+  /** The model that gave the verdict. */
+  model?: string
+  /** Why the QA model was refused (a hand-edited reviewer a client-only project may not call); the chunk is flagged. */
+  refused?: string
+}
 
 function sameIssue(a: QaIssue, b: QaIssue): boolean {
   return a.segId === b.segId && a.type === b.type
@@ -93,15 +116,24 @@ export async function reviewChunk(
   segs: readonly SegmentRec[],
   final: Record<string, string>,
   opts: { unit: string; task?: string }
-): Promise<QaIssue[]> {
+): Promise<ReviewResult> {
   const issues = deterministicChecks(segs, final, env.glossary, { sameLanguage: env.sourceLanguage.toLowerCase() === env.targetLanguage.toLowerCase(), format: env.format })
   const ids = new Set(segs.map((s) => s.id))
   const gl = relevantEntries(env.glossary, segs.map((s) => s.text).join('\n'))
   const pairs = segs.map((s) => `<pair id="${s.id}">\n<src>${s.text}</src>\n<tgt>${final[s.id] ?? ''}</tgt>\n</pair>`).join('\n')
   const user = [gl.length > 0 ? `## Glossary\n${formatEntries(gl)}` : '', `## Segments to review\n${pairs}`].filter(Boolean).join('\n\n')
   const messages = await buildMessages(env.dataDir, 'qa', { sourceLanguage: env.sourceLanguage, targetLanguage: env.targetLanguage, brief: env.brief }, user)
+  // a prompt file from before the score existed: ask for it in the user message
+  if (!messages.some((m) => m.content.includes('"score"'))) {
+    const last = messages[messages.length - 1]!
+    last.content += ['', '', '## Score', 'Also put "score" (your overall grade of this translation, 0 = unusable to 10 = publishable as is) in the JSON object.'].join('\n')
+  }
+  let score: number | undefined
+  let model: string | undefined
   try {
-    const { value } = await chatJson(chatFn(env, 'qa', opts.task ?? 'review', opts.unit), messages, qaReplySchema, { temperature: 0.1, signal: env.signal })
+    const { value, reply } = await chatJson(chatFn(env, 'qa', opts.task ?? 'review', opts.unit), messages, qaReplySchema, { temperature: 0.1, signal: env.signal })
+    score = parseScore(value.score)
+    model = reply.model
     for (const i of value.issues) {
       const segId = String(i.segId).trim()
       if (!ids.has(segId)) continue
@@ -113,8 +145,9 @@ export async function reviewChunk(
   } catch (err) {
     if (env.signal?.aborted || (err as Error).name === 'AbortError') throw err
     env.log('warn', `${opts.unit}: QA model gave no usable answer (${(err as Error).message}); deterministic checks only`)
+    return { issues, ...(err instanceof ClientOnlyRefusal ? { refused: err.message } : {}) }
   }
-  return issues
+  return { issues, score: score ?? issueScore(issues), ...(model ? { model } : {}) }
 }
 
 /**
