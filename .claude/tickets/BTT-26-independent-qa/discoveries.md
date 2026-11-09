@@ -1,0 +1,8 @@
+- 2026-11-09 director-checker: statline QA score updates only when the project status changes, not per chunk mid-run (src/renderer/store/store.ts:179; src/engine/pipeline/runner.ts:483) - suggested: update the score on each chunk.state event
+- 2026-11-09 director-checker: a retried or refused chunk keeps its old tile QA score (src/renderer/store/store.ts:198) - suggested: reset the chunk qaScore when the chunk is retried or refused
+- 2026-11-09 director-checker: the repair assertion in the pipeline test can never fail (tests/pipeline.test.ts:363) - suggested: assert on the repaired output
+- 2026-11-09 director-checker: estimate and prepareChunks resolve models non-exact; no spend happens (src/engine/service.ts:228/241; src/engine/pipeline/runner.ts:207) - suggested: resolve with exact true for client-only projects
+- 2026-11-09 director-checker: a refused proofreader fails the chunk with a generic client-only message, unlike a refused QA which is flagged; the README is partly wrong for this case (README.md:142) - suggested: flag the chunk like QA when the proofreader is refused, and correct the README
+- 2026-11-09 director-checker: info: engine status shows failure reasons only for failed chunks (src/engine/cli.ts:216) - suggested: show reasons for flagged chunks too
+- 2026-11-09 director-checker: info: a providers.md alias named client/... could bypass isClientRef, which predates this ticket (src/engine/models/registry.ts) - suggested: refuse alias names that start with client/
+- 2026-11-09 director-checker: info: no test asserts that another client/x reviewer is allowed at call time (tests/clientOnly.test.ts) - suggested: add one test for an allowed client reviewer

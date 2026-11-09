@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: REQ-0005
 repos: [book-translator]
 branch: BTT-26_independent-qa
