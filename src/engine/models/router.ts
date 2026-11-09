@@ -13,6 +13,8 @@ export interface RoutedRequest {
   meta?: RequestMeta
   /** Extra JSON fields merged into the request body, on top of the model's own `extra_body`. */
   extraBody?: Record<string, unknown>
+  /** Use the list exactly as given: the registry's shared fallback list adds no rows. */
+  exact?: boolean
 }
 
 /** A model reference: `provider/model` or an already resolved model. */
@@ -88,13 +90,13 @@ export class ModelRouter {
    * list is sorted by the group order. Unknown, embedding and unavailable models are dropped, and so are servers that are down
    * and providers whose daily limit is used up, unless nothing else is left.
    */
-  resolve(refs: readonly ModelRef[]): ModelInfo[] {
+  resolve(refs: readonly ModelRef[], opts: { exact?: boolean } = {}): ModelInfo[] {
     const strs = refs.map((r) => (typeof r === 'string' ? r : r.ref))
     const objs = new Map<string, ModelInfo>()
     for (const r of refs) if (typeof r !== 'string') objs.set(r.ref, r)
     const seen = new Set<string>()
     let list: ModelInfo[] = []
-    for (const alias of this.registry.orderRefs(strs)) {
+    for (const alias of opts.exact ? strs : this.registry.orderRefs(strs)) {
       const ref = this.registry.resolve(alias)
       if (seen.has(ref)) continue
       seen.add(ref)
@@ -133,7 +135,7 @@ export class ModelRouter {
    * After a failed attempt the consumer sees a new `attempt` event and should drop the text so far.
    */
   async *chat(refs: readonly ModelRef[], req: RoutedRequest, held: ReadonlySet<string> = new Set()): AsyncGenerator<RoutedEvent, void, void> {
-    const models = this.resolve(refs)
+    const models = this.resolve(refs, { exact: req.exact })
     if (models.length === 0) throw new ProviderError(`no available model in: ${refs.map((r) => (typeof r === 'string' ? r : r.ref)).join(', ') || '(empty list)'}`)
     let lastError: unknown
     let attempts = 0

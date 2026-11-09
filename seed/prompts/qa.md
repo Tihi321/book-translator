@@ -13,8 +13,9 @@ Look for:
 Severity: "major" only when a reader would be misled, text is missing or added, tags are broken or text is untranslated. Style preferences and small wording issues are "minor" or not worth reporting. Do not report a problem you are not sure about.
 
 Reply with one JSON object and nothing else:
-{"issues":[{"segId":"the pair id","type":"omission|addition|mistranslation|glossary|tags|untranslated","severity":"minor|major","comment":"what is wrong, short","suggestion":"a corrected {{targetLanguage}} text or wording, if you can"}]}
-If everything is fine, reply {"issues":[]}.
+{"score":8,"issues":[{"segId":"the pair id","type":"omission|addition|mistranslation|glossary|tags|untranslated","severity":"minor|major","comment":"what is wrong, short","suggestion":"a corrected {{targetLanguage}} text or wording, if you can"}]}
+`score` is your overall grade of the translation of these segments, from 0 (unusable) to 10 (publishable as is).
+If everything is fine, reply {"score":10,"issues":[]}.
 
 ## Book brief
 {{brief}}

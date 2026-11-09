@@ -285,7 +285,7 @@ describe('seed migration of acp and antigravity (BTT-21)', () => {
     const ids = await providerIds(dir)
     expect(ids.indexOf('acp')).toBe(ids.indexOf('mock') - 1)
     const parsed = parseMdWith(text, providersSchema, file)
-    expect(parsed.data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: false, local: true, base_url: 'http://127.0.0.1:7461/v1' })
+    expect(parsed.data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: false, local: true, base_url: 'http://127.0.0.1:8787/v1' })
     expect(parsed.data.providers.find((p) => p.id === 'client')!.models.map((m) => m.id)).toEqual(['claude-code', 'antigravity'])
     const registry = new ModelRegistry(dir, { keys: () => 'k' })
     await registry.load()
@@ -325,5 +325,35 @@ describe('seed migration of acp and antigravity (BTT-21)', () => {
     expect((await initDataFolder(dir, SEED_DIR)).migrated).toEqual([])
     expect(await fs.readFile(file, 'utf8')).toBe(before)
     expect(JSON.parse(await fs.readFile(path.join(dir, 'config', 'seed-state.json'), 'utf8')).models).toEqual(['client/antigravity'])
+  })
+
+  it('moves the acp port from the old seed value to 8787 once, and leaves a url of its own alone', async () => {
+    const stateOf = async (dir: string) => JSON.parse(await fs.readFile(path.join(dir, 'config', 'seed-state.json'), 'utf8')) as { migrations?: string[] }
+    /** A folder as the version before had it: acp on `url`, and the port migration not run yet. */
+    const oldFolder = async (url: string) => {
+      const { dir, cleanup } = await tempDir()
+      cleanups.push(cleanup)
+      await initDataFolder(dir, SEED_DIR)
+      const file = path.join(dir, 'config', 'providers.md')
+      const text = (await fs.readFile(file, 'utf8')).replace('http://127.0.0.1:8787/v1', url).replace('  - id: acp', '  # my acp note\n  - id: acp')
+      await fs.writeFile(file, text, 'utf8')
+      const state = await stateOf(dir)
+      state.migrations = (state.migrations ?? []).filter((m) => m !== 'acp-port-8787-v1')
+      await fs.writeFile(path.join(dir, 'config', 'seed-state.json'), JSON.stringify(state), 'utf8')
+      return { dir, file, text }
+    }
+    const old = await oldFolder('http://127.0.0.1:7461/v1')
+    expect((await initDataFolder(old.dir, SEED_DIR)).migrated).toEqual(['acp-port-8787-v1'])
+    const moved = await fs.readFile(old.file, 'utf8')
+    expect(moved).toBe(old.text.replace('http://127.0.0.1:7461/v1', 'http://127.0.0.1:8787/v1'))
+    expect(moved).toContain('# my acp note')
+    expect((await stateOf(old.dir)).migrations).toContain('acp-port-8787-v1')
+    expect((await initDataFolder(old.dir, SEED_DIR)).migrated).toEqual([])
+    expect(await fs.readFile(old.file, 'utf8')).toBe(moved)
+
+    const own = await oldFolder('http://127.0.0.1:9000/v1')
+    expect((await initDataFolder(own.dir, SEED_DIR)).migrated).toEqual([])
+    expect(await fs.readFile(own.file, 'utf8')).toBe(own.text)
+    expect((await stateOf(own.dir)).migrations).toContain('acp-port-8787-v1')
   })
 })

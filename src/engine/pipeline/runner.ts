@@ -7,7 +7,7 @@ import { isAbortError } from '../models/types'
 import { emptyChunk } from '../project/store'
 import type { ProjectStore } from '../project/store'
 import { countStates, summarize } from '../project/summary'
-import { DEFAULT_PARALLEL, IN_PROGRESS_STATES, isClientRef } from '../../shared/project'
+import { DEFAULT_PARALLEL, IN_PROGRESS_STATES, isClientRef, reviewerAgents } from '../../shared/project'
 import type { DocumentIR } from '../../shared/ir'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
@@ -355,16 +355,18 @@ export class ProjectRunner {
 
     if (settings.enabled.qa) {
       await this.setState(chunk, 'reviewing')
-      let issues = await reviewChunk(env, segs, chunk.final, { unit })
+      let review = await reviewChunk(env, segs, chunk.final, { unit })
+      let issues = review.issues
       const bad = new Set((settings.fixMinorIssues === true ? issues : issues.filter(isMajor)).map((i) => i.segId))
       if (bad.size > 0) {
         await this.setState(chunk, 'fixing')
         const fixed = await fixChunk(env, segs, chunk.final, issues.filter((i) => bad.has(i.segId)), { unit })
         chunk.final = { ...chunk.final, ...fixed }
         await this.setState(chunk, 'reviewing')
-        issues = await reviewChunk(env, segs, chunk.final, { unit, task: 'recheck' })
+        review = await reviewChunk(env, segs, chunk.final, { unit, task: 'recheck' })
+        issues = review.issues
       }
-      chunk.qa.issues = issues
+      chunk.qa = { issues, ...(review.score !== undefined ? { score: review.score } : {}), ...(review.model ? { model: review.model } : {}) }
     }
 
     await this.setState(chunk, chunk.qa.issues.some(isMajor) ? 'flagged' : 'done')
@@ -394,13 +396,16 @@ export class ProjectRunner {
       const base = this.project.settings.agentModels[agent] ?? []
       const refs = agent === 'translator' && this.translatorModel ? [this.translatorModel, ...base.filter((r) => r !== this.translatorModel)] : base
       // the one place every model call passes: a client-only project never reaches a model that is not the client's
-      if (this.project.settings.clientOnly) {
-        const outside = refs.filter((r) => !isClientRef(r))
+      const clientOnly = this.project.settings.clientOnly === true
+      if (clientOnly) {
+        // a reviewer's free models (local providers) are allowed for the agents the reviewer setting names, nothing else
+        const reviewerRefs = reviewerAgents(this.project.settings).includes(agent) ? (this.project.settings.reviewer?.models ?? []) : []
+        const outside = refs.filter((r) => !isClientRef(r) && !(reviewerRefs.includes(r) && this.deps.registry.isLocalRef(r)))
         if (outside.length) throw new Error(`project is client-only: the ${agent} agent may not use ${outside.join(', ')} (only client/ models). Turn clientOnly off with update_project_settings to use it.`)
       }
       const r = await this.deps.router.complete(
         refs,
-        { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit, job: [this.projectId, req.unit ?? 'run', req.task ?? 'call'].join('--') } },
+        { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, exact: clientOnly, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit, job: [this.projectId, req.unit ?? 'run', req.task ?? 'call'].join('--') } },
         {
           onDelta: (t) => {
             hooks?.onDelta?.(t)

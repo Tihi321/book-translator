@@ -11,8 +11,8 @@ import { ProjectSettingsTab } from './ProjectSettingsTab'
 
 type Tab = 'chunks' | 'glossary' | 'settings' | 'log'
 
-const Tile = memo(function Tile({ index, state, issues, selected, onOpen }: { index: number; state: ChunkState; issues: number; selected: boolean; onOpen: (i: number) => void }) {
-  return <button className={`tile ${state}${issues > 0 ? ' has-issues' : ''}${selected ? ' selected' : ''}`} title={`chunk ${index}: ${STATE_LABEL[state]}${issues > 0 ? `, ${issues} issue(s)` : ''}`} onClick={() => onOpen(index)} />
+const Tile = memo(function Tile({ index, state, issues, qaScore, selected, onOpen }: { index: number; state: ChunkState; issues: number; qaScore?: number; selected: boolean; onOpen: (i: number) => void }) {
+  return <button className={`tile ${state}${issues > 0 ? ' has-issues' : ''}${selected ? ' selected' : ''}`} title={`chunk ${index}: ${STATE_LABEL[state]}${issues > 0 ? `, ${issues} issue(s)` : ''}${qaScore !== undefined ? `, QA ${qaScore}` : ''}`} onClick={() => onOpen(index)} />
 })
 
 function Sections({ detail, selected, onOpen }: { detail: ProjectDetail; selected: number | null; onOpen: (i: number) => void }) {
@@ -39,7 +39,7 @@ function Sections({ detail, selected, onOpen }: { detail: ProjectDetail; selecte
           </div>
           <div className="tiles">
             {r.chunks.map((c) => (
-              <Tile key={c.index} index={c.index} state={c.state} issues={c.issues} selected={selected === c.index} onOpen={onOpen} />
+              <Tile key={c.index} index={c.index} state={c.state} issues={c.issues} qaScore={c.qaScore} selected={selected === c.index} onOpen={onOpen} />
             ))}
           </div>
         </div>
@@ -195,6 +195,11 @@ export function ProjectView({ id }: { id: string }) {
           <span><b data-testid="done-count">{prog.done}</b>/{prog.total} chunks</span>
           <span>tokens <b>{fmtCount(prog.tokensIn)}</b> in / <b>{fmtCount(prog.tokensOut)}</b> out</span>
           <span>cost <b>{fmtCost(prog.costUsd)}</b></span>
+          {detail.qa.scored > 0 && (
+            <span title={`scored ${detail.qa.scored} of ${prog.total} chunks by ${detail.qa.models.join(', ') || 'unknown model'}${detail.qa.independent ? '' : ' (self-reviewed)'}`}>
+              QA <b data-testid="qa-score">{detail.qa.score}</b>/10
+            </span>
+          )}
           <span>ETA <b>{prog.etaSec === null ? (running ? 'calculating' : '-') : fmtDuration(prog.etaSec)}</b></span>
           {tps && <span>speed <b>{tps}</b> tok/s</span>}
         </div>

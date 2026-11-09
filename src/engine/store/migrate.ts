@@ -323,3 +323,38 @@ export async function migrateStrataLoaded(dataDir: string): Promise<MigrationRes
 export function seedHasProviders(seedDir: string): boolean {
   return existsSync(path.join(seedDir, 'config', 'providers.md'))
 }
+
+/** The id `migrateAcpPort` records in `migrations` of seed-state.json. */
+export const ACP_PORT_MIGRATION = 'acp-port-8787-v1'
+const ACP_OLD_URL = 'http://127.0.0.1:7461/v1'
+const ACP_NEW_URL = 'http://127.0.0.1:8787/v1'
+
+/**
+ * Once per data folder (`migrations` of seed-state.json): the `acp` provider's `base_url` moves from the old seed value
+ * (`http://127.0.0.1:7461/v1`) to the proxy's port 8787. Only that exact value is rewritten, in place (comments and the rest of the
+ * file stay); any other URL, or no `acp` entry, changes nothing but is recorded. A providers.md that can't be parsed is left alone and
+ * not recorded. Returns `acp-port-8787-v1` in `added` when it changed the file.
+ */
+export async function migrateAcpPort(dataDir: string): Promise<MigrationResult> {
+  const result: MigrationResult = { added: [], warnings: [] }
+  const stateFile = path.join(dataDir, SEED_STATE_FILE)
+  const state = await readStateFile(stateFile)
+  if (state.migrations?.includes(ACP_PORT_MIGRATION)) return result
+  const file = path.join(dataDir, 'config', 'providers.md')
+  const mine = parseProviders(await fs.readFile(file, 'utf8').catch(() => ''), 'config/providers.md')
+  if (typeof mine === 'string') return result
+  const acp = mine.providers.items.find((item) => idOf(item) === 'acp')
+  const url = isMap(acp) ? (acp.get('base_url', true) as Node | undefined) : undefined
+  if (url?.range && isMap(acp) && acp.get('base_url') === ACP_OLD_URL) {
+    const [start, end] = url.range
+    const old = mine.front.slice(start, end)
+    const at = old.indexOf(ACP_OLD_URL)
+    if (at !== -1) {
+      const front = mine.front.slice(0, start + at) + ACP_NEW_URL + mine.front.slice(start + at + ACP_OLD_URL.length)
+      await atomicWrite(file, mine.text.slice(0, mine.frontStart) + front + mine.text.slice(mine.frontStart + mine.front.length))
+      result.added.push(ACP_PORT_MIGRATION)
+    }
+  }
+  if (state.providers) await writeState(stateFile, state.providers, undefined, [...(state.migrations ?? []), ACP_PORT_MIGRATION])
+  return result
+}

@@ -1,5 +1,5 @@
 import type { DocFormat } from './ir'
-import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from './project'
+import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary, QaScore } from './project'
 import type { AgentName } from './agents'
 import type { DefaultsConfig } from './schemas'
 import type { ClientTaskSummary } from '../engine/models/client'
@@ -148,6 +148,8 @@ export interface ChunkBrief {
   state: ChunkState
   issues: number
   majorIssues: number
+  /** The QA grade of the chunk, 0 to 10. */
+  qaScore?: number
   model?: string
   tokensIn: number
   tokensOut: number
@@ -160,6 +162,7 @@ export interface ProjectDetail {
   chunks: ChunkBrief[]
   sections: { id: string; title?: string }[]
   glossary: GlossaryEntry[]
+  qa: QaScore
   brief: string
   /** The last lines of log.md. */
   log: string

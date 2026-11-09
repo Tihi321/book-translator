@@ -45,7 +45,7 @@ export interface AgentEnv {
 export function chatFn(env: Pick<AgentEnv, 'call'>, agent: AgentName, task: string, unit?: string): ChatFn {
   return async (req) => {
     const r = await env.call(agent, { ...req, task, unit })
-    return { text: r.text, costUsd: r.costUsd }
+    return { text: r.text, costUsd: r.costUsd, model: r.model }
   }
 }
 

@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { migrateProviders, migrateStrataLoaded, seedHasProviders } from './migrate'
+import { migrateAcpPort, migrateProviders, migrateStrataLoaded, seedHasProviders } from './migrate'
 
 /** Folders created inside the data folder. */
 export const DATA_LAYOUT = ['config', 'prompts', 'projects'] as const
@@ -84,8 +84,9 @@ export async function initDataFolder(dataDir: string, seedDir: string | undefine
     if (seedHasProviders(seedDir)) {
       const m = await migrateProviders(dataDir, seedDir, { fresh: result.copied.includes('config/providers.md') })
       const s = await migrateStrataLoaded(dataDir)
-      result.migrated = [...m.added, ...s.added]
-      result.warnings = [...m.warnings, ...s.warnings]
+      const a = await migrateAcpPort(dataDir)
+      result.migrated = [...m.added, ...s.added, ...a.added]
+      result.warnings = [...m.warnings, ...s.warnings, ...a.warnings]
     }
   }
   for (const rel of DATA_LAYOUT) {

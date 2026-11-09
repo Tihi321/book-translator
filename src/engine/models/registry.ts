@@ -595,6 +595,11 @@ export class ModelRegistry {
     return this.models.get(ref) ?? this.models.get(this.aliasRefs.get(ref) ?? '')
   }
 
+  /** The ref's provider is local (or a client): a model that costs nothing. A provider that providers.md does not have is not. */
+  isLocalRef(ref: string): boolean {
+    return this.providers.get(this.resolve(ref).split('/')[0]!)?.local === true
+  }
+
   /** The context window to plan with: LM Studio's loaded context, else `context` of the model or its provider in providers.md (200000 for a `client` provider), else 8192. */
   contextLength(ref: string): number {
     const m = this.getModel(ref)

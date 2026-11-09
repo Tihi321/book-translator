@@ -50,7 +50,7 @@ export function CustomProviderForm({ provider, onDone }: Props) {
         <label>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ACP proxy (home)" data-testid="provider-form-name" />
         <label>Base URL</label>
-        <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:7461/v1" data-testid="provider-form-url" />
+        <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:8787/v1" data-testid="provider-form-url" />
         <label>API key</label>
         <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={provider?.hasKey ? 'key set (type to replace it)' : 'optional'} data-testid="provider-form-key" />
         <label>Free (local)</label>

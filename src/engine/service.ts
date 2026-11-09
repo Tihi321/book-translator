@@ -12,14 +12,14 @@ import type { ModelRegistry } from './models/registry'
 import { budgetFor, planProjectChunks, ProjectRunner, workerCount } from './pipeline/runner'
 import type { RunResult } from './pipeline/runner'
 import { mergeSettings, ProjectStore, projectIdFor } from './project/store'
-import { countStates, summarize } from './project/summary'
+import { countStates, qaScoreOf, summarize } from './project/summary'
 import { buildMessages } from './pipeline/prompts'
 import { characterLabels, ensureNameEntries, KEEP_NAME_NOTE, localizesNames, nameMap, sharedTargets } from './pipeline/names'
 import { describeParse, parseSegments } from './pipeline/segments'
 import type { SegmentParse } from './pipeline/segments'
 import { fitEdges, prevTail, tagIssue, translatorUserContent } from './pipeline/translator'
 import type { DocumentIR, WriteOptions } from '../shared/ir'
-import { IN_PROGRESS_STATES } from '../shared/project'
+import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
 import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, SubmitResult, TranslationTask } from '../shared/protocol'
 import { AGENTS } from '../shared/schemas'
@@ -58,6 +58,7 @@ const chunkBrief = (c: ChunkRecord): ChunkBrief => ({
   state: c.state,
   issues: c.qa.issues.length,
   majorIssues: c.qa.issues.filter((i) => i.severity === 'major').length,
+  ...(typeof c.qa.score === 'number' ? { qaScore: c.qa.score } : {}),
   model: c.model,
   tokensIn: c.tokens.in,
   tokensOut: c.tokens.out,
@@ -152,16 +153,28 @@ export class EngineService {
     }
   }
 
+  /** Refuses a reviewer that is not free: only a `client/` model (not the one that translates) or a model of a local provider. */
+  checkReviewer(settings: Pick<ProjectSettings, 'reviewer'>): void {
+    for (const ref of settings.reviewer?.models ?? []) {
+      if (!ref.includes('/')) throw new Error(`reviewer model ${ref} must be provider/model`)
+      if (ref === CLIENT_ONLY_MODEL) throw new Error('the reviewer must be a different model than the one that translates (client/claude-code)')
+      if (isClientRef(ref) || this.registry.isLocalRef(ref)) continue
+      throw new Error(`reviewer model ${ref} is not free (only local providers or client models; a client-only project spends nothing). For a paid QA model turn clientOnly off and set agentModels.`)
+    }
+  }
+
   /** Creates the project (project.json, source.json ...). The same file and language give the same project: its settings are updated. */
   async createProject(req: CreateProjectRequest): Promise<ProjectSummary> {
     const sourcePath = path.resolve(req.sourcePath)
     const hash = await hashSource(sourcePath)
     const base = await this.defaultSettings(req.targetLanguage, req.sourceLanguage)
     const settings = mergeSettings(base, req.settings)
+    this.checkReviewer(settings)
     const id = req.id ?? projectIdFor(sourcePath, settings.targetLanguageCode ?? settings.targetLanguage, hash)
     if (await this.store.exists(id)) {
       const existing = await this.store.load(id)
       existing.settings = mergeSettings(existing.settings, req.settings)
+      this.checkReviewer(existing.settings)
       await this.store.save(existing)
       return summarize(existing, await this.store.listChunks(id))
     }
@@ -256,6 +269,7 @@ export class EngineService {
       project,
       chunks: chunks.map(chunkBrief),
       sections: ir.sections.map((s) => ({ id: s.id, title: s.title })),
+      qa: qaScoreOf(chunks),
       glossary,
       brief,
       log,

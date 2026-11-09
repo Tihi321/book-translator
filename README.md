@@ -7,7 +7,7 @@ Books are larger than any model's context, so the text is split into chunks that
 1. **Glossary builder** reads the whole book once and writes a term table (names, places, terms, gender of characters) and a book brief (genre, tone, register, narrator, form of address).
 2. **Translator** translates chunk by chunk with the glossary terms that occur in the chunk and the tail of the previous chunk.
 3. **Proofreader** (optional) polishes the target-language text.
-4. **QA reviewer** (optional) compares source and result, finds omissions, additions and mistranslations, and triggers one fix pass for serious ones. Cheap deterministic checks (length ratio, untranslated text, glossary terms, inline tags) run first.
+4. **QA reviewer** (optional) compares source and result, finds omissions, additions and mistranslations, and triggers one fix pass for serious ones. It also grades each chunk 0 to 10 (`qa.score`); the project score is the mean. Cheap deterministic checks (length ratio, untranslated text, glossary terms, inline tags) run first.
 
 ## Features
 
@@ -46,7 +46,7 @@ Any OpenAI-compatible server (LM Studio on another port, llama.cpp, vLLM, the AC
 
 - **Free** means `local: true`: no key needed, nothing counted as money. Unticked, the provider is paid and its models need a price (**Detect models** lists them with the prices the server gives; **Add a model by its id** asks for both prices).
 - A provider you add is its own group in "Default models for a new translation": its row is labelled with its name, can be moved in the fallback order, and its default model can stand in as an alias (`acp-home`) in any model list. The API row (`paid`) still means every paid provider that is not a custom one. Groups in `defaults.json` (`groupDefaults`, `modelOrder`) are open names now: `paid`, a provider id.
-- The seed has an `acp` entry for the ACP proxy (`http://127.0.0.1:7461/v1`), off until you start the proxy and enable it. Start the proxy with `PROXY_IGNORE_SAMPLING=1` (the app sends `temperature`, `max_tokens` and `stream_options`); it is text only, and `PROXY_TIMEOUT_MS` must cover your longest request. Driving Antigravity this way may break its terms of use: see the creative-hub ROADMAP section "Antigravity models and the ACP proxy". An existing data folder gets `acp` at its next start (once; delete it and it stays gone). The old disabled `custom` placeholder is not in the seed any more; a data folder that has it keeps it and it works like any other provider.
+- The seed has an `acp` entry for the ACP proxy (`http://127.0.0.1:8787/v1`), off until you start the proxy and enable it. Start the proxy with `PROXY_IGNORE_SAMPLING=1` (the app sends `temperature`, `max_tokens` and `stream_options`); it is text only, and `PROXY_TIMEOUT_MS` must cover your longest request. Driving Antigravity this way may break its terms of use: see the creative-hub ROADMAP section "Antigravity models and the ACP proxy". An existing data folder gets `acp` at its next start (once; delete it and it stays gone). The old disabled `custom` placeholder is not in the seed any more; a data folder that has it keeps it and it works like any other provider.
 
 API keys are never written to files. A key is looked up in an environment variable named in `api_key_env` (for example `DEEPSEEK_API_KEY`), then in the Windows Credential Manager (service `book-translator`). Set one of these ways:
 
@@ -120,7 +120,7 @@ Two ways to work:
 Tools:
 
 - Info: `get_info`, `list_models`, `get_defaults`, `list_languages`
-- Projects: `list_projects`, `analyze_file`, `create_project`, `get_project`, `update_project_settings`
+- Projects: `list_projects`, `analyze_file`, `create_project`, `get_project`, `update_project_settings` (`get_project` and `wait_for_progress` show `qa`: the mean QA score, how many chunks are scored, by which models, and whether the review was independent of the translator)
 - Running: `start_translation`, `pause_translation`, `cancel_translation`, `wait_for_progress`
 - Review: `get_chunk`, `edit_chunk`, `retry_chunk`, `update_glossary`, `set_brief`, `export_project`
 - Translator role: `prepare_chunks`, `get_translation_task`, `submit_translation`
@@ -139,7 +139,7 @@ Safety:
 The `client` provider (model `client/claude-code`) turns the app's model calls into tasks for an MCP client. Nothing is spent on models.
 
 1. The provider is already there. A new data folder has it enabled in `config/providers.md`, and an existing folder gets it added at the next start (see [Data folder](#data-folder)). Its model plans with a context of 200000 tokens: set `context` on the model or on the provider to change that.
-2. For a Claude-only translation set `clientOnly: true` in `create_project` or `update_project_settings`: all four agents (glossary, translator, proofreader, qa) go on `client/claude-code` (any `agentModels` given with it is ignored) and the project refuses every other model ref, also one from old settings, the defaults or `retry_chunk {model}`, with an error instead of calling it. `clientOnly: false` turns it off; the agents stay on `client/claude-code` until you set `agentModels`. `get_project` shows `clientOnly`. Or choose single agents with `update_project_settings`, for example `agentModels: { translator: ["client/claude-code"], glossary: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }`. An agent left on another model keeps using that model.
+2. For a Claude-only translation set `clientOnly: true` in `create_project` or `update_project_settings`: all four agents (glossary, translator, proofreader, qa) go on `client/claude-code` (any `agentModels` given with it is ignored) and the project refuses every other model ref, also one from old settings, the defaults or `retry_chunk {model}`, with an error instead of calling it. `clientOnly: false` turns it off; the agents stay on `client/claude-code` until you set `agentModels`. `get_project` shows `clientOnly`. For an independent check give `reviewer: { models: ["acp/antigravity/gemini-3.8-flash"], proofread: false }` (in `create_project` or `update_project_settings`): QA (and the proofreader with `proofread: true`) then use those models instead of `client/claude-code`, while the glossary, translator and fix pass stay on the client. Reviewer models must be free: another `client/` model, or a model of a local provider (the `acp` proxy counts); a paid model or `client/claude-code` is refused when saved and again at call time. A client-only project uses its model lists exactly as given (no shared fallback rows), so a reviewer that is down leaves QA to the deterministic checks, with a warning in the log, and never falls back to a paid model. `reviewer: { models: [] }` turns it off. Or choose single agents with `update_project_settings`, for example `agentModels: { translator: ["client/claude-code"], glossary: ["client/claude-code"], proofreader: ["client/claude-code"], qa: ["client/claude-code"] }`. An agent left on another model keeps using that model.
 3. `start_translation`, then loop: `wait_for_progress` (returns at once when a task waits, with `clientTasks: { waiting, leased }`; `role` counts only that role's tasks, so a worker for one role waits for its own work; it also lists the minor QA issues), `get_client_task` (leases the oldest waiting task for 10 minutes, `leaseMinutes` up to 60; filter by `role`, `project`, `task`), write the answer as `output` says, `submit_client_task`. A JSON answer (glossary, QA) is checked against the task's schema when you submit: if it fails you get `problems` and the task stays leased. A refused answer starts the lease again. A task whose lease runs out goes back to the queue; `release_client_task` gives one back, or (with `project` and/or `role`, no `taskId`) every leased task that matches: call it at the start of a session to free what an earlier client that stopped still holds. Minor QA issues stay in the text unless the project setting `fixMinorIssues` (`update_project_settings`, "Also fix minor QA issues" in the settings tab) sends them to the fixer too. Several clients or subagents can each take a task.
 
 `get_client_task` returns `system` (the rules) and `user` (the request). A normal task has only those two. `messages` (the whole conversation, in order) comes only for a request with more than one turn, such as a JSON repair round after a bad answer: answer its last user message.
@@ -201,7 +201,7 @@ projects/<id>/
   project.json          source, languages, models per agent, status, spend
   source.json           the parsed document
   brief.md, glossary.md book brief and term table (editable)
-  chunks/0001.json      source, translation, proofread text, QA issues, state per chunk
+  chunks/0001.json      source, translation, proofread text, QA issues and score, state per chunk
   output/               exported documents
   log.md
 ```
