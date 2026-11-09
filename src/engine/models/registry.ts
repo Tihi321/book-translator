@@ -252,7 +252,14 @@ export class ModelRegistry {
     const models = new Map<string, ModelInfo>()
     const aliasRefs = new Map<string, string>()
     const warnings: string[] = []
+    let realClient = false
     for (const p of prov.data.providers) {
+      // `client` is the id a client-only project trusts as free: only the first provider of kind client may carry it
+      if (p.id === 'client' && (p.kind !== 'client' || realClient)) {
+        warnings.push(`providers.md: provider "client" skipped: ${p.kind !== 'client' ? `its kind is ${p.kind}` : 'it is a duplicate'}; the id client is reserved for the one provider of kind client`)
+        continue
+      }
+      if (p.id === 'client') realClient = true
       // limits set in the Models dialog (config/models.md) win over providers.md; 0 there means no limit
       const set = choices.limits[p.id] ?? {}
       const limit = (v: number | undefined, fallback: number | undefined) => (v === undefined ? fallback : v > 0 ? v : undefined)
@@ -309,7 +316,7 @@ export class ModelRegistry {
           this.applyServed(row)
           for (const a of m.aliases) {
             // `client/...` is the namespace a client-only project trusts as free: an alias there could stand for a paid model
-            if (a.startsWith('client/') || (p.id === 'client' && p.kind !== 'client')) {
+            if (a.startsWith('client/')) {
               warnings.push(`providers.md: alias "${p.id}/${a}" refused: names starting with client/ are reserved for the client provider`)
               continue
             }

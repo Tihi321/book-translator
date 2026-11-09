@@ -15,3 +15,10 @@ Branch `BTT-27_pre-run-fixes` (from `master` d4129fa), repo book-translator. Req
 
 ### Verification
 `yarn vitest run`: 25 files, 373 tests pass. `yarn typecheck` and `yarn lint`: clean. The estimate test fails with the service.ts change reverted.
+
+### Polish round 1: `client` id hole in the $0 guard
+- `src/engine/models/registry.ts`: `load` skips (warning in `registry.warnings` and `console.warn`) a provider with id `client` whose kind is not `client`, and any `client` provider after the first real one. So a hand-edited `id: client, kind: openai-compat` can no longer make `client/<model>` pass `isClientRef`. The old `p.id === 'client' && p.kind !== 'client'` alias condition was dead after this and is removed.
+- `src/engine/serve.ts`: `registry.warnings` are logged to the engine log at start, next to the data-folder warnings.
+- `README.md`: the guard line mentions the skipped provider.
+- Test: `registry.test.ts` x1 (fake `client` before the real one and a duplicate after it: both skipped with a warning, `client/x` does not resolve, `client/claude-code` stays kind client). It fails with the registry change reverted.
+- `yarn vitest run`: 25 files, 374 tests pass; `yarn typecheck`, `yarn lint` clean.
