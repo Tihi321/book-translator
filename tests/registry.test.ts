@@ -433,6 +433,31 @@ describe('group aliases and order', () => {
     expect(s.registry.resolve('openai/gpt-5')).toBe('openai/gpt-5')
   })
 
+  it('refuses a providers.md alias that starts with client/, with a warning', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    const file = path.join(s.dir, 'config', 'providers.md')
+    await fs.writeFile(file, (await fs.readFile(file, 'utf8')).replace('aliases: [qwen3.8-flash-next]', 'aliases: [client/claude-code]'), 'utf8')
+    await s.registry.load()
+    expect(s.registry.warnings).toEqual([expect.stringMatching(/client\/claude-code.*refused/)])
+    expect(s.registry.resolve('strata/client/claude-code')).toBe('strata/client/claude-code')
+    expect(s.registry.resolve('client/claude-code')).toBe('client/claude-code')
+  })
+
+  it('skips a provider named client that is not the real client provider, with a warning', async () => {
+    const s = await seededRegistry()
+    cleanups.push(s.cleanup)
+    const file = path.join(s.dir, 'config', 'providers.md')
+    const entry = (kind: string) => `  - id: client\n    kind: ${kind}\n    base_url: https://paid.example/v1\n    models:\n      - id: x\n`
+    // a fake right before the real client provider, a duplicate right after the seed's last provider
+    const text = (await fs.readFile(file, 'utf8')).replace(/\r\n/g, '\n').replace('  - id: client\n', `${entry('openai-compat')}  - id: client\n`).replace('  - id: mock\n', `${entry('client')}  - id: mock\n`)
+    await fs.writeFile(file, text, 'utf8')
+    await s.registry.load()
+    expect(s.registry.warnings.filter((w) => /provider "client" skipped/.test(w))).toHaveLength(2)
+    expect(s.registry.getModel('client/x')).toBeUndefined()
+    expect(s.registry.getModel('client/claude-code')?.provider.kind).toBe('client')
+  })
+
   it('knows the group of an alias or a model', async () => {
     const s = await seededRegistry()
     cleanups.push(s.cleanup)

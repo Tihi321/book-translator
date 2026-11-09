@@ -204,7 +204,7 @@ export class ProjectRunner {
   private async prepareChunks(ir: Awaited<ReturnType<ProjectStore['readIr']>>, opts: RunOptions): Promise<void> {
     const { store, registry, router } = this.deps
     const project = this.project
-    if (!router.resolve(project.settings.agentModels.translator ?? [])[0]) throw new Error(`no usable translator model in: ${(project.settings.agentModels.translator ?? []).join(', ') || '(none)'}`)
+    if (!router.resolve(project.settings.agentModels.translator ?? [], { exact: project.settings.clientOnly === true })[0]) throw new Error(`no usable translator model in: ${(project.settings.agentModels.translator ?? []).join(', ') || '(none)'}`)
     const budget = budgetFor(registry, router, project.settings)
     const { chunks, planned } = await planProjectChunks(store, project, ir, budget, !opts.only)
     if (planned) this.log('info', `${chunks.length} chunks of up to ${budget} tokens`)
@@ -352,6 +352,7 @@ export class ProjectRunner {
       const pr = await proofreadChunk(env, segs, chunk.translation, { unit })
       chunk.proofread = pr.proofread
       chunk.final = { ...pr.proofread }
+      if (pr.refused) chunk.error = pr.refused // the translation is kept; the chunk is flagged below, like a refused QA
     }
 
     if (settings.enabled.qa) {
@@ -367,7 +368,7 @@ export class ProjectRunner {
         review = await reviewChunk(env, segs, chunk.final, { unit, task: 'recheck' })
         issues = review.issues
       }
-      if (review.refused) chunk.error = review.refused // shown as the chunk's reason; the QA is skipped, so the chunk is flagged below
+      if (review.refused) chunk.error = chunk.error ? `${chunk.error}; ${review.refused}` : review.refused // shown as the chunk's reason; the QA is skipped, so the chunk is flagged below
       chunk.qa = { issues, ...(review.score !== undefined ? { score: review.score } : {}), ...(review.model ? { model: review.model } : {}) }
     }
 
@@ -409,7 +410,9 @@ export class ProjectRunner {
           throw new ClientOnlyRefusal(
             agent === 'qa'
               ? `reviewer ${outside.join(', ')} refused: not free in a client-only project (only another client/ model or a local provider's model; client/claude-code translates). Fix it with update_project_settings.`
-              : `project is client-only: the ${agent} agent may not use ${outside.join(', ')} (only client/ models). Turn clientOnly off with update_project_settings to use it.`
+              : agent === 'proofreader'
+                ? `proofreader ${outside.join(', ')} refused: not free in a client-only project (only a client/ model, or a local provider's model named in reviewer with proofread true). Fix it with update_project_settings.`
+                : `project is client-only: the ${agent} agent may not use ${outside.join(', ')} (only client/ models). Turn clientOnly off with update_project_settings to use it.`
           )
         }
       }

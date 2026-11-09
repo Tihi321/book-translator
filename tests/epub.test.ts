@@ -42,6 +42,22 @@ describe('epub adapter', () => {
     expect(adapterFor('a.epub').outputExt).toBe('.epub')
   })
 
+  it('translates the OPF description and leaves dc:subject alone', async () => {
+    const { src, out } = await setup()
+    const zip = await JSZip.loadAsync(await fs.readFile(src))
+    const opf = (await zip.file('OEBPS/content.opf')!.async('string')).replace('</metadata>', '<dc:description>A short blurb.</dc:description><dc:subject>Fantasy</dc:subject></metadata>')
+    zip.file('OEBPS/content.opf', opf)
+    await fs.writeFile(src, await zip.generateAsync({ type: 'uint8array' }))
+    const adapter = adapterFor(src)
+    const ir = await adapter.read(src)
+    expect(blocksOf(ir).find((b) => b.id === 'm.2')).toMatchObject({ kind: 'para', text: 'A short blurb.' })
+    expect(blocksOf(ir).some((b) => b.text === 'Fantasy')).toBe(false)
+    await adapter.write(ir, new Map([['m.2', 'Kratak opis.']]), src, out, { targetLanguage: 'hr' })
+    const res = await (await JSZip.loadAsync(await fs.readFile(out))).file('OEBPS/content.opf')!.async('string')
+    expect(res).toContain('<dc:description>Kratak opis.</dc:description>')
+    expect(res).toContain('<dc:subject>Fantasy</dc:subject>')
+  })
+
   it('reads blocks, kinds, tags and titles in spine order', async () => {
     const { src } = await setup()
     const ir = await adapterFor(src).read(src)

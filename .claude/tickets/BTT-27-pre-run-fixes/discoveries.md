@@ -1,0 +1,3 @@
+- 2026-11-09 BTT-27: a non-client provider whose id is `client` made `client/x` refs pass `isClientRef`; this ticket refuses aliases there, but the provider id itself is still accepted (src/engine/models/registry.ts load) - suggested: refuse or rename a non-client provider with id `client`
+- 2026-11-09 BTT-27: `ChunkRecord.error` of a flagged chunk is cleared only by a retry; a proofreader and a QA refusal in one chunk now join into one message (src/engine/pipeline/runner.ts processChunk) - info
+- 2026-11-09 BTT-27: `engine status` flagged-reason output has no test (src/engine/cli.ts projectStatus needs a data folder) - suggested: extract the line formatting if it grows

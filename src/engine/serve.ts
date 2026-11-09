@@ -67,7 +67,7 @@ export async function bootEngine(opts: BootOptions): Promise<BootedEngine> {
     await service.recoverInterrupted()
     const dispatcher = new CommandDispatcher({ service, emit, showMock, mcpStatus: opts.mcpStatus, onDefaultsSaved: opts.onDefaultsSaved })
     if (init.migrated.length) emit({ type: 'log', level: 'info', message: `models: config/providers.md: added ${init.migrated.join(', ')} from the seed` })
-    for (const w of init.warnings) emit({ type: 'log', level: 'warn', message: `models: ${w}` })
+    for (const w of [...init.warnings, ...registry.warnings]) emit({ type: 'log', level: 'warn', message: `models: ${w}` })
     // `concurrency: auto` servers (Strata, LM Studio) report their slot count: asked now and every few seconds, so starting a
     // "4 at once" or a "one at a time" script needs no change in providers.md
     void dispatcher.syncSlots()
