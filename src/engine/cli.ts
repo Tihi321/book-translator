@@ -211,7 +211,7 @@ export async function projectStatus(argv: string[]): Promise<number> {
   out(`${p.name} [${p.id}] ${p.format} -> ${p.settings.targetLanguage}: ${p.status}`)
   out(`chunks: ${chunks.length} (${Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none yet'})`)
   out(`spend: $${p.spend.costUsd.toFixed(4)}, ${p.spend.tokensIn} tokens in, ${p.spend.tokensOut} out`)
-  out(`qa score: ${qaScoreLine(qaScoreOf(chunks), chunks.length)}`)
+  out(`qa score: ${qaScoreLine(qaScoreOf(chunks, p.settings), chunks.length)}`)
   for (const c of chunks) {
     if (c.state === 'failed') out(`  chunk ${c.index} failed: ${c.error}`)
     else if (c.state === 'flagged' && c.error) out(`  chunk ${c.index} flagged: ${c.error}`)

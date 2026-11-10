@@ -127,7 +127,7 @@ export interface ChunkRecord {
   /** What is exported: the latest accepted text per segment. */
   final: Record<string, string>
   /** `score` is the reviewer's grade 0-10, `model` the ref that gave the verdict. */
-  qa: { issues: QaIssue[]; score?: number; model?: string }
+  qa: { issues: QaIssue[]; score?: number; model?: string; /** The text was edited after this verdict: the score is kept, the issues were reviewed. */ edited?: boolean }
   state: ChunkState
   model?: string
   tokens: { in: number; out: number }

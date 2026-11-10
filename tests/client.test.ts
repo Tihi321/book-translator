@@ -393,7 +393,7 @@ describe('client provider over MCP', () => {
     const again = await call<{ taskId: string; leaseMinutes: number }>(c, 'get_client_task', { role: 'translator', leaseMinutes: 3 })
     expect(again.leaseMinutes).toBe(3)
     expect(await call(c, 'release_client_task', { project: id })).toEqual({ released: 1 })
-    await expect(call(c, 'release_client_task', {})).rejects.toThrow(/taskId/)
+    expect(await call(c, 'release_client_task', {})).toEqual({ released: 0 }) // no arguments: every leased task (none left)
 
     // answer every task like the mock translator would, until the project is done
     const stop = answerLoop(r!)

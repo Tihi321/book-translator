@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ChunkFailure } from '../src/engine/pipeline/env'
 import type { AgentEnv, CallFn } from '../src/engine/pipeline/env'
 import { proofreadChunk } from '../src/engine/pipeline/proofreader'
-import { deterministicChecks } from '../src/engine/pipeline/qa'
+import { deterministicChecks, reviewChunk } from '../src/engine/pipeline/qa'
 import { prevTail, translateChunk } from '../src/engine/pipeline/translator'
 import type { SegmentRec } from '../src/shared/project'
 import { SEED_DIR } from './helpers'
@@ -163,6 +163,25 @@ describe('deterministic QA checks', () => {
   it('flags a missing glossary term as minor', () => {
     expect(kinds([seg('a', 'Alice walked home through the park.')], { a: 'Ana je šetala kući kroz park.' })).toEqual(['a:glossary:minor'])
     expect(kinds([seg('a', 'Alice walked home through the park.')], { a: 'Alisa je šetala kući kroz park.' })).toEqual([])
+  })
+
+  it('matches an inflected multiword target word by word, and skips citations', () => {
+    const seas = [{ source: 'Southern Seas', target: 'Južna mora', type: 'place' }, { source: 'Stoic', target: 'stoik', type: 'term' }]
+    const check = (src: string, tr: string) => deterministicChecks([seg('a', src)], { a: tr }, seas).map((i) => i.type)
+    expect(check('Sailing the Southern Seas now.', 'Ploveći po Južnim morima sada.')).toEqual([])
+    expect(check('The Stoic school taught calm.', 'Stoici su učili mir.')).toEqual([])
+    expect(check('Sailing the Southern Seas now.', 'Ploveći po Sjevernom moru.')).toEqual(['glossary'])
+    const ref = 'Smith, J. K. (2019). Southern Seas of Fortune. Oxford Press. https://example.org/southern-seas'
+    expect(check(ref, 'Smith, J. K. (2019). Southern Seas of Fortune. Oxford Press. https://example.org/southern-seas')).not.toContain('glossary')
+  })
+
+  it('lets the tag check overrule a reviewer tags issue when the tags match the source', async () => {
+    const reply = JSON.stringify({ score: 6, issues: [{ segId: 'a', type: 'tags', severity: 'major', comment: 'Missing inline tags <1> and </1>' }, { segId: 'b', type: 'tags', severity: 'major', comment: 'Missing inline tags' }] })
+    const { env } = envWith(() => reply)
+    const segs = [seg('a', 'Say <1>hello</1> to everyone.'), seg('b', 'Say <1>hello</1> to everyone.')]
+    const res = await reviewChunk(env, segs, { a: 'Pozdravi <1>sve</1> redom.', b: 'Pozdravi sve redom.' }, { unit: 'c' })
+    expect(res.issues.filter((i) => i.type === 'tags').map((i) => i.segId)).toEqual(['b']) // b: the deterministic check found it too
+    expect(res.issues).toHaveLength(1)
   })
 
   it('flags tag mismatches as major', () => {

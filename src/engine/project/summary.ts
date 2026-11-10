@@ -1,5 +1,5 @@
-import { CHUNK_STATES } from '../../shared/project'
-import type { ChunkRecord, ChunkState, ProjectFile, ProjectSummary, QaScore } from '../../shared/project'
+import { CHUNK_STATES, reviewerAgents } from '../../shared/project'
+import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, ProjectSummary, QaScore } from '../../shared/project'
 
 export function countStates(chunks: readonly ChunkRecord[]): Record<ChunkState, number> {
   const counts = Object.fromEntries(CHUNK_STATES.map((s) => [s, 0])) as Record<ChunkState, number>
@@ -7,10 +7,13 @@ export function countStates(chunks: readonly ChunkRecord[]): Record<ChunkState, 
   return counts
 }
 
-/** The project's QA score, from the chunk files: the mean of the chunk scores, who gave them, and whether none was a self-review (the reviewer is not the model that translated the chunk). */
-export function qaScoreOf(chunks: readonly ChunkRecord[]): QaScore {
+/**
+ * The project's QA score, from the chunk files: the mean of the chunk scores, who gave them, and whether none was a self-review (the reviewer is not the model that translated the chunk).
+ * With the settings, `independent` before any chunk is scored says whether a reviewer is set for QA.
+ */
+export function qaScoreOf(chunks: readonly ChunkRecord[], settings?: Pick<ProjectSettings, 'clientOnly' | 'reviewer'>): QaScore {
   const scored = chunks.filter((c) => typeof c.qa.score === 'number')
-  if (scored.length === 0) return { score: null, scored: 0, models: [], independent: false }
+  if (scored.length === 0) return { score: null, scored: 0, models: [], independent: settings !== undefined && reviewerAgents(settings).includes('qa') }
   const mean = scored.reduce((n, c) => n + (c.qa.score as number), 0) / scored.length
   return {
     score: Math.round(mean * 10) / 10,
@@ -42,7 +45,7 @@ export function summarize(p: ProjectFile, chunks: readonly ChunkRecord[]): Proje
     done: counts.done + counts.flagged,
     flagged: counts.flagged,
     failed: counts.failed,
-    qa: qaScoreOf(chunks),
+    qa: qaScoreOf(chunks, p.settings),
     spend: p.spend
   }
 }

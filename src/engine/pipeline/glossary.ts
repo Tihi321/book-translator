@@ -117,9 +117,12 @@ export function relevantEntries(entries: readonly GlossaryEntry[], text: string,
   return out
 }
 
+const PALATAL: Record<string, string> = { k: 'c', g: 'z', h: 's' }
+
 /**
  * True when the translation has the glossary target, also in an inflected form: every word of the target counts as present when its stem
- * is (the word minus its last 2 letters when it has 7 or more, minus the last letter when it has 5 or 6, whole when shorter).
+ * is (the word minus its last 2 letters when it has 7 or more, minus the last letter when it has 4 to 6, whole when shorter). A stem that
+ * ends in k, g or h also matches c, z or s (Croatian: "stoika" / "stoici").
  */
 export function hasTarget(translation: string, target: string): boolean {
   const hay = translation.normalize('NFC').toLowerCase()
@@ -127,8 +130,10 @@ export function hasTarget(translation: string, target: string): boolean {
   if (words.length === 0) return true
   return words.every((w) => {
     const letters = Array.from(w)
-    const cut = letters.length >= 7 ? 2 : letters.length >= 5 ? 1 : 0
-    return hay.includes(letters.slice(0, letters.length - cut).join(''))
+    const cut = letters.length >= 7 ? 2 : letters.length >= 4 ? 1 : 0
+    const stem = letters.slice(0, letters.length - cut).join('')
+    const alt = PALATAL[stem.slice(-1)]
+    return hay.includes(stem) || (alt !== undefined && hay.includes(stem.slice(0, -1) + alt))
   })
 }
 

@@ -20,6 +20,18 @@ const MIN_CHARS_FOR_RATIO = 25
 
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length
 
+const LINK_RE = /(?:https?:\/\/|www\.)\S+|\bdoi:\s*\S+|\bisbn(?:-1[03])?:?\s*[\d-]+x?/giu
+/** An author-year entry of a reference list: `Surname, A. B. (2019). Title ...`. */
+const REFERENCE_RE = /^\s*\p{Lu}[\p{L}'’-]+,\s*(?:\p{Lu}\.\s*)+.*\b(?:1[5-9]|20)\d{2}[a-z]?\b/su
+
+/** A segment that is mostly a link or a reference-list entry: its titles stay in the source language on purpose, so glossary terms are not checked in it. */
+export function isCitation(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  const linkChars = (t.match(LINK_RE) ?? []).reduce((n, m) => n + m.length, 0)
+  return linkChars / t.length >= 0.25 || REFERENCE_RE.test(t)
+}
+
 /**
  * True when the text is long enough to count as left untranslated. Only the words outside inline tags count (a speaker tag
  * like `<1>INÈS (angry):</1>` is not text), and the terms of glossary rows kept as they are (source == target) do not count either.
@@ -69,7 +81,7 @@ export function deterministicChecks(
       if (ratio < MIN_RATIO) issues.push({ segId: s.id, type: 'omission', severity: 'major', comment: `The translation is much shorter than the source (${Math.round(ratio * 100)}% of its length); text may be missing.` })
       else if (ratio > MAX_RATIO) issues.push({ segId: s.id, type: 'addition', severity: 'minor', comment: `The translation is much longer than the source (${Math.round(ratio * 100)}% of its length); text may have been added.` })
     }
-    for (const g of relevantEntries(glossary, s.text)) {
+    for (const g of isCitation(s.text) ? [] : relevantEntries(glossary, s.text)) {
       if (!hasTarget(tgt, g.target)) {
         issues.push({ segId: s.id, type: 'glossary', severity: 'minor', comment: `Glossary term "${g.source}" should be "${g.target}", which is not in the translation.`, suggestion: g.target })
       }
@@ -138,6 +150,8 @@ export async function reviewChunk(
       const segId = String(i.segId).trim()
       if (!ids.has(segId)) continue
       const type = (ISSUE_TYPES as readonly string[]).includes(i.type ?? '') ? (i.type as IssueType) : 'mistranslation'
+      // the deterministic check decides on inline tags: a reviewer's "missing tags" on a segment whose tags match the source is a false positive
+      if (type === 'tags' && validateTags(segs.find((s) => s.id === segId)!.text, final[segId] ?? '').ok) continue
       const issue: QaIssue = { segId, type, severity: i.severity === 'major' ? 'major' : 'minor', comment: i.comment?.trim() || type }
       if (i.suggestion?.trim()) issue.suggestion = i.suggestion.trim()
       if (!issues.some((x) => sameIssue(x, issue))) issues.push(issue)

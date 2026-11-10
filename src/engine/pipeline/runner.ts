@@ -68,7 +68,7 @@ export function workerCount(router: ModelRouter, settings: ProjectSettings): num
  */
 export async function planProjectChunks(store: ProjectStore, project: ProjectFile, ir: DocumentIR, budget: number, replan = true): Promise<{ chunks: ChunkRecord[]; planned: boolean }> {
   let chunks = await store.listChunks(project.id)
-  const untouched = chunks.every((c) => c.state === 'pending')
+  const untouched = chunks.every((c) => c.state === 'pending' && !hasText(c.translation))
   if (chunks.length > 0 && !(untouched && project.chunking?.budget !== budget && replan)) return { chunks, planned: false }
   await store.clearChunks(project.id)
   chunks = planChunks(ir, budget).map(emptyChunk)
@@ -88,6 +88,22 @@ function resetChunk(c: ChunkRecord): void {
   c.qa = { issues: [] }
   c.error = undefined
   c.edited = undefined
+}
+
+const hasText = (r: Record<string, string>) => Object.keys(r).length > 0
+
+/**
+ * A chunk whose run was stopped (pause, cancel): back to pending. What a finished stage produced stays in the chunk file, so a resume
+ * does not ask for it again (a client-only run answers every request by hand): the translation once the translator is through, the
+ * proofread text once the proofreader is. A chunk stopped during the translator starts over.
+ */
+function parkChunk(c: ChunkRecord): void {
+  if (c.state !== 'proofreading' && c.state !== 'reviewing' && c.state !== 'fixing') return resetChunk(c)
+  const proofDone = (c.state === 'reviewing' || c.state === 'fixing') && !c.error && hasText(c.proofread)
+  if (!proofDone) c.proofread = {}
+  c.state = 'pending'
+  c.final = { ...(proofDone ? c.proofread : c.translation) }
+  c.error = undefined // c.qa.issues still holds the translator's tag issues: the reviewer's verdict is only stored when the review ends
 }
 
 /**
@@ -319,7 +335,7 @@ export class ProjectRunner {
       await this.processChunk(chunk, prev)
     } catch (err) {
       if (this.signal?.aborted || isAbortError(err)) {
-        resetChunk(chunk)
+        parkChunk(chunk)
         await store.writeChunk(this.project.id, chunk).catch(() => undefined)
         throw err
       }
@@ -340,14 +356,23 @@ export class ProjectRunner {
     const unit = `chunk-${chunk.index}`
     const env = await this.makeEnv(chunk)
     const segs = chunk.segments
-    resetChunk(chunk)
-    await this.setState(chunk, 'translating')
-    const tr = await translateChunk(env, segs, { prev: prev ? prevTail(prev.segments, prev.final) : undefined, unit }, chunk.translation)
-    chunk.translation = tr.translation
-    chunk.final = { ...tr.translation }
-    chunk.qa.issues = tr.issues
+    // a chunk parked by a pause keeps the output of the stages that finished: carry on after them
+    const resumed = chunk.state === 'pending' && hasText(chunk.translation)
+    const proofDone = resumed && hasText(chunk.proofread)
+    if (resumed) {
+      chunk.error = undefined
+      chunk.edited = undefined
+      this.log('info', `chunk ${chunk.index} resumes after its ${proofDone ? 'proofreading' : 'translation'}`)
+    } else {
+      resetChunk(chunk)
+      await this.setState(chunk, 'translating')
+      const tr = await translateChunk(env, segs, { prev: prev ? prevTail(prev.segments, prev.final) : undefined, unit }, chunk.translation)
+      chunk.translation = tr.translation
+      chunk.final = { ...tr.translation }
+      chunk.qa.issues = tr.issues
+    }
 
-    if (settings.enabled.proofreader) {
+    if (settings.enabled.proofreader && !proofDone) {
       await this.setState(chunk, 'proofreading')
       const pr = await proofreadChunk(env, segs, chunk.translation, { unit })
       chunk.proofread = pr.proofread

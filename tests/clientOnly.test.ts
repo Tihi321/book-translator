@@ -135,6 +135,7 @@ describe('independent reviewer in a client-only project', () => {
       const id = await r.create({ clientOnly: true, reviewer: { models: ['mock/mock-reviewer'] }, enabled: all })
       const p = await r.service.store.load(id)
       expect(p.settings.agentModels).toMatchObject({ qa: ['mock/mock-reviewer'], translator: CLIENT, glossary: CLIENT, proofreader: CLIENT })
+      expect((await r.service.detail(id)).qa).toEqual({ score: null, scored: 0, models: [], independent: true }) // nothing scored yet, the reviewer is set
       expect((await r.service.start(id)).status).toBe('done')
       expect(r.mock.calls.length).toBeGreaterThan(0)
       expect(r.mock.calls.every((c) => c.meta?.role === 'qa' && c.model === 'mock-reviewer')).toBe(true)

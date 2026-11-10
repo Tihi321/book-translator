@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { CatalogModel, ChunkBrief, EngineEvent, EngineInfo, ModelsInfo, ProgressInfo, ProjectDetail } from '../../shared/protocol'
 import { CHUNK_STATES } from '../../shared/project'
-import type { ChunkState, ProjectSummary } from '../../shared/project'
+import type { ChunkState, ProjectSummary, QaScore } from '../../shared/project'
 import type { DefaultsConfig } from '../../shared/schemas'
 import { getApi } from '../api'
 
@@ -195,7 +195,9 @@ export const useStore = create<State>()((set, get) => ({
             const at = list[ev.index - 1]?.index === ev.index ? ev.index - 1 : list.findIndex((c) => c.index === ev.index)
             const cur = list[at]
             if (cur) {
-              list[at] = { ...cur, state: ev.state, model: ev.model ?? cur.model, tokensIn: ev.tokens?.in ?? cur.tokensIn, tokensOut: ev.tokens?.out ?? cur.tokensOut, issues: ev.issues ?? cur.issues, ...(ev.qaScore !== undefined ? { qaScore: ev.qaScore } : {}) }
+              // the engine sends the score whenever the chunk has one: none in the event means a retried or refused chunk lost it
+              const { qaScore: _old, ...rest } = cur
+              list[at] = { ...rest, state: ev.state, model: ev.model ?? cur.model, tokensIn: ev.tokens?.in ?? cur.tokensIn, tokensOut: ev.tokens?.out ?? cur.tokensOut, issues: ev.issues ?? cur.issues, ...(ev.qaScore !== undefined ? { qaScore: ev.qaScore } : {}) }
               detailChanged = true
             }
           }
@@ -232,7 +234,10 @@ export const useStore = create<State>()((set, get) => ({
       }
     }
 
-    if (detailChanged && detail) detail = { ...detail, chunks: chunks ?? detail.chunks }
+    if (detailChanged && detail) {
+      detail = { ...detail, chunks: chunks ?? detail.chunks }
+      if (chunks) detail = { ...detail, qa: withChunkScores(detail.qa, chunks) }
+    }
     set({ projects, live, detail, models, view })
     for (const t of toasts) get().toast(t)
     if (reload) void get().loadDetail(reload)
@@ -245,6 +250,12 @@ export const useStore = create<State>()((set, get) => ({
     await api.request<'snapshot'>({ type: 'snapshot' })
   }
 }))
+
+/** The QA score and scored count recomputed from the tiles, so the statline follows each chunk (models and independence come with project.updated). */
+function withChunkScores(qa: QaScore, chunks: readonly ChunkBrief[]): QaScore {
+  const scores = chunks.flatMap((c) => (c.qaScore === undefined ? [] : [c.qaScore]))
+  return { ...qa, scored: scores.length, score: scores.length ? Math.round((scores.reduce((n, x) => n + x, 0) / scores.length) * 10) / 10 : null }
+}
 
 /** The progress to show: the live one while a run reports, else computed from the chunks and the saved spend. */
 export function progressOf(detail: ProjectDetail, live: Live | undefined): ProgressInfo {

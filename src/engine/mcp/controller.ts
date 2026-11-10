@@ -16,6 +16,8 @@ export interface McpControllerOptions {
   force?: boolean
   /** Replaces the port of config/defaults.json (`headless --port`). */
   port?: number
+  /** What the `shutdown` tool runs (headless: pause the projects, close the server, release the data folder lock). Without it the tool is refused. */
+  onShutdown?: () => Promise<void>
   keys?: KeyResolver
   storeKey?: (name: string, value: string) => void
 }
@@ -56,7 +58,7 @@ export class McpController {
     try {
       this.token ??= getOrCreateMcpToken(this.opts.keys, this.opts.storeKey)
       const { dispatcher, service, bus } = this.opts
-      this.http = await startMcpHttp({ port, token: this.token, factory: () => createMcpServer(dispatcher, service, bus) })
+      this.http = await startMcpHttp({ port, token: this.token, factory: () => createMcpServer(dispatcher, service, bus, this.opts.onShutdown) })
     } catch (err) {
       const e = err as NodeJS.ErrnoException
       this.error = e.code === 'EADDRINUSE' ? `port ${port} is already in use` : e.message

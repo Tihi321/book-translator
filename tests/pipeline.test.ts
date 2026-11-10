@@ -190,6 +190,26 @@ describe('resume', () => {
     expect(full).toContain('[hr] Paragraph 12 of chapter 2')
   })
 
+  it('a pause keeps the translation of a chunk that was proofreading, and the resume does not translate it again', async () => {
+    let pause: () => void = () => undefined
+    r = await rig({ delay: 8, onEvent: (e) => e.type === 'chunk.state' && e.state === 'proofreading' && e.index === 1 && pause() })
+    const id = await r.create({ enabled: { glossary: false, proofreader: true, qa: false }, parallel: { enabled: false, maxAtOnce: 1, splitSections: false } })
+    const service = r.service
+    pause = () => {
+      pause = () => undefined // only the first time
+      void service.pause(id)
+    }
+    expect((await service.start(id)).status).toBe('paused')
+    const parked = (await service.store.listChunks(id))[0]!
+    expect(parked.state).toBe('pending')
+    expect(Object.values(parked.translation)[0]).toContain('[hr] ')
+
+    expect((await service.start(id)).status).toBe('done')
+    expect(r.calls('translator').filter((c) => c.unit === 'chunk-1')).toHaveLength(1)
+    expect(r.calls('proofreader').filter((c) => c.unit === 'chunk-1').length).toBeGreaterThan(0)
+    expect(Object.values((await service.store.readChunk(id, 1)).final)[0]).toContain('✓')
+  })
+
   it('resets chunks left in progress by a crash and retries failed ones', async () => {
     r = await rig()
     const id = await r.create()
@@ -446,6 +466,17 @@ describe('editing', () => {
     await expect(r.service.editChunk(id, 2, { nope: 'x' })).rejects.toThrow(/no segment nope/)
     await r.service.updateGlossary(id, [{ source: 'Bob', target: 'Bobi', type: 'person' }])
     expect(await r.service.store.readGlossary(id)).toEqual([{ source: 'Bob', target: 'Bobi', type: 'person' }])
+  })
+
+  it('keeps the QA score of an edited chunk, marked edited', async () => {
+    r = await rig()
+    r.mock.on({ role: 'qa' }, '{"score":7,"issues":[]}')
+    const id = await r.create({ enabled: { glossary: false, proofreader: false, qa: true } })
+    await r.service.start(id)
+    const before = (await r.service.detail(id)).qa
+    const edited = await r.service.editChunk(id, 1, { [(await r.service.store.readChunk(id, 1)).segments[0]!.id]: 'Ručno.' })
+    expect(edited.qa).toEqual({ issues: [], score: 7, model: 'mock/mock-reviewer', edited: true })
+    expect((await r.service.detail(id)).qa).toEqual(before)
   })
 
   it('rejoins pieces of a split block on export', async () => {
