@@ -1,0 +1,2 @@
+{"ts":"2026-11-10T10:45:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0006","ticket":"BTT-27-pre-run-fixes","detail":"director-checker PASS","data":{"verdict":"PASS"}}
+{"ts":"2026-11-10T10:45:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0006","ticket":"BTT-27-pre-run-fixes","detail":"done; merged be5ecb9 to book-translator master"}

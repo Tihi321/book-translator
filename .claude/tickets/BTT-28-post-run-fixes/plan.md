@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: REQ-0006
 repos: [book-translator]
 branch: BTT-28_post-run-fixes

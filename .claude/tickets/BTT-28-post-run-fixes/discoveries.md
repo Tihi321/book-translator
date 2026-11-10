@@ -5,3 +5,8 @@
 - 2026-11-10 BTT-28: answers to the fix pass (task `fix`) accepted before a pause are still lost: the resume re-runs the review - info.
 - 2026-11-10 BTT-28: reference-list detection is a heuristic (link share >= 25% or `Surname, A. (year)` start); other citation styles still get glossary checks - suggested: tune on a real References section.
 - 2026-11-10 BTT-28: a `tags` issue where the reviewer's tag set matches the source but the words are wrong is not caught by the deterministic tag check - accepted as a trade-off (low risk, the reviewer's other issue types still report it).
+- 2026-11-10 director-checker: process.exit with code 1 on a failed headless shutdown goes against the repo rule at src/engine/index.ts:45, and the comment at src/engine/serve.ts:145 is now wrong (src/engine/serve.ts:187) - suggested: set process.exitCode = 1 plus an unref'd fallback timer, and fix the comment
+- 2026-11-10 director-checker: the stderr template literal has a raw line break (src/engine/serve.ts:185-186) - suggested: use \n
+- 2026-11-10 director-checker: no unit test for a pause during retry-tags or the re-derived tags issue of a kept segment (src/engine/pipeline/translator.ts:89-121) - suggested: add one test
+- 2026-11-10 director-checker: a resume sends only the missing segments, possibly far apart, with no kept neighbours as context (src/engine/pipeline/translator.ts:143) - suggested: send kept neighbours as read-only context
+- 2026-11-10 director-checker: glossary row "will -> volja" flags the English auxiliary "will" in the what-fate project (C:/Users/Infplane/BookTranslator/projects/what-fate-decides-luck-will-and-the-life-hr-54a317) - suggested: the deferred noun-only glossary option

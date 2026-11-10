@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: done
 request: REQ-0006
 repos: [book-translator]
 branch: BTT-27_pre-run-fixes
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # BTT-27 Pre-run fixes (from the REQ-0006 plan, task A1)

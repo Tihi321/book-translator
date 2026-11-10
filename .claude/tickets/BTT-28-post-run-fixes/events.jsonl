@@ -1,0 +1,2 @@
+{"ts":"2026-11-10T10:45:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0006","ticket":"BTT-28-post-run-fixes","detail":"re-check PASS after FAIL and polish round 1","data":{"verdict":"PASS","rounds":1}}
+{"ts":"2026-11-10T10:45:00Z","actor":"director-scribe","type":"ticket.done","request":"REQ-0006","ticket":"BTT-28-post-run-fixes","detail":"done; merged 20185d1 to book-translator master"}
