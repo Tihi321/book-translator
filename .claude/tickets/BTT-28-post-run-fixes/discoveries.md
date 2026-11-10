@@ -4,3 +4,4 @@
 - 2026-11-10 BTT-28: a crash (not a pause) still resets a chunk left in proofreading/reviewing, losing the accepted translation (src/engine/pipeline/runner.ts prepareChunks resets IN_PROGRESS_STATES) - suggested: keep the stage output there too, as parkChunk does.
 - 2026-11-10 BTT-28: answers to the fix pass (task `fix`) accepted before a pause are still lost: the resume re-runs the review - info.
 - 2026-11-10 BTT-28: reference-list detection is a heuristic (link share >= 25% or `Surname, A. (year)` start); other citation styles still get glossary checks - suggested: tune on a real References section.
+- 2026-11-10 BTT-28: a `tags` issue where the reviewer's tag set matches the source but the words are wrong is not caught by the deterministic tag check - accepted as a trade-off (low risk, the reviewer's other issue types still report it).

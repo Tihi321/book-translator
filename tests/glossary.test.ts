@@ -93,4 +93,14 @@ describe('hasTarget (inflected glossary targets)', () => {
     expect(hasTarget('Došli smo u Zemlji čudesa.', 'Zemlja čudesa')).toBe(true)
     expect(hasTarget('Ana je šetala.', 'Alisa')).toBe(false)
   })
+
+  it.each([
+    ['Učenje stoika o miru.', 'stoici', true], // the real row "Stoics -> stoici" against "stoika": k/c both ways
+    ['Stoici su učili mir.', 'stoik', true],
+    ['On je jedini vidio grad.', 'Edip', false], // the stem has to start a word: "edi" is inside "jedini"
+    ['Stari je otišao.', 'ariš', false],
+    ['Ariš je otišao.', 'ariš', true]
+  ])('%s with target %s -> %s', (text, target, expected) => {
+    expect(hasTarget(text, target)).toBe(expected)
+  })
 })

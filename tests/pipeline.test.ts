@@ -210,6 +210,41 @@ describe('resume', () => {
     expect(Object.values((await service.store.readChunk(id, 1)).final)[0]).toContain('✓')
   })
 
+  it('a pause inside the translator keeps the accepted first half of a split chunk, and the resume asks only for the second half', async () => {
+    r = await rig({ delay: 8, content: 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.\n\nFourth paragraph.\n' })
+    const id = await r.create({ enabled: { glossary: false, proofreader: false, qa: false }, maxChunkTokens: 1000, parallel: { enabled: false, maxAtOnce: 1, splitSections: false } })
+    const service = r.service
+    const asked: string[][] = []
+    let pausedOnce = false
+    r.mock.on({ role: 'translator' }, (req) => {
+      const ids = segsIn(lastUser(req)).map((s) => s.id)
+      if (unitOf(req) !== 'chunk-1') return echo(req)
+      asked.push(ids)
+      const full = asked[0]!
+      const half = Math.ceil(full.length / 2)
+      if (ids.length === full.length) return asSegs(segsIn(lastUser(req)).slice(1).map((s) => ({ id: s.id, text: s.text }))) // an id is missing: retry, then split
+      if (ids[0] === full[half] && !pausedOnce) {
+        pausedOnce = true
+        void service.pause(id) // the second half is in flight
+      }
+      return echo(req)
+    })
+    expect((await service.start(id)).status).toBe('paused')
+    const full = asked[0]!
+    expect(full).toHaveLength(4)
+    const half = Math.ceil(full.length / 2)
+    const parked = (await service.store.listChunks(id))[0]!
+    expect(parked.state).toBe('pending')
+    expect(Object.keys(parked.translation)).toEqual(full.slice(0, half))
+
+    const before = asked.length
+    expect((await service.start(id)).status).toBe('done')
+    expect(asked.slice(before)).toEqual([full.slice(half)])
+    const done = await service.store.readChunk(id, 1)
+    expect(Object.keys(done.translation)).toEqual(full)
+    expect(Object.values(done.translation).every((v) => v.startsWith('[hr] '))).toBe(true)
+  })
+
   it('resets chunks left in progress by a crash and retries failed ones', async () => {
     r = await rig()
     const id = await r.create()

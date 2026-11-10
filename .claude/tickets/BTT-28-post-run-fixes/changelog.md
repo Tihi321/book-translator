@@ -18,3 +18,12 @@ Branch `BTT-28_post-run-fixes` (from `master` be5ecb9), repo book-translator. Re
 
 ### Verification
 `yarn test`: 25 files, 380 tests pass (374 before). `yarn typecheck` and `yarn lint`: clean. The pause test fails with the runner.ts change reverted.
+
+## Polish round 1 (checker findings)
+
+- `runner.ts` (`parkChunk`, `processChunk`), `translator.ts` (`translateChunk`): a pause during the translator keeps the accepted segments (first half of a split, finished retry, retry-tags result) in `chunk.translation`; the resume asks only for the missing ids and re-derives the kept segments' `tags` issues. A segment with bad tags is stored only once its retry settled, so a stop in between asks for it again. A fix pass in progress is still re-run. README and the `shutdown` tool description say so.
+- `glossary.ts` (`hasTarget`): the stem must start a word (`Edip` is not in `jedini`, `ariš` not in `Stari`); the palatal map works both ways (k/c, g/z, h/s), so target `stoici` matches `stoika`; comment fixed.
+- `tests/client.test.ts`: the release-all check leases a task first and expects `released: 1`.
+- `mcp/server.ts`, `serve.ts`: an `onShutdown` failure is emitted as an `error` event (stderr log in headless); `headless` shutdown reports a failed stop and ends the process with exit code 1, because a half-stopped engine with the server socket open and no usable lock must not stay up (a stale lock of a dead pid is reclaimed at the next start).
+- Tests: pipeline (pause inside the translator keeps the first half, 4-segment chunk), glossary (one table test, 5 rows), agents (real row `Stoics -> stoici`). Each new test fails with the src changes stashed.
+- Verification: `yarn test` 25 files, 386 tests pass; typecheck and lint clean.

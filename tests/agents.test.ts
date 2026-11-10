@@ -166,10 +166,10 @@ describe('deterministic QA checks', () => {
   })
 
   it('matches an inflected multiword target word by word, and skips citations', () => {
-    const seas = [{ source: 'Southern Seas', target: 'Južna mora', type: 'place' }, { source: 'Stoic', target: 'stoik', type: 'term' }]
+    const seas = [{ source: 'Southern Seas', target: 'Južna mora', type: 'place' }, { source: 'Stoics', target: 'stoici', type: 'term' }]
     const check = (src: string, tr: string) => deterministicChecks([seg('a', src)], { a: tr }, seas).map((i) => i.type)
     expect(check('Sailing the Southern Seas now.', 'Ploveći po Južnim morima sada.')).toEqual([])
-    expect(check('The Stoic school taught calm.', 'Stoici su učili mir.')).toEqual([])
+    expect(check('The Stoics taught calm.', 'Učenje stoika o miru.')).toEqual([])
     expect(check('Sailing the Southern Seas now.', 'Ploveći po Sjevernom moru.')).toEqual(['glossary'])
     const ref = 'Smith, J. K. (2019). Southern Seas of Fortune. Oxford Press. https://example.org/southern-seas'
     expect(check(ref, 'Smith, J. K. (2019). Southern Seas of Fortune. Oxford Press. https://example.org/southern-seas')).not.toContain('glossary')

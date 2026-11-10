@@ -117,12 +117,23 @@ export function relevantEntries(entries: readonly GlossaryEntry[], text: string,
   return out
 }
 
-const PALATAL: Record<string, string> = { k: 'c', g: 'z', h: 's' }
+/** True when `stem` occurs in `hay` right after a non-letter, non-digit (or at the start). */
+function atWordStart(hay: string, stem: string): boolean {
+  for (let i = hay.indexOf(stem); i >= 0; i = hay.indexOf(stem, i + 1)) {
+    const before = hay.slice(0, i).match(/[\p{L}\p{N}]$/u)
+    if (!before) return true
+  }
+  return false
+}
+
+// the Croatian palatalisation (k/c, g/z, h/s: "stoik" / "stoici"), both ways: the glossary row may have either form
+const PALATAL: Record<string, string> = { k: 'c', c: 'k', g: 'z', z: 'g', h: 's', s: 'h' }
 
 /**
  * True when the translation has the glossary target, also in an inflected form: every word of the target counts as present when its stem
- * is (the word minus its last 2 letters when it has 7 or more, minus the last letter when it has 4 to 6, whole when shorter). A stem that
- * ends in k, g or h also matches c, z or s (Croatian: "stoika" / "stoici").
+ * is (the word minus its last 2 letters when it has 7 or more, minus the last letter when it has 4 to 6, whole when shorter). The stem
+ * has to start at the start of a word in the translation ("Edip" is not in "jedini"). A stem that ends in k, g, h, c, z or s also
+ * matches the paired letter (Croatian: target "stoik" / text "stoici", or target "stoici" / text "stoika").
  */
 export function hasTarget(translation: string, target: string): boolean {
   const hay = translation.normalize('NFC').toLowerCase()
@@ -133,7 +144,7 @@ export function hasTarget(translation: string, target: string): boolean {
     const cut = letters.length >= 7 ? 2 : letters.length >= 4 ? 1 : 0
     const stem = letters.slice(0, letters.length - cut).join('')
     const alt = PALATAL[stem.slice(-1)]
-    return hay.includes(stem) || (alt !== undefined && hay.includes(stem.slice(0, -1) + alt))
+    return atWordStart(hay, stem) || (alt !== undefined && atWordStart(hay, stem.slice(0, -1) + alt))
   })
 }
 

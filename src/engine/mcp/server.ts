@@ -201,7 +201,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   })
   tool(
     'shutdown',
-    'Headless engine only: pauses every running project (answers the client already accepted are kept in the chunk files), closes the MCP server, removes engine.lock and ends the process. The answer comes before the server closes. The app (with a window) refuses it: close the app instead.',
+    'Headless engine only: pauses every running project (the translator and proofreader answers the client already accepted are kept in the chunk files; a fix pass in progress runs again on resume), closes the MCP server, removes engine.lock and ends the process. The answer comes before the server closes. The app (with a window) refuses it: close the app instead.',
     {},
     async () => {
       if (!onShutdown) throw new Error('shutdown only works on a headless engine (npm run headless); close the app to stop it')
@@ -212,7 +212,9 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         paused.push(p.id)
       }
       // after the reply has been sent: closing the server ends this very request otherwise
-      setTimeout(() => void onShutdown().catch(() => undefined), 200)
+      setTimeout(() => {
+        onShutdown().catch((err: unknown) => bus.emit({ type: 'error', message: `shutdown failed: ${err instanceof Error ? err.message : String(err)}` }))
+      }, 200)
       return { stopping: true, paused }
     }
   )

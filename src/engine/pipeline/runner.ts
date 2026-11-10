@@ -95,9 +95,18 @@ const hasText = (r: Record<string, string>) => Object.keys(r).length > 0
 /**
  * A chunk whose run was stopped (pause, cancel): back to pending. What a finished stage produced stays in the chunk file, so a resume
  * does not ask for it again (a client-only run answers every request by hand): the translation once the translator is through, the
- * proofread text once the proofreader is. A chunk stopped during the translator starts over.
+ * proofread text once the proofreader is. A chunk stopped during the translator keeps the segments whose answers were accepted (the
+ * first half of a split, a finished retry); the resume asks only for the others. A fix pass is not kept: it runs again.
  */
 function parkChunk(c: ChunkRecord): void {
+  if (c.state === 'translating') {
+    c.state = 'pending'
+    c.proofread = {}
+    c.final = {}
+    c.error = undefined
+    c.edited = undefined
+    return
+  }
   if (c.state !== 'proofreading' && c.state !== 'reviewing' && c.state !== 'fixing') return resetChunk(c)
   const proofDone = (c.state === 'reviewing' || c.state === 'fixing') && !c.error && hasText(c.proofread)
   if (!proofDone) c.proofread = {}
@@ -357,14 +366,23 @@ export class ProjectRunner {
     const env = await this.makeEnv(chunk)
     const segs = chunk.segments
     // a chunk parked by a pause keeps the output of the stages that finished: carry on after them
-    const resumed = chunk.state === 'pending' && hasText(chunk.translation)
+    const parked = chunk.state === 'pending' && hasText(chunk.translation)
+    const translated = parked && segs.every((s) => Object.hasOwn(chunk.translation, s.id))
+    const resumed = translated
     const proofDone = resumed && hasText(chunk.proofread)
     if (resumed) {
       chunk.error = undefined
       chunk.edited = undefined
       this.log('info', `chunk ${chunk.index} resumes after its ${proofDone ? 'proofreading' : 'translation'}`)
     } else {
-      resetChunk(chunk)
+      if (parked) {
+        // stopped inside the translator: the accepted segments stay, only the others are asked for
+        chunk.error = undefined
+        chunk.edited = undefined
+        chunk.final = {}
+        chunk.proofread = {}
+        this.log('info', `chunk ${chunk.index} resumes the translation: ${Object.keys(chunk.translation).length} of ${segs.length} segments kept`)
+      } else resetChunk(chunk)
       await this.setState(chunk, 'translating')
       const tr = await translateChunk(env, segs, { prev: prev ? prevTail(prev.segments, prev.final) : undefined, unit }, chunk.translation)
       chunk.translation = tr.translation

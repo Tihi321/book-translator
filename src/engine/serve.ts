@@ -174,10 +174,17 @@ export async function headless(argv: string[]): Promise<void> {
     stopping = true
     process.stderr.write('\n[headless] stopping: pausing running projects\n')
     try {
-      for (const p of await service.listProjects()) if (service.isRunning(p.id)) await service.pause(p.id)
-      await mcp.stop()
-    } finally {
-      await engine.stop()
+      try {
+        for (const p of await service.listProjects()) if (service.isRunning(p.id)) await service.pause(p.id)
+        await mcp.stop()
+      } finally {
+        await engine.stop()
+      }
+    } catch (err) {
+      // a half-stopped engine must not stay up (its lock may be gone, or kept with nothing served): report and end the process
+      process.stderr.write(`[error] shutdown failed: ${err instanceof Error ? err.message : String(err)}
+`)
+      process.exit(1)
     }
     // nothing keeps the process alive now (the slot timer is stopped, the server is closed): it ends by itself
   }
