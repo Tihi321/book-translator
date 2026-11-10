@@ -1,0 +1,7 @@
+- 2026-11-10 BTT-28 deferred: an `estimate_project {projectId}` MCP tool (analyze_file with the project's own models) - not built in this ticket, a new tool outside the post-run fix list.
+- 2026-11-10 BTT-28 deferred: a per-row "noun only"/part-of-speech glossary option (core row "will => volja" matches the English future tense) - not built, it needs a glossary file format change.
+- 2026-11-10 BTT-28: the packaged `Book Translator.exe --headless` runs `engine serve --mcp`, which has no `shutdown` hook (the tool answers that it needs a headless engine); only `npm run headless` stops via MCP (src/engine/serve.ts serve vs headless) - suggested: wire an app quit into the tool if the exe is used headless.
+- 2026-11-10 BTT-28: a crash (not a pause) still resets a chunk left in proofreading/reviewing, losing the accepted translation (src/engine/pipeline/runner.ts prepareChunks resets IN_PROGRESS_STATES) - suggested: keep the stage output there too, as parkChunk does.
+- 2026-11-10 BTT-28: answers to the fix pass (task `fix`) accepted before a pause are still lost: the resume re-runs the review - info.
+- 2026-11-10 BTT-28: reference-list detection is a heuristic (link share >= 25% or `Surname, A. (year)` start); other citation styles still get glossary checks - suggested: tune on a real References section.
+- 2026-11-10 BTT-28: a `tags` issue where the reviewer's tag set matches the source but the words are wrong is not caught by the deterministic tag check - accepted as a trade-off (low risk, the reviewer's other issue types still report it).

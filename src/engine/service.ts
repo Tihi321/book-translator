@@ -269,7 +269,7 @@ export class EngineService {
       project,
       chunks: chunks.map(chunkBrief),
       sections: ir.sections.map((s) => ({ id: s.id, title: s.title })),
-      qa: qaScoreOf(chunks),
+      qa: qaScoreOf(chunks, project.settings),
       glossary,
       brief,
       log,
@@ -345,11 +345,13 @@ export class EngineService {
       chunk.final[segId] = text
     }
     chunk.state = 'done'
-    chunk.qa = { issues: [] }
+    // the verdict (score, model) stays, marked as given for the text before the edit, so qa.scored and the project score do not drop
+    const { score, model } = chunk.qa
+    chunk.qa = { issues: [], ...(score !== undefined ? { score, edited: true, ...(model ? { model } : {}) } : {}) }
     chunk.error = undefined
     chunk.edited = true
     await this.store.writeChunk(id, chunk)
-    this.emit({ type: 'chunk.state', projectId: id, index, state: 'done', model: chunk.model, tokens: chunk.tokens, issues: 0 })
+    this.emit({ type: 'chunk.state', projectId: id, index, state: 'done', model: chunk.model, tokens: chunk.tokens, issues: 0, ...(chunk.qa.score !== undefined ? { qaScore: chunk.qa.score } : {}) })
     const project = await this.store.load(id)
     this.emit({ type: 'project.updated', project: summarize(project, await this.store.listChunks(id)) })
     return chunk

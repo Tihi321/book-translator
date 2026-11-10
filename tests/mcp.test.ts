@@ -28,12 +28,12 @@ afterEach(async () => {
   r = server = client = undefined
 })
 
-async function setup() {
+async function setup(onShutdown?: () => Promise<void>) {
   const bus = new EngineBus()
   r = await rig({ onEvent: (e) => bus.emit(e) })
   const dispatcher = new CommandDispatcher({ service: r.service, emit: (e) => bus.emit(e), showMock: true, keys: () => undefined, storeKey: () => undefined })
   const svc = r.service
-  server = await startMcpHttp({ port: 0, token: TOKEN, factory: () => createMcpServer(dispatcher, svc, bus) })
+  server = await startMcpHttp({ port: 0, token: TOKEN, factory: () => createMcpServer(dispatcher, svc, bus, onShutdown) })
   const c = new Client({ name: 'test', version: '0' })
   await c.connect(new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } }))
   client = c
@@ -98,7 +98,7 @@ describe('MCP HTTP endpoint', () => {
       'get_info', 'list_models', 'get_defaults', 'list_languages', 'list_projects', 'analyze_file', 'create_project', 'get_project', 'update_project_settings',
       'start_translation', 'pause_translation', 'cancel_translation', 'wait_for_progress', 'get_chunk', 'edit_chunk', 'retry_chunk', 'update_glossary', 'set_brief', 'export_project',
       'prepare_chunks', 'get_translation_task', 'submit_translation',
-      'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task'
+      'list_client_tasks', 'get_client_task', 'submit_client_task', 'release_client_task', 'shutdown'
     ]) expect(names).toContain(n)
     expect(names.filter((n) => /secret|provider|limit|delete|key|detect|add_model|show_models/.test(n))).toEqual([])
     const prompts = (await c.listPrompts()).prompts
@@ -111,8 +111,21 @@ describe('MCP HTTP endpoint', () => {
     expect(c.getInstructions()).toContain('Operator')
     // localized character names can be set when creating a project and later
     const tools = (await c.listTools()).tools
-    for (const n of ['create_project', 'update_project_settings']) expect(Object.keys(tools.find((t) => t.name === n)!.inputSchema.properties ?? {})).toContain('localizeNames')
+    for (const n of ['create_project', 'update_project_settings']) expect(Object.keys(tools.find((t) => t.name === n)!.inputSchema.properties ?? {})).toEqual(expect.arrayContaining(['localizeNames', 'pauseAfterGlossary']))
     expect(c.getInstructions()).toContain('localizeNames')
+  })
+
+  it('shutdown is refused without a headless engine, and with one answers first and then stops it', async () => {
+    const { c } = await setup()
+    await expect(call(c, 'shutdown')).rejects.toThrow(/headless/)
+    await client?.close()
+    await server?.close()
+    let stopped = 0
+    const { c: c2 } = await setup(async () => void stopped++)
+    expect(await call(c2, 'shutdown')).toEqual({ stopping: true, paused: [] })
+    expect(stopped).toBe(0) // the reply is out before the engine goes
+    await new Promise((res) => setTimeout(res, 400))
+    expect(stopped).toBe(1)
   })
 
   it('answers a failing tool with isError and the engine message, and checks the arguments', async () => {
@@ -146,8 +159,9 @@ describe('MCP HTTP endpoint', () => {
 describe('MCP operator flow (the app models translate)', () => {
   it('create_project -> start_translation -> wait_for_progress until done -> export_project', async () => {
     const { r, c } = await setup()
-    const project = await call<{ id: string; chunks: number }>(c, 'create_project', { sourcePath: r.file, targetLanguage: 'Croatian', sourceLanguage: 'English', agentModels: MODELS, enabledAgents: NO_AGENTS, maxChunkTokens: 100 })
+    const project = await call<{ id: string; chunks: number }>(c, 'create_project', { sourcePath: r.file, targetLanguage: 'Croatian', sourceLanguage: 'English', agentModels: MODELS, enabledAgents: NO_AGENTS, maxChunkTokens: 100, pauseAfterGlossary: true })
     expect(project.id).toBeTruthy()
+    expect((await r.service.store.load(project.id)).settings.pauseAfterGlossary).toBe(true)
     // a settings change while stopped
     const detail0 = await call<{ project: { settings: { maxChunkTokens: number; enabled: Record<string, boolean> } } }>(c, 'update_project_settings', { projectId: project.id, maxChunkTokens: 120 })
     expect(detail0.project.settings).toMatchObject({ maxChunkTokens: 120, enabled: NO_AGENTS })

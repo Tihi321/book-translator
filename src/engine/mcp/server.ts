@@ -79,7 +79,7 @@ function defined<T extends Record<string, unknown>>(o: T): Partial<T> {
  * The MCP server: tools that call `dispatcher.handle`, the same path the app's UI uses. Left out on purpose: API keys, provider settings,
  * model limits and deleting projects. A tool that fails answers with `isError: true` and the engine's message.
  */
-export function createMcpServer(dispatcher: CommandDispatcher, service: EngineService, bus: EngineBus): McpServer {
+export function createMcpServer(dispatcher: CommandDispatcher, service: EngineService, bus: EngineBus, onShutdown?: () => Promise<void>): McpServer {
   const server = new McpServer({ name: 'book-translator', version: '0.0.1' }, { instructions: INSTRUCTIONS })
   const run = (cmd: Command) => dispatcher.handle(cmd)
 
@@ -128,6 +128,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       reviewer,
       localizeNames,
       fixMinorIssues,
+      pauseAfterGlossary: z.boolean().optional().describe('true: the run stops after the glossary is built (status glossary-review) so you can edit it; start_translation continues'),
       maxChunkTokens: z.number().int().min(100).optional().describe('Upper limit of a chunk in source tokens'),
       projectId: z.string().optional().describe('A project id of your own (default: made from the file name, language and hash)')
     },
@@ -138,7 +139,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         targetLanguage: a.targetLanguage,
         sourceLanguage: a.sourceLanguage,
         id: a.projectId,
-        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, reviewer: a.reviewer, localizeNames: a.localizeNames, fixMinorIssues: a.fixMinorIssues })
+        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, reviewer: a.reviewer, localizeNames: a.localizeNames, fixMinorIssues: a.fixMinorIssues, pauseAfterGlossary: a.pauseAfterGlossary })
       })
   )
   tool(
@@ -198,6 +199,25 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     await run({ type: 'pause', projectId: a.projectId })
     return { paused: true }
   })
+  tool(
+    'shutdown',
+    'Headless engine only: pauses every running project (the translator and proofreader answers the client already accepted are kept in the chunk files; a fix pass in progress runs again on resume), closes the MCP server, removes engine.lock and ends the process. The answer comes before the server closes. The app (with a window) refuses it: close the app instead.',
+    {},
+    async () => {
+      if (!onShutdown) throw new Error('shutdown only works on a headless engine (npm run headless); close the app to stop it')
+      const paused: string[] = []
+      for (const p of await service.listProjects()) {
+        if (!service.isRunning(p.id)) continue
+        await service.pause(p.id)
+        paused.push(p.id)
+      }
+      // after the reply has been sent: closing the server ends this very request otherwise
+      setTimeout(() => {
+        onShutdown().catch((err: unknown) => bus.emit({ type: 'error', message: `shutdown failed: ${err instanceof Error ? err.message : String(err)}` }))
+      }, 200)
+      return { stopping: true, paused }
+    }
+  )
   tool('cancel_translation', 'Stops a running project and marks it cancelled. Finished chunks are kept.', { projectId }, async (a) => {
     await run({ type: 'cancel', projectId: a.projectId })
     return { cancelled: true }
@@ -279,7 +299,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'release_client_task',
-    'Gives a leased request back to the queue, for another client to take: the one with taskId ({released: true or false}), or, with project and/or role and no taskId, every leased request that matches ({released: how many}). Use the second form at the start of a session to free what an earlier client that stopped still holds, instead of waiting for its lease to run out.',
+    'Gives a leased request back to the queue, for another client to take: the one with taskId ({released: true or false}), or, with no taskId, every leased request that matches the project, role and client you give (none given: every leased request of every client) ({released: how many}). Use the second form at the start of a session to free what an earlier client that stopped still holds, instead of waiting for its lease to run out.',
     { taskId: z.string().min(1).optional(), client: z.string().optional().describe('Only the leased requests of this client (default: every client). Antigravity: client: "antigravity".'), project: z.string().optional(), role: z.string().optional() },
     (a) => run({ type: 'releaseClientTask', taskId: a.taskId, client: a.client, project: a.project, role: a.role })
   )
@@ -406,7 +426,7 @@ function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotO
     total: chunks.length,
     counts,
     spend: p.spend,
-    qa: qaScoreOf(chunks),
+    qa: qaScoreOf(chunks, p.settings),
     clientTasks: { ...clientCounts(service, p.id, role), ...(role ? { role } : {}) },
     // minor QA issues stay in the text unless the project's fixMinorIssues setting sends them to the fixer: the first ones are listed here
     minorIssues: minors.length,

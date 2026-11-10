@@ -797,7 +797,6 @@ export class CommandDispatcher {
         return s.clientQueue.submit(cmd.taskId, cmd.text)
       case 'releaseClientTask':
         if (cmd.taskId) return { released: s.clientQueue.release(cmd.taskId) }
-        if (!cmd.project && !cmd.role) throw new Error('give a taskId, or a project and/or role to release every leased task of')
         return { released: s.clientQueue.releaseLeased({ client: cmd.client, project: cmd.project, role: cmd.role }) }
       default: {
         const never: never = cmd

@@ -84,6 +84,17 @@ describe('renderer store', () => {
     expect(useStore.getState().live.zzz).toBeUndefined()
   })
 
+  it('follows the QA score on each chunk event, and drops the tile score of a retried chunk', () => {
+    useStore.setState({ view: { name: 'project', id: 'p' }, detail: detailOf('p', [brief(1), brief(2), brief(3)]) })
+    const apply = (e: EngineEvent) => useStore.getState().applyEvents([e])
+    apply({ type: 'chunk.state', projectId: 'p', index: 1, state: 'done', qaScore: 8 })
+    apply({ type: 'chunk.state', projectId: 'p', index: 2, state: 'done', qaScore: 6 })
+    expect(useStore.getState().detail!.qa).toMatchObject({ score: 7, scored: 2 })
+    apply({ type: 'chunk.state', projectId: 'p', index: 2, state: 'translating' }) // retried: the engine reset its QA
+    expect(useStore.getState().detail!.chunks[1]!.qaScore).toBeUndefined()
+    expect(useStore.getState().detail!.qa).toMatchObject({ score: 8, scored: 1 })
+  })
+
   it('computes progress from the chunks when no run reports, and reloads the detail when the status changes', async () => {
     useStore.getState().setView({ name: 'project', id: 'p' })
     await new Promise((r) => setTimeout(r, 10))

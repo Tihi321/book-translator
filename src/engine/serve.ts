@@ -142,7 +142,7 @@ function describeEvent(ev: EngineEvent, lastStatus: Map<string, string>): string
 
 /**
  * `engine headless`: the engine with no window. MCP is always on; the URL and the token are printed once to stderr, events are logged to
- * stderr, and Ctrl+C pauses the running projects and ends the process (no process.exit: the sockets close and Node ends by itself).
+ * stderr, and Ctrl+C (or the MCP tool `shutdown`, the way to stop it from a script) pauses the running projects and ends the process (no process.exit: the sockets close and Node ends by itself).
  */
 export async function headless(argv: string[]): Promise<void> {
   const portArg = argValue(argv, 'port')
@@ -151,7 +151,8 @@ export async function headless(argv: string[]): Promise<void> {
   const ctl: { mcp?: McpController } = {}
   const engine = await bootEngine({ argv, mcpStatus: () => ctl.mcp?.status() ?? { enabled: false, running: false } })
   const { dispatcher, service, bus, dataDir } = engine
-  const mcp = new McpController({ dispatcher, service, bus, force: true, port })
+  let shutdown: () => Promise<void> = async () => undefined
+  const mcp = new McpController({ dispatcher, service, bus, force: true, port, onShutdown: () => shutdown() })
   ctl.mcp = mcp
   const lastStatus = new Map<string, string>()
   bus.on((ev) => {
@@ -165,18 +166,25 @@ export async function headless(argv: string[]): Promise<void> {
     await engine.stop()
     throw new Error(`the MCP server did not start: ${st.error ?? 'unknown error'}`)
   }
-  process.stderr.write(`[headless] MCP server at ${st.url}\n[headless] token (shown once): ${st.token}\n[headless] Ctrl+C pauses running projects and stops\n`)
+  process.stderr.write(`[headless] MCP server at ${st.url}\n[headless] token (shown once): ${st.token}\n[headless] Ctrl+C, or the MCP tool shutdown, pauses running projects and stops\n`)
   void dispatcher.discover()
   let stopping = false
-  const shutdown = async () => {
+  shutdown = async () => {
     if (stopping) return
     stopping = true
     process.stderr.write('\n[headless] stopping: pausing running projects\n')
     try {
-      for (const p of await service.listProjects()) if (service.isRunning(p.id)) await service.pause(p.id)
-      await mcp.stop()
-    } finally {
-      await engine.stop()
+      try {
+        for (const p of await service.listProjects()) if (service.isRunning(p.id)) await service.pause(p.id)
+        await mcp.stop()
+      } finally {
+        await engine.stop()
+      }
+    } catch (err) {
+      // a half-stopped engine must not stay up (its lock may be gone, or kept with nothing served): report and end the process
+      process.stderr.write(`[error] shutdown failed: ${err instanceof Error ? err.message : String(err)}
+`)
+      process.exit(1)
     }
     // nothing keeps the process alive now (the slot timer is stopped, the server is closed): it ends by itself
   }

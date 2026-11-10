@@ -81,29 +81,38 @@ export function tagIssue(seg: SegmentRec, text: string): QaIssue | undefined {
  * Translates the segments of a chunk. A reply that does not have exactly the asked ids is retried once with a note, then the chunk is
  * split in half and each half tried (again with one retry); if that fails too, throws ChunkFailure. Per segment, inline tags must match
  * the source: one retry for the segments that do not, then the plain text is kept and a `tags` issue recorded.
- * Segments that were already translated before a failure are in `out` (an optional shared record).
+ * Segments that were already translated before a failure or a pause are in `out` (an optional shared record): they are not asked for
+ * again, and a kept segment whose tags do not match the source gets its `tags` issue again.
  */
 export async function translateChunk(env: AgentEnv, segs: readonly SegmentRec[], opts: TranslateOptions, out: Record<string, string> = {}): Promise<TranslateResult> {
   const issues: QaIssue[] = []
+  const kept = (s: SegmentRec) => Object.hasOwn(out, s.id)
+  for (const s of segs) {
+    const issue = kept(s) ? tagIssue(s, out[s.id]!) : undefined
+    if (issue) issues.push(issue)
+  }
 
   const accept = async (group: readonly SegmentRec[], got: Map<string, string>) => {
     const bad: SegmentRec[] = []
+    const first = new Map<string, string>() // a segment with bad tags is stored only once settled: a stop in between asks for it again
     for (const s of group) {
       const text = fitEdges(s.text, got.get(s.id)!)
-      out[s.id] = text
-      if (tagIssue(s, text)) bad.push(s)
+      if (tagIssue(s, text)) {
+        bad.push(s)
+        first.set(s.id, text)
+      } else out[s.id] = text
     }
     if (bad.length === 0) return
     let retry: Map<string, string> | undefined
     try {
-      const note = `The inline tags (<1>, </1>, <2/> ...) must be copied exactly as in the source segment. Problems: ${bad.map((s) => `${s.id}: ${tagIssue(s, out[s.id]!)!.comment}`).join(' ')}`
+      const note = `The inline tags (<1>, </1>, <2/> ...) must be copied exactly as in the source segment. Problems: ${bad.map((s) => `${s.id}: ${tagIssue(s, first.get(s.id)!)!.comment}`).join(' ')}`
       const p = await ask(env, bad, opts, note, 'retry-tags')
       if (p.ok) retry = p.segments
     } catch (err) {
       if (env.signal?.aborted || (err as Error).name === 'AbortError') throw err
     }
     for (const s of bad) {
-      const text = retry ? fitEdges(s.text, retry.get(s.id)!) : out[s.id]!
+      const text = retry ? fitEdges(s.text, retry.get(s.id)!) : first.get(s.id)!
       const issue = tagIssue(s, text)
       if (!issue) out[s.id] = text
       else {
@@ -131,6 +140,7 @@ export async function translateChunk(env: AgentEnv, segs: readonly SegmentRec[],
     throw new ChunkFailure(`${opts.unit}: the model did not return the segments correctly (${note})`)
   }
 
-  await attempt(segs, true)
+  const todo = segs.filter((s) => !kept(s))
+  if (todo.length > 0) await attempt(todo, true)
   return { translation: { ...out }, issues }
 }
