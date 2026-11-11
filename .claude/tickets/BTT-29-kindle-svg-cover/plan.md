@@ -75,7 +75,7 @@ Output contract for any `cover` value, any source:
 
 Verification: `fnm exec --using default yarn.cmd test`, `yarn.cmd typecheck`, `yarn.cmd lint` in `C:/projects/Personal/book-translator` (all from Bash via `fnm exec --using default ...`). Then the implement skill's review and commit flow (one commit `BTT-29: ...`, merge to master per the repo's usual `Merge BTT-29_...` pattern only when the user approves).
 
-**Task 1 results (DONE, uncommitted; Scope items 1 and 2):**
+**Task 1 results (DONE, committed 9bc4e7b; Scope items 1 and 2):**
 - Reproduction test run first against the unchanged writer: `tests/epub.test.ts` > `epub cover` > `cover title on a book that has a text cover page adds no image cover (Kindle reflow)` failed with `AssertionError: expected '<?xml ...' not to match /image\/svg\+xml"[^>]*cover-image|cover-image[^>]*image\/svg\+xml/` (OPF contained `translated-cover` `image/svg+xml` `cover-image` and `translated-cover-page` first in the spine). After the fix: 13/13 in the file pass.
 - Full suite 387 passed (25 files); `yarn.cmd typecheck` and `yarn.cmd lint` clean (lint first flagged an unused `relativeTo`, removed).
 - Tests: +1 (reproduction), the two SVG `cover title` tests rewritten (A2, A3), default-cover test untouched. The translation map key `m.1` needed no change.
@@ -102,6 +102,8 @@ Steps per project:
 5. Append a line to the project's `log.md` only if the engine does not do it already (it logs `exported N block(s)`).
 
 Output: three fixed EPUBs at the original paths, three `.pre-req0008.epub` backups, a short results table (file, epubcheck result, script result) in this ticket's `handoff.md`. The user then deletes the old copies on Kindle and sends the new files.
+
+**Task 2 results (DONE 2026-11-11):** all three source hashes matched; backups made; exported via CLI from the branch build (default cover); epubcheck 0 fatal / only OPF-096 for each; `verify_reexport.py` PASS 11/11 for each; every zip entry except the OPF byte-equal to the backup, only `translated-cover.svg`/`.xhtml` removed. Table in `C:/projects/Personal/scriptorium/.claude/tickets/REQ-0008-kindle-fixed-layout/handoff.md`. A7 (Kindle reflow) UNTESTED.
 
 ## Acceptance criteria
 
