@@ -190,7 +190,7 @@ async function serviceFor(argv: string[]): Promise<{ service: EngineService; id:
 export async function exportProject(argv: string[]): Promise<number> {
   const s = await serviceFor(argv)
   if (!s) {
-    out('Usage: npm run engine -- export <projectId> [--out <file|folder>] [--cover title]')
+    out('Usage: npm run engine -- export <projectId> [--out <file|folder>] [--cover title]  (EPUB: --cover title replaces the cover image by a plain text title page)')
     out('A visual-novel pack is exported as a folder <slug>.<lang>/ with edition.json, vn/pack.json, vn/text/<lang>.json and catalog.json.')
     return 2
   }

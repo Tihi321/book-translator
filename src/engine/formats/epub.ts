@@ -5,7 +5,7 @@ import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Document, Element, Node } from '@xmldom/xmldom'
 import type { Block, BlockKind, DocumentIR, FormatAdapter, InlineTag, Section, WriteOptions } from '../../shared/ir'
 import { type InlineNode, resolveTranslation } from '../publish/inlineTree'
-import { coverAltText, titleCoverSvg } from '../publish/cover'
+import { coverAltText } from '../publish/cover'
 import { isRtl } from '../publish/lang'
 import { escapeXml, xhtmlPage } from '../publish/xhtml'
 import { stripTags } from './inline'
@@ -343,7 +343,43 @@ function coverImagePaths(opf: Document, opfPath: string): { id: string; path: st
   return out
 }
 
-const relativeTo = (fromFile: string, to: string) => path.posix.relative(path.posix.dirname(fromFile), to)
+/** The body of a plain text title page: the title and, when known, the author. Reflowable text only, never an image. */
+function titleBodyHtml(title: string, author?: string): string {
+  return `<div class="titlepage" style="text-align:center"><h1>${escapeXml(title)}</h1>${author ? `<p class="author">${escapeXml(author)}</p>` : ''}</div>`
+}
+
+/** Replaces the children of a document's `<body>` by the title page body; keeps the body's `epub:type`, setting it to `cover` when it has none. */
+function setTitleBody(doc: Document, title: string, author: string | undefined): boolean {
+  const body = doc.getElementsByTagName('body')[0]
+  if (!body) return false
+  while (body.firstChild) body.removeChild(body.firstChild)
+  const ns = body.namespaceURI
+  const div = doc.createElementNS(ns, 'div')
+  div.setAttribute('class', 'titlepage')
+  div.setAttribute('style', 'text-align:center')
+  const h1 = doc.createElementNS(ns, 'h1')
+  h1.appendChild(doc.createTextNode(title))
+  div.appendChild(h1)
+  if (author) {
+    const p = doc.createElementNS(ns, 'p')
+    p.setAttribute('class', 'author')
+    p.appendChild(doc.createTextNode(author))
+    div.appendChild(p)
+  }
+  body.appendChild(div)
+  if (!body.getAttribute('epub:type')) body.setAttributeNS('http://www.idpf.org/2007/ops', 'epub:type', 'cover') // namespaced, so the serializer declares xmlns:epub when the page lacks it
+  return true
+}
+
+/** Whether a document is already a text cover or title page: its `<body>`, or a direct child of it, has an `epub:type` with the token `cover` or `titlepage`. */
+function isTextCoverPage(doc: Document): boolean {
+  const body = doc.getElementsByTagName('body')[0]
+  if (!body) return false
+  const has = (el: Element) => (el.getAttribute('epub:type') ?? '').split(/\s+/).some((t) => t === 'cover' || t === 'titlepage')
+  if (has(body)) return true
+  for (let n = body.firstChild; n; n = n.nextSibling) if (n.nodeType === ELEMENT && has(n as Element)) return true
+  return false
+}
 
 async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath: string, outPath: string, opts: WriteOptions = {}): Promise<void> {
   const { zip, opfPath, opf, entries } = await loadEpub(srcPath)
@@ -373,14 +409,18 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
       else if (spine.getAttribute('page-progression-direction') === 'rtl') spine.removeAttribute('page-progression-direction')
     }
   }
-  // the cover: its alt text names the translated title; with `cover: 'title'` the image is replaced by a plain title page
+  // the cover: its alt text names the translated title. With `cover: 'title'` the page that shows the cover image becomes a text title page
+  // (never an image: Kindle turns a book with an SVG cover into a fixed-layout one)
   const newTitle = t !== undefined ? stripTags(t).trim() : ''
   const covers = coverImagePaths(opf, opfPath)
   const coverPaths = new Set(covers.map((c) => c.path))
   const opfDir = path.posix.dirname(opfPath) === '.' ? '' : path.posix.dirname(opfPath)
-  const newCover = { svg: path.posix.join(opfDir, 'translated-cover.svg'), page: path.posix.join(opfDir, 'translated-cover.xhtml'), used: false }
   const extra = new Map<string, string>()
   const alt = newTitle ? coverAltText(newTitle, lang) : ''
+  const titleText = newTitle || collapse(opfTitleEl(opf)?.textContent ?? '')
+  const author = opf.getElementsByTagNameNS(DC, 'creator')[0]?.textContent?.trim() || undefined
+  let titlePages = 0
+  const docs = new Map<string, Document>()
 
   replaced.set(opfPath, serialize(opf))
 
@@ -388,15 +428,15 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
     const text = await readText(zip, e.path)
     const doc = text ? parseDoc(text, e) : null
     if (!doc) continue
+    docs.set(e.path, doc)
+    let showsCover = false
     for (const img of Array.from(doc.getElementsByTagName('img'))) {
       const src = img.getAttribute('src') ?? ''
-      const isCover = coverPaths.has(path.posix.normalize(path.posix.join(path.posix.dirname(e.path), decode(src.split('#')[0]!)))) || /^cover\b/i.test((img.getAttribute('alt') ?? '').trim())
+      const declared = coverPaths.has(path.posix.normalize(path.posix.join(path.posix.dirname(e.path), decode(src.split('#')[0]!))))
+      const isCover = declared || /^cover\b/i.test((img.getAttribute('alt') ?? '').trim())
       if (!isCover) continue
       if (alt) img.setAttribute('alt', alt)
-      if (opts.cover === 'title' && coverPaths.has(path.posix.normalize(path.posix.join(path.posix.dirname(e.path), decode(src.split('#')[0]!))))) {
-        img.setAttribute('src', relativeTo(e.path, newCover.svg))
-        newCover.used = true
-      }
+      if (declared) showsCover = true
     }
     const key = `d${i + 1}`
     const all = [...(e.kind === 'ncx' ? [] : [extractTitle(doc, key)]), ...(e.kind === 'ncx' ? extractNcx(doc, key) : extractXhtml(doc, key, e.kind === 'nav'))]
@@ -405,40 +445,41 @@ async function write(_ir: DocumentIR, translations: Map<string, string>, srcPath
       const tr = translations.get(ex.block.id)
       if (tr !== undefined) applyTranslation(doc, ex, tr)
     }
+    if (opts.cover === 'title' && showsCover && e.kind === 'xhtml' && setTitleBody(doc, titleText, author)) titlePages++
     if (lang) setDocLanguage(doc, lang)
     replaced.set(e.path, serialize(doc))
   }
 
   if (opts.cover === 'title') {
-    const author = opf.getElementsByTagNameNS(DC, 'creator')[0]?.textContent?.trim()
-    extra.set(newCover.svg, titleCoverSvg(newTitle || collapse(opfTitleEl(opf)?.textContent ?? ''), author))
     const ns = opf.documentElement?.namespaceURI ?? null
     const manifest = opf.getElementsByTagName('manifest')[0]
     const spine = opf.getElementsByTagName('spine')[0]
     if (manifest) {
+      // no image cover is left in the package; the image files stay in the archive, unreferenced
       for (const c of covers) {
         const props = (c.item.getAttribute('properties') ?? '').split(/\s+/).filter((p) => p && p !== 'cover-image')
         if (props.length > 0) c.item.setAttribute('properties', props.join(' '))
         else c.item.removeAttribute('properties')
       }
-      const svgItem = opf.createElementNS(ns, 'item')
-      svgItem.setAttribute('id', 'translated-cover')
-      svgItem.setAttribute('href', path.posix.relative(opfDir || '.', newCover.svg))
-      svgItem.setAttribute('media-type', 'image/svg+xml')
-      svgItem.setAttribute('properties', 'cover-image')
-      manifest.appendChild(svgItem)
-      for (const m of Array.from(opf.getElementsByTagName('meta'))) if (m.getAttribute('name') === 'cover') m.setAttribute('content', 'translated-cover')
-      if (!newCover.used && spine) {
-        // the book had no cover page to point at the new image: add one at the start of the reading order
-        extra.set(newCover.page, xhtmlPage(newTitle || 'Cover', `<div style="text-align:center"><img src="${escapeXml(relativeTo(newCover.page, newCover.svg))}" alt="${escapeXml(alt || 'Cover')}" style="max-width:100%;max-height:100%"/></div>`, { lang: lang ?? 'en', epubType: 'cover', css: 'translated-cover.css' }).replace(/<link[^>]*>\n?/, ''))
-        const pageItem = opf.createElementNS(ns, 'item')
-        pageItem.setAttribute('id', 'translated-cover-page')
-        pageItem.setAttribute('href', path.posix.relative(opfDir || '.', newCover.page))
-        pageItem.setAttribute('media-type', 'application/xhtml+xml')
-        manifest.appendChild(pageItem)
-        const ref = opf.createElementNS(ns, 'itemref')
-        ref.setAttribute('idref', 'translated-cover-page')
-        spine.insertBefore(ref, spine.firstChild)
+      for (const m of Array.from(opf.getElementsByTagName('meta'))) if (m.getAttribute('name') === 'cover') m.parentNode?.removeChild(m)
+      if (titlePages === 0 && spine) {
+        const firstRef = Array.from(spine.getElementsByTagName('itemref')).find((r) => r.getAttribute('linear') !== 'no')
+        const firstItem = firstRef ? Array.from(manifest.getElementsByTagName('item')).find((it) => it.getAttribute('id') === firstRef.getAttribute('idref')) : undefined
+        const firstPath = firstItem ? path.posix.normalize(path.posix.join(opfDir, decode((firstItem.getAttribute('href') ?? '').split('#')[0]!))) : undefined
+        const firstDoc = firstPath ? docs.get(firstPath) : undefined
+        if (!firstDoc || !isTextCoverPage(firstDoc)) {
+          // no cover or title page to rewrite: add a text title page at the start of the reading order
+          const page = path.posix.join(opfDir, 'translated-title.xhtml')
+          extra.set(page, xhtmlPage(titleText || 'Title', titleBodyHtml(titleText, author), { lang: lang ?? 'en', epubType: 'titlepage' }).replace(/<link[^>]*>\n?/, ''))
+          const pageItem = opf.createElementNS(ns, 'item')
+          pageItem.setAttribute('id', 'translated-title-page')
+          pageItem.setAttribute('href', path.posix.relative(opfDir || '.', page))
+          pageItem.setAttribute('media-type', 'application/xhtml+xml')
+          manifest.appendChild(pageItem)
+          const ref = opf.createElementNS(ns, 'itemref')
+          ref.setAttribute('idref', 'translated-title-page')
+          spine.insertBefore(ref, spine.firstChild)
+        }
       }
       replaced.set(opfPath, serialize(opf))
     }

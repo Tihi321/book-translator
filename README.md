@@ -18,7 +18,7 @@ Books are larger than any model's context, so the text is split into chunks that
 - Progress view with a tile per chunk, live model output, tokens, cost, ETA. Pause, resume and cancel at any time. Everything is written per chunk, so closing the app or a crash resumes where it stopped.
 - Review: source and translation side by side per chunk, QA flags, edit text, retranslate a chunk with another model, accept flags. An editable glossary that applies to the chunks that follow.
 - Export works with partial progress (untranslated parts keep the source text), for previewing.
-- An EPUB export keeps the source cover image with its alt text translated (the title and the word for "cover" where known). The source image still has the original title drawn on it: `export_project` with `cover: title` (CLI `--cover title`) replaces it by a plain SVG title page with the translated title and the author.
+- An EPUB export keeps the source cover image with its alt text translated (the title and the word for "cover" where known). The source image still has the original title drawn on it: `export_project` with `cover: title` (CLI `--cover title`) replaces it by a plain text title page (translated title and author), never an image. EPUB covers are never SVG: Kindle's converter turns a book with an SVG cover into a fixed-layout book.
 - Glossary terms match as whole words or phrases ("Da" is not found in "day"); QA accepts an inflected form of a glossary target (it compares a stem). A glossary row whose Source equals its Target is a keep row: it does not count towards "left untranslated". Brief text written with `set_brief` is kept by the glossary pass: it only adds the fields and characters your brief lacks.
 - Headless CLI for scripting and tests.
 - An MCP server, so another LLM (Claude Code ...) can drive the app or translate with it, with or without a window.
@@ -81,7 +81,7 @@ translate <file|folder> --to <language> [--from <language>] [--model <provider/m
           [--glossary-model <ref>] [--proofread-model <ref>] [--qa-model <ref>]
           [--no-glossary] [--no-proofread] [--no-qa] [--max-chunk <tokens>]
           [--project <id>] [--pause-after-glossary] [--localize-names] [--out <file|folder>]
-export <projectId> [--out <file|folder>] [--cover title]  write the document from what is translated so far (EPUB: --cover title swaps the cover for a plain title page; a pack: writes <slug>.<lang>/ with catalog.json)
+export <projectId> [--out <file|folder>] [--cover title]  write the document from what is translated so far (EPUB: --cover title swaps the cover for a plain text title page; a pack: writes <slug>.<lang>/ with catalog.json)
 status <projectId>                          chunk states, spend, failed chunks and major QA issues
 key-set <ENV_NAME>                          store an API key (npm run key:set <ENV_NAME>)
 headless [--data <dir>] [--port <n>]        run with no window and the MCP server on (npm run headless)
