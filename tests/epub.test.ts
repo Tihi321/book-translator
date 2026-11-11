@@ -200,6 +200,7 @@ describe('epub cover', () => {
     expect(page).toContain('<h1>Probna knjiga</h1>')
     expect(page).toContain('<p class="author">Jane Roe</p>')
     expect(page).not.toMatch(/<img|<svg/)
+    expect(page).toContain('xmlns:epub=')
     const opf = await zip.file('OEBPS/content.opf')!.async('string')
     expect(opf).not.toContain('cover-image')
     expect(opf).not.toContain('image/svg+xml')

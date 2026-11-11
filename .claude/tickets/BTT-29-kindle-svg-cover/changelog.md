@@ -34,3 +34,5 @@
 ### Commit status
 
 Committed on `BTT-29_kindle-svg-cover` (`9bc4e7b` plus the ticket-files commit). Not merged, not pushed.
+
+Polish: epub:type existence check on the cover body is now namespace-aware (getAttributeNS), and the A2 cover-title test asserts xmlns:epub is declared.

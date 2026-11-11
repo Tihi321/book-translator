@@ -367,7 +367,8 @@ function setTitleBody(doc: Document, title: string, author: string | undefined):
     div.appendChild(p)
   }
   body.appendChild(div)
-  if (!body.getAttribute('epub:type')) body.setAttributeNS('http://www.idpf.org/2007/ops', 'epub:type', 'cover') // namespaced, so the serializer declares xmlns:epub when the page lacks it
+  const OPS_NS = 'http://www.idpf.org/2007/ops'
+  if (!body.getAttributeNS(OPS_NS, 'type')) body.setAttributeNS(OPS_NS, 'epub:type', 'cover') // namespaced, so the serializer declares xmlns:epub when the page lacks it
   return true
 }
 
