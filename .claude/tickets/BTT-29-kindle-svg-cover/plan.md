@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: REQ-0008
 repos: [book-translator]
 branch: BTT-29_kindle-svg-cover
