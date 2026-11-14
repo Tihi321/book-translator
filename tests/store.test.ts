@@ -25,7 +25,7 @@ const brief = (index: number, state: ChunkState = 'pending'): ChunkBrief => ({ i
 
 function detailOf(id: string, chunks: ChunkBrief[]): ProjectDetail {
   const project = { id, status: 'translating', spend: { tokensIn: 5, tokensOut: 7, costUsd: 0.5, ms: 0 }, settings: { targetLanguage: 'Croatian' } } as unknown as ProjectFile
-  return { project, chunks, sections: [{ id: 's1', title: 'One' }], qa: { score: null, scored: 0, models: [], independent: false }, glossary: [], brief: '', log: '', running: true, outputRel: `projects/${id}/output` }
+  return { project, chunks, sections: [{ id: 's1', title: 'One' }], qa: { score: null, scored: 0, models: [], independent: false }, typography: { styles: {}, inconsistent: false, offending: [], message: '' }, glossary: [], brief: '', log: '', running: true, outputRel: `projects/${id}/output` }
 }
 
 describe('renderer store', () => {

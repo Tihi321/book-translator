@@ -582,6 +582,32 @@ describe('external translator commands (prepareChunks, getTranslationTask, submi
     await expect(run({ type: 'getTranslationTask', projectId: id, index: 999 })).rejects.toThrow(/no chunk 999/)
   })
 
+  it('a task says when the previous chunk is not translated, carries the typography rule either way, and the project flags mixed dialogue styles', async () => {
+    const { run, id } = await project()
+    const { chunks } = await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id })
+    const f = follower(chunks).index
+    await run({ type: 'updateProjectSettings', projectId: id, patch: { typography: { dialogue: 'dash', notes: 'Numbers in words.' } } })
+    const lone = (await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index: f })).messages
+    expect(lone[1]!.content).toContain(`chunk ${f - 1} is not translated yet`)
+    expect(lone[1]!.content).toContain('Typography')
+    expect(lone[0]!.content).toMatch(/Typography.*dash.*Numbers in words/s)
+
+    // two chunks of one section in different styles: flagged, neither chunk fails
+    const answer = async (index: number, line: string) => {
+      const t = await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index })
+      const ids = t.segmentIds
+      await run({ type: 'submitTranslation', projectId: id, index, reply: asSegs(ids.map((sid, i) => ({ id: sid, text: i < 2 ? line : `Bez dijaloga ${sid}` }))) })
+      return t
+    }
+    await answer(f - 1, '„Dođi”, rekla je.')
+    const second = await answer(f, '– Dođi – rekla je.')
+    expect(second.messages[1]!.content).toContain('## Previous passage')
+    expect(second.messages[1]!.content).toContain('Typography')
+    const detail = await run<ProjectDetail>({ type: 'getProject', projectId: id })
+    expect(detail.typography).toMatchObject({ inconsistent: true, expected: 'dash', offending: [f - 1] })
+    expect(detail.chunks.filter((c) => c.state === 'failed' || c.state === 'flagged')).toHaveLength(0)
+  })
+
   it('submitTranslation rejects wrong ids and saves nothing, accepts a good reply or map, and finishes the project', async () => {
     const { r, run, id } = await project()
     const prepared = await run<PrepareChunksResult>({ type: 'prepareChunks', projectId: id })

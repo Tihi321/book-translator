@@ -18,6 +18,7 @@ import { characterLabels, ensureNameEntries, isPlaceholderName, localizesNames }
 import { proofreadChunk } from './proofreader'
 import { fixChunk, reviewChunk } from './qa'
 import { prevTail, translateChunk } from './translator'
+import { effectiveTypography, typographyRuleOf } from './typography'
 
 export interface RunnerDeps {
   dataDir: string
@@ -200,6 +201,11 @@ export class ProjectRunner {
       const hasBrief = res.brief.characters.length > 0 || [res.brief.genre, res.brief.tone, res.brief.register, res.brief.pov, res.brief.address].some(Boolean)
       // a brief the user wrote (set_brief, or edited by hand) keeps all its text: the pass only adds what is missing
       if (hasBrief) await store.writeBrief(project.id, mergeBriefText(await store.readBrief(project.id), res.brief))
+      // typography: the brief says how dialogue is marked; when it is empty the target language's default is written here (the user can change it)
+      if (!project.settings.typography?.dialogue) {
+        const t = effectiveTypography(project.settings)
+        if (t) project.settings.typography = t
+      }
       project.glossaryDone = true
       await store.save(project)
       this.log(res.failed > 0 ? 'warn' : 'info', `glossary built: ${res.entries.length} terms in ${res.passes} pass(es)${res.failed > 0 ? `, ${res.failed} of them failed and were skipped` : ''}`)
@@ -428,7 +434,7 @@ export class ProjectRunner {
       dataDir,
       sourceLanguage: s.sourceLanguage ?? 'the original language',
       targetLanguage: s.targetLanguage,
-      brief: briefWithNote(brief, this.project.format, { localizeNames: localizesNames(this.project) }),
+      brief: briefWithNote(brief, this.project.format, { localizeNames: localizesNames(this.project), typography: typographyRuleOf(this.project.settings) }),
       glossary,
       format: this.project.format,
       call: this.makeCall(chunk),

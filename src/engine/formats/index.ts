@@ -68,8 +68,8 @@ export function formatNote(format: DocFormat, opts: { localizeNames?: boolean } 
   return undefined
 }
 
-/** The book brief with the format's note. */
-export function briefWithNote(brief: string, format: DocFormat, opts: { localizeNames?: boolean } = {}): string {
+/** The book brief with the typography rule and the format's note. */
+export function briefWithNote(brief: string, format: DocFormat, opts: { localizeNames?: boolean; typography?: string } = {}): string {
   const note = formatNote(format, opts)
-  return note ? [brief.trim(), note].filter(Boolean).join('\n\n') : brief
+  return note || opts.typography ? [brief.trim(), opts.typography, note].filter(Boolean).join('\n\n') : brief
 }

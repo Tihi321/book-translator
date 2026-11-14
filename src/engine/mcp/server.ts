@@ -5,6 +5,7 @@ import type { CommandDispatcher } from '../dispatcher'
 import { NOTHING_LEFT } from '../service'
 import type { EngineService } from '../service'
 import { countStates, qaScoreOf } from '../project/summary'
+import { typographyCheck } from '../pipeline/typography'
 import type { EngineEvent, ModelsInfo, ProgressInfo } from '../../shared/protocol'
 import type { Command } from '../../shared/protocol'
 import type { ProjectFile } from '../../shared/project'
@@ -53,6 +54,15 @@ const clientOnly = z
 const localizeNames = z
   .boolean()
   .describe("Visual-novel folders and packs only (default false). true: the character names are localized: the glossary builder gives each name a form for the target language (type person in glossary.md, which you can edit before export_project), and the translator writes it into the catalog's name values and wherever a name appears in the text (a book folder: into the speaker tags, the ON SCREEN: lines and the bible's character list, so VN Studio still pairs every line). false: names stay as in the source.")
+  .optional()
+
+const typography = z
+  .object({
+    dialogue: z.enum(['dash', 'quotes', 'guillemets']).optional().describe('dash: a dialogue paragraph starts with an en dash ("– Text – he said."); quotes: quotation marks; guillemets: « »'),
+    quotes: z.string().optional().describe('The quotation marks, for example „…” (inside narration for dash dialogue, around the dialogue for quotes)'),
+    notes: z.string().optional().describe('Anything else about typography, in words (ellipsis, number format ...)')
+  })
+  .describe("The typography part of the brief: how dialogue and quotations are marked. Every translator and proofreader prompt carries it as a rule, and get_project / wait_for_progress flag chunks that use another dialogue style. Empty: the target language's default (Croatian, Serbian, Bosnian, Polish, Russian, Spanish: dash; English, German, Czech: quotes), none for other languages.")
   .optional()
 
 const fixMinorIssues = z
@@ -127,6 +137,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       clientOnly,
       reviewer,
       localizeNames,
+      typography,
       fixMinorIssues,
       pauseAfterGlossary: z.boolean().optional().describe('true: the run stops after the glossary is built (status glossary-review) so you can edit it; start_translation continues'),
       maxChunkTokens: z.number().int().min(100).optional().describe('Upper limit of a chunk in source tokens'),
@@ -139,7 +150,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
         targetLanguage: a.targetLanguage,
         sourceLanguage: a.sourceLanguage,
         id: a.projectId,
-        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, reviewer: a.reviewer, localizeNames: a.localizeNames, fixMinorIssues: a.fixMinorIssues, pauseAfterGlossary: a.pauseAfterGlossary })
+        settings: defined({ agentModels: a.agentModels as never, enabled: a.enabledAgents as never, maxChunkTokens: a.maxChunkTokens, clientOnly: a.clientOnly, reviewer: a.reviewer, localizeNames: a.localizeNames, typography: a.typography, fixMinorIssues: a.fixMinorIssues, pauseAfterGlossary: a.pauseAfterGlossary })
       })
   )
   tool(
@@ -162,6 +173,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       clientOnly,
       reviewer,
       localizeNames,
+      typography,
       fixMinorIssues,
       maxChunkTokens: z.number().int().min(100).optional(),
       targetLanguage: z.string().optional(),
@@ -179,6 +191,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
           clientOnly: a.clientOnly,
           reviewer: a.reviewer,
           localizeNames: a.localizeNames,
+          typography: a.typography,
           fixMinorIssues: a.fixMinorIssues,
           maxChunkTokens: a.maxChunkTokens,
           targetLanguage: a.targetLanguage,
@@ -317,7 +330,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'get_translation_task',
-    'The next chunk to translate (or the chunk at index), as the messages the app translator would get: rules, brief, glossary entries, the previous passage and the <seg id> segments. Translate them and send the answer to submit_translation.',
+    'The next chunk to translate (or the chunk at index), as the messages the app translator would get: rules, brief (with the typography rule), glossary entries, the previous passage and the <seg id> segments. The previous passage is the previous chunk\'s translation; when that chunk is not translated yet (parallel clients) the task says so and you have no style reference: follow the typography rule. Translate them and send the answer to submit_translation.',
     { projectId, index: z.number().int().min(1).optional().describe('A specific chunk, to translate it again') },
     async (a) => {
       try {
@@ -417,6 +430,7 @@ function clientCounts(service: EngineService, projectId: string, role?: string):
 
 function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotOf>>, p: ProjectFile, errors: string[], timedOut: boolean, role?: string) {
   const { counts, chunks } = s
+  const typo = typographyCheck(chunks, p.settings)
   const minors = chunks.flatMap((c) => c.qa.issues.filter((i) => i.severity === 'minor').map((i) => ({ chunk: c.index, segId: i.segId, type: i.type, comment: i.comment })))
   return {
     status: p.status,
@@ -427,6 +441,8 @@ function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotO
     counts,
     spend: p.spend,
     qa: qaScoreOf(chunks, p.settings),
+    // chunks that mix dialogue styles or leave the brief's (the chunks themselves are not failed)
+    ...(typo.inconsistent ? { typography: typo } : {}),
     clientTasks: { ...clientCounts(service, p.id, role), ...(role ? { role } : {}) },
     // minor QA issues stay in the text unless the project's fixMinorIssues setting sends them to the fixer: the first ones are listed here
     minorIssues: minors.length,

@@ -30,6 +30,32 @@ export interface GlossaryEntry {
   note?: string
 }
 
+export type DialogueStyle = 'dash' | 'quotes' | 'guillemets'
+
+/** How dialogue and quotations are marked in the translation. Part of the brief: every translator and proofreader prompt carries it as a rule. */
+export interface Typography {
+  /** `dash`: a paragraph starts with a dash; `quotes`: quotation marks; `guillemets`: « » (or » «). */
+  dialogue?: DialogueStyle
+  /** The quotation marks for quotes inside narration (or for the dialogue when `dialogue` is `quotes`), for example `„…”`. */
+  quotes?: string
+  /** Anything else, in words (number format, ellipsis, ...). */
+  notes?: string
+}
+
+/** The deterministic dialogue-style check of a project (`typographyCheck`). */
+export interface TypographyCheck {
+  /** The brief's dialogue style, when it has one. */
+  expected?: DialogueStyle
+  /** Chunk numbers per style found (a chunk with too little dialogue has none). */
+  styles: Partial<Record<DialogueStyle | 'mixed', number[]>>
+  /** More than one style, or a style other than the brief's. */
+  inconsistent: boolean
+  /** The chunks that are not in the brief's style, or (without one) not in the commonest style. */
+  offending: number[]
+  /** One line for a status display. */
+  message: string
+}
+
 export interface ProjectSettings {
   sourceLanguage?: string
   /** Name used in prompts, for example "Croatian". */
@@ -51,6 +77,8 @@ export interface ProjectSettings {
   reviewer?: ReviewerSettings
   /** Default off: only major QA issues go to the fixer. On: the minor ones are sent too (and the chunk is checked again). */
   fixMinorIssues?: boolean
+  /** The brief's typography part. Empty: the glossary pass (and every prompt) uses the target language's default, if there is one. */
+  typography?: Typography
   /** Parallel translation. `maxAtOnce: auto` follows the translator provider's concurrency; `splitSections` also runs the chunks of one section at the same time. */
   parallel: ParallelSettings
 }

@@ -42,6 +42,8 @@ describe('pipeline end to end (mock models)', () => {
     const project = await store.load(id)
     expect(project.status).toBe('done')
     expect(project.glossaryDone).toBe(true)
+    // the glossary pass writes the target language's typography default into the brief's settings
+    expect(project.settings.typography).toMatchObject({ dialogue: 'dash' })
     expect(project.spend.tokensIn).toBe(res.spend.tokensIn)
 
     const out = await r.service.export(id)
