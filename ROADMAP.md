@@ -2,6 +2,10 @@
 
 What Book Translator still lacks on its own. Work that needs the other tools or a production run (the BTT-11 live check, translations for the hub) is planned in the creative hub (`C:\projects\Personal\creative-hub\ROADMAP.md`, tickets `HUB-NN` in its `.claude/tickets/`). Finished work is in `.claude/tickets/` (BTT-08 VN script adapter, BTT-09 client provider, BTT-10 client-only projects, BTT-11 the hub roadmap fixes, BTT-13/14 UI check and providers reload, BTT-15 to BTT-20 the hub findings). Fix items on a ticket branch (`BTT-NN_<what>`) cut from `master`.
 
+## Open: found by the hub's *The Rooster* Croatian run (2026-11-14)
+
+- **BTT-30: style drift between chunks translated in parallel.** Four clients translated ranges of one client-only project at the same time (`get_translation_task {index}`). The result mixed „…” dialogue (chunks 1-17) with en-dash dialogue (18-34), and some recurring words differed ("pet do pet" against "deset do pet", "skelar" against "trajektaš", "zapjevao" against "kukurikao"). Every check passed. Fix: (1) a typography field in the brief (dialogue style, quote marks, number format) that every translator prompt carries; (2) a deterministic check at the end, or in `engine status`, that flags a book whose chunks use more than one dialogue style; (3) optionally, give each client the previous chunk's translation when it exists, and say in the task when it does not.
+
 ## Where it stands (2026-10-25)
 
 - **BTT-26** (2026-11-09, branch `BTT-26_independent-qa`; creative-hub request REQ-0005, piece P4; plan `.claude/tickets/BTT-26-independent-qa/plan.md`): a client-only project can name free reviewer models (`reviewer: { models, proofread? }`) so QA is not Claude checking Claude; client-only lists are exact (no shared fallbacks) and reviewers must be local or `client/` models. Every QA reply carries a 0-10 `score` (a failed QA has none), stored per chunk (`qa.score`, `qa.model`) and shown as the project score in `get_project`, `wait_for_progress`, `list_projects`, `engine status` and the project view. The ACP proxy port is now 8787 (a data folder with the old seed value is migrated once).
