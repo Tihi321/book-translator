@@ -5,6 +5,7 @@ import { scriptDevMock } from './models/devMock'
 import { ModelRegistry } from './models/registry'
 import { countTokens } from './tokens'
 import { countStates, qaScoreLine, qaScoreOf } from './project/summary'
+import { typographyCheck } from './pipeline/typography'
 import { EngineService } from './service'
 import type { ExportReport } from './service'
 import { AGENTS } from '../shared/schemas'
@@ -212,6 +213,8 @@ export async function projectStatus(argv: string[]): Promise<number> {
   out(`chunks: ${chunks.length} (${Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none yet'})`)
   out(`spend: $${p.spend.costUsd.toFixed(4)}, ${p.spend.tokensIn} tokens in, ${p.spend.tokensOut} out`)
   out(`qa score: ${qaScoreLine(qaScoreOf(chunks, p.settings), chunks.length)}`)
+  const typo = typographyCheck(chunks, p.settings)
+  if (typo.inconsistent) out(`typography: ${typo.message}`)
   for (const c of chunks) {
     if (c.state === 'failed') out(`  chunk ${c.index} failed: ${c.error}`)
     else if (c.state === 'flagged' && c.error) out(`  chunk ${c.index} flagged: ${c.error}`)

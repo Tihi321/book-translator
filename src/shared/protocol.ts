@@ -1,5 +1,5 @@
 import type { DocFormat } from './ir'
-import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary, QaScore } from './project'
+import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary, QaScore, TypographyCheck } from './project'
 import type { AgentName } from './agents'
 import type { DefaultsConfig } from './schemas'
 import type { ClientTaskSummary } from '../engine/models/client'
@@ -163,6 +163,8 @@ export interface ProjectDetail {
   sections: { id: string; title?: string }[]
   glossary: GlossaryEntry[]
   qa: QaScore
+  /** Dialogue style per chunk: flags a book whose chunks mix styles or leave the brief's. */
+  typography: TypographyCheck
   brief: string
   /** The last lines of log.md. */
   log: string

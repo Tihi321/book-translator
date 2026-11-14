@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hasTarget, mergeBriefText, mergeGlossary, parseGlossary, relevantEntries, serializeBrief, serializeGlossary } from '../src/engine/pipeline/glossary'
+import { dialogueStyleOf, effectiveTypography, typographyRuleOf } from '../src/engine/pipeline/typography'
 import type { GlossaryEntry } from '../src/shared/project'
 
 const entries: GlossaryEntry[] = [
@@ -70,6 +71,29 @@ describe('mergeBriefText', () => {
   })
   it('uses the generated brief when the user has none', () => {
     expect(mergeBriefText('  ', gen)).toBe(serializeBrief(gen))
+  })
+})
+
+describe('typography', () => {
+  const para = (...xs: string[]) => xs
+
+  it('detects the dialogue style by the paragraphs that start a line of dialogue, and ignores a chunk with almost no dialogue', () => {
+    expect(dialogueStyleOf(para('– Dođi – rekla je.', '<1>– Ne.</1>', 'Pada kiša.'))).toBe('dash')
+    expect(dialogueStyleOf(para('„Dođi”, rekla je.', '„Ne.”', '– Pa dobro.'))).toBe('quotes')
+    expect(dialogueStyleOf(para('„Dođi”, rekla je.', '– Ne.'))).toBe('mixed')
+    expect(dialogueStyleOf(para('«Viens.»', '«Non.»'))).toBe('guillemets')
+    expect(dialogueStyleOf(para('– Samo jedna replika.', 'Pada kiša.'))).toBeUndefined()
+  })
+
+  it('has a default per language, lets the project override it, and states the rule', () => {
+    expect(effectiveTypography({ targetLanguage: 'Croatian' })).toMatchObject({ dialogue: 'dash' })
+    expect(effectiveTypography({ targetLanguage: 'x', targetLanguageCode: 'de-AT' })).toMatchObject({ dialogue: 'quotes' })
+    expect(effectiveTypography({ targetLanguage: 'Klingon' })).toBeUndefined()
+    // an own dialogue style drops the default's quote marks, an own note keeps the default
+    expect(effectiveTypography({ targetLanguage: 'Croatian', typography: { dialogue: 'quotes' } })).toEqual({ dialogue: 'quotes' })
+    expect(effectiveTypography({ targetLanguage: 'Croatian', typography: { notes: 'Numbers in words.' } })).toMatchObject({ dialogue: 'dash', notes: 'Numbers in words.' })
+    expect(typographyRuleOf({ targetLanguage: 'Croatian' })).toMatch(/dash.*never with quotation marks.*„…”/)
+    expect(typographyRuleOf({ targetLanguage: 'Klingon' })).toBeUndefined()
   })
 })
 

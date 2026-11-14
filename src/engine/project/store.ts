@@ -203,7 +203,8 @@ export function mergeSettings(base: ProjectSettings, patch: Partial<ProjectSetti
     ...defined,
     agentModels: { ...base.agentModels, ...(patch.agentModels ?? {}) },
     enabled: { ...base.enabled, ...(patch.enabled ?? {}) },
-    parallel: { ...DEFAULT_PARALLEL, ...base.parallel, ...(patch.parallel ?? {}) }
+    parallel: { ...DEFAULT_PARALLEL, ...base.parallel, ...(patch.parallel ?? {}) },
+    ...(base.typography || patch.typography ? { typography: { ...base.typography, ...(patch.typography ?? {}) } } : {})
   }
   // clientOnly wins over any agentModels given with it or kept from before: every agent sits on the client model
   if (merged.clientOnly) merged.agentModels = Object.fromEntries(AGENTS.map((a) => [a, [CLIENT_ONLY_MODEL]])) as Record<AgentName, string[]>

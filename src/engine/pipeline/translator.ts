@@ -47,11 +47,21 @@ export function fitEdges(source: string, text: string): string {
 }
 
 /** The user message of a translator request: glossary slice, previous passage, a note about the last answer, the segments. */
-export function translatorUserContent(env: Pick<AgentEnv, 'glossary' | 'targetLanguage'>, segs: readonly SegmentRec[], prev: PrevContext | undefined, note: string | undefined): string {
+export function translatorUserContent(
+  env: Pick<AgentEnv, 'glossary' | 'targetLanguage'>,
+  segs: readonly SegmentRec[],
+  prev: PrevContext | undefined,
+  note: string | undefined,
+  /** `rule`: the brief's typography rule. `previousMissing`: the number of the chunk before this one when it is not translated yet. */
+  style: { rule?: string; previousMissing?: number } = {}
+): string {
   const parts: string[] = []
   const gl = relevantEntries(env.glossary, segs.map((s) => s.text).join('\n'))
   if (gl.length > 0) parts.push(`## Glossary (use these translations)\n${formatEntries(gl)}`)
-  if (prev) parts.push(`## Previous passage (context only, do not translate it)\nSource:\n${prev.source}\n\nTranslation:\n${prev.translation}`)
+  const rule = style.rule ? `\n\n${style.rule}` : ''
+  if (prev) parts.push(`## Previous passage (context only, do not translate it)\nSource:\n${prev.source}\n\nTranslation:\n${prev.translation}${rule}`)
+  else if (style.previousMissing !== undefined)
+    parts.push(`## Previous passage\nNone: chunk ${style.previousMissing} is not translated yet (another translator may be working on it), so there is no earlier translation to match. Follow the glossary and the brief for names, wording and typography.${rule}`)
   if (note) parts.push(`## Problem with your previous answer\n${note}`)
   parts.push(`## Translate these segments into ${env.targetLanguage}\n${formatSegments(segs)}`)
   return parts.join('\n\n')

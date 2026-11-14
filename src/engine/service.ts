@@ -18,6 +18,7 @@ import { characterLabels, ensureNameEntries, KEEP_NAME_NOTE, localizesNames, nam
 import { describeParse, parseSegments } from './pipeline/segments'
 import type { SegmentParse } from './pipeline/segments'
 import { fitEdges, prevTail, tagIssue, translatorUserContent } from './pipeline/translator'
+import { typographyCheck, typographyRuleOf } from './pipeline/typography'
 import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
@@ -270,6 +271,7 @@ export class EngineService {
       chunks: chunks.map(chunkBrief),
       sections: ir.sections.map((s) => ({ id: s.id, title: s.title })),
       qa: qaScoreOf(chunks, project.settings),
+      typography: typographyCheck(chunks, project.settings),
       glossary,
       brief,
       log,
@@ -401,14 +403,19 @@ export class EngineService {
       throw new Error(NOTHING_LEFT)
     }
     const before = chunks.find((c) => c.index === chunk.index - 1)
-    const prev = before && before.sectionId === chunk.sectionId && (before.state === 'done' || before.state === 'flagged') ? prevTail(before.segments, before.final) : undefined
+    const translated = (c: ChunkRecord) => c.state === 'done' || c.state === 'flagged'
+    const sameSection = before !== undefined && before.sectionId === chunk.sectionId
+    const prev = before && sameSection && translated(before) ? prevTail(before.segments, before.final) : undefined
+    // a parallel client may ask for chunk n before chunk n-1 is translated: say so, it has no style reference then
+    const previousMissing = before !== undefined && sameSection && !prev ? before.index : undefined
+    const rule = typographyRuleOf(project.settings)
     const [glossary, brief] = await Promise.all([this.store.readGlossary(id), this.store.readBrief(id)])
     const s = project.settings
     const messages = await buildMessages(
       this.opts.dataDir,
       'translator',
-      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief: briefWithNote(brief, project.format, { localizeNames: localizesNames(project) }) },
-      translatorUserContent({ glossary, targetLanguage: s.targetLanguage }, chunk.segments, prev, undefined)
+      { sourceLanguage: s.sourceLanguage ?? 'the original language', targetLanguage: s.targetLanguage, brief: briefWithNote(brief, project.format, { localizeNames: localizesNames(project), typography: rule }) },
+      translatorUserContent({ glossary, targetLanguage: s.targetLanguage }, chunk.segments, prev, undefined, { rule, previousMissing })
     )
     return {
       index: chunk.index,
