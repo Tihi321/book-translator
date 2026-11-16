@@ -24,7 +24,7 @@ interface Item {
  * then a second pass (`matchMoved`) that gives a moved paragraph its old block. A block with a match whose segments are all translated (chunk `done` or `flagged`) keeps its
  * translation, proofread text, hand edit and QA verdict in a kept chunk, which is never run again. Changed and new blocks go into new pending
  * chunks. Removed blocks are dropped. Chunks are numbered 1..N in document order. `editedKept` and `editsDropped` count hand-edited segments
- * (`isHandEdit`), kept and dropped.
+ * (`isHandEdit`), kept and dropped; `droppedEdits` names the first dropped ones.
  */
 export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord[], newIr: DocumentIR, budget: number, count: (t: string) => number = countTokens): { chunks: ChunkRecord[]; report: Counts } {
   // the old segments by id, with the chunk that holds them
@@ -100,15 +100,26 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
     }
   }
 
+  const dropped = oldChunks.flatMap((c) => c.segments.filter((s) => !carried.has(s.id) && isHandEdit(c, s.id)).map((s) => ({ chunk: c.index, segment: s.id, text: c.final[s.id] ?? '' })))
   return {
     chunks,
     report: {
       blocks: { kept: blocksKept, toTranslate: blocksToTranslate, removed: oldBlocks.length - matched },
       chunks: { total: chunks.length, kept: kept.size, toTranslate: chunks.length - kept.size },
       editedKept,
-      editsDropped: oldChunks.reduce((n, c) => n + c.segments.filter((s) => !carried.has(s.id) && isHandEdit(c, s.id)).length, 0)
+      editsDropped: dropped.length,
+      droppedEdits: dropped.slice(0, MAX_DROPPED_LISTED).map((d) => ({ ...d, text: cut(d.text, DROPPED_TEXT_CHARS) }))
     }
   }
+}
+
+/** Dropped hand edits that `refreshChunks` names (the count is always given), and how much of each old text it keeps. */
+const MAX_DROPPED_LISTED = 20
+const DROPPED_TEXT_CHARS = 160
+
+/** `text`, or its first `max - 1` characters and an ellipsis. */
+export function cut(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}\u2026`
 }
 
 /**
@@ -266,6 +277,7 @@ function keptChunk(index: number, sectionId: string, run: Item[], c: ChunkRecord
     return out
   }
   const whole = run.length === c.segments.length
+  const editedSegs = c.editedSegs && run.filter((x) => c.editedSegs!.includes(x.from!.oldId)).map((x) => x.seg.id)
   return {
     ...c,
     index,
@@ -275,7 +287,9 @@ function keptChunk(index: number, sectionId: string, run: Item[], c: ChunkRecord
     translation: rekey(c.translation),
     proofread: rekey(c.proofread),
     final: rekey(c.final),
-    editedSegs: c.editedSegs && run.filter((x) => c.editedSegs!.includes(x.from!.oldId)).map((x) => x.seg.id),
+    editedSegs,
+    // a part of a split chunk that holds none of its hand edits shows no "edited" badge (an older chunk without editedSegs keeps the flag)
+    edited: !whole && editedSegs?.length === 0 ? false : c.edited,
     qa: { ...c.qa, issues: c.qa.issues.filter((q) => ids.has(q.segId)).map((q) => ({ ...q, segId: ids.get(q.segId)! })) },
     tokens: whole ? c.tokens : { in: 0, out: 0 },
     costUsd: whole ? c.costUsd : 0,

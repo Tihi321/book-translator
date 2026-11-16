@@ -151,6 +151,7 @@ Choose other models (--model ...), or run the project from an MCP client: start_
     return 2
   }
   out(`project ${summary.id} (${summary.format}, ${summary.chunks > 0 ? summary.chunks + ' chunks, resuming' : 'new'})`)
+  if (summary.hint) out(`note: ${summary.hint}`)
   const est = await service.analyze(summary.id)
   out(`estimate: ${est.chunks} chunks of up to ${est.budget} tokens, ${est.sourceTokens} source tokens, ~${est.estTokensIn}/${est.estTokensOut} tokens in/out, ~$${est.estCostUsd.toFixed(3)}, ~${fmtDuration(est.estSeconds)}`)
 
@@ -217,6 +218,8 @@ export async function refreshProject(argv: string[]): Promise<number> {
   out(`chunks: ${r.chunks.total} (${r.chunks.kept} kept, ${r.chunks.toTranslate} to translate)`)
   out(`hand-edited segments kept: ${r.editedKept}`)
   out(`hand-edited segments dropped (text changed or removed): ${r.editsDropped}`)
+  for (const d of r.droppedEdits) out(`  chunk ${d.chunk}, ${d.segment}: ${d.text}`)
+  if (r.editsDropped > r.droppedEdits.length) out(`  ${r.editsDropped - r.droppedEdits.length} more (the old texts are in refresh-backup/)`)
   out(`backup: ${r.backupRel}`)
   return 0
 }

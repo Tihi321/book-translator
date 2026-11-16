@@ -11,7 +11,7 @@ import type { Command } from '../../shared/protocol'
 import type { ProjectFile } from '../../shared/project'
 import { AGENTS } from '../../shared/schemas'
 
-/** The longest `wait_for_progress` waits, and the wait when `timeoutSec` is left out. */
+/** The longest `wait_for_progress` waits (the MCP client's default request timeout is 60 s: a longer call would fail there), and the wait when `timeoutSec` is left out. */
 export const MAX_WAIT_SEC = 60
 const DEFAULT_WAIT_SEC = 25
 /** Lines of log.md that `get_project` returns. */
@@ -237,10 +237,10 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   })
   tool(
     'wait_for_progress',
-    `Waits until a chunk finishes or the project's status changes, or for timeoutSec (at most ${MAX_WAIT_SEC}), then returns the status and progress. Returns at once when the project does not run, or when a request of this project waits for you on the client provider (clientTasks.waiting > 0: take it with get_client_task). With role, only a request of that role counts (and clientTasks counts only that role), so a worker for one role can wait for its own work. The result lists the minor QA issues of the chunks (minorIssues, minors). Call it again until status is done.`,
+    `Waits until a chunk finishes or the project's status changes, or for timeoutSec seconds (default ${DEFAULT_WAIT_SEC}, at most ${MAX_WAIT_SEC}, so the call stays under the MCP client's 60 s request timeout; there is no timeoutMs), then returns the status and progress, with waitedMs, the time this call waited. To wait longer, call it again. Returns at once when the project does not run, or when a request of this project waits for you on the client provider (clientTasks.waiting > 0: take it with get_client_task). With role, only a request of that role counts (and clientTasks counts only that role), so a worker for one role can wait for its own work. The result lists the minor QA issues of the chunks (minorIssues, minors). Call it again until status is done.`,
     {
       projectId,
-      timeoutSec: z.number().min(1).max(MAX_WAIT_SEC).optional().describe(`Default ${DEFAULT_WAIT_SEC}`),
+      timeoutSec: z.number().min(1).max(MAX_WAIT_SEC).optional().describe(`Seconds, not milliseconds. Default ${DEFAULT_WAIT_SEC}, at most ${MAX_WAIT_SEC} (the MCP client's request timeout): call again to wait longer`),
       role: z.string().optional().describe('glossary, translator, proofreader or qa: only a waiting request of this role ends the wait early')
     },
     (a) => waitForProgress(service, bus, a.projectId, Math.min(MAX_WAIT_SEC, a.timeoutSec ?? DEFAULT_WAIT_SEC), a.role),
@@ -258,7 +258,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'refresh_source',
-    'Reads the source document again after it was edited and keeps the translation of every block whose text did not change, hand edits (edit_chunk) and QA verdicts included, also when the block moved. Changed and new blocks go into new pending chunks: start_translation (or get_translation_task) translates only them. Removed blocks are dropped. A hand edit on changed or removed text is dropped and counted in editsDropped. Chunk numbers change. The old chunks, source.json and project.json are copied to refresh-backup/ first. Refused while the project runs, and for visual-novel folders and packs.',
+    'Reads the source document again after it was edited and keeps the translation of every block whose text did not change, hand edits (edit_chunk) and QA verdicts included, also when the block moved. Changed and new blocks go into new pending chunks: start_translation (or get_translation_task) translates only them. Removed blocks are dropped. A hand edit on changed or removed text is dropped and counted in editsDropped; droppedEdits names the first 20 (old chunk, segment id, the edited text cut to 160 characters). Chunk numbers change. The old chunks, source.json and project.json are copied to refresh-backup/ first. Refused while the project runs, and for visual-novel folders and packs.',
     { projectId, sourcePath: z.string().optional().describe("Absolute path of the edited source, the same format (default: the project's source path)") },
     (a) => run({ type: 'refreshSource', projectId: a.projectId, sourcePath: a.sourcePath })
   )
@@ -457,9 +457,11 @@ function describe(service: EngineService, s: Awaited<ReturnType<typeof snapshotO
   }
 }
 
+/** `describe` after a wait, with `waitedMs`: how long the call waited (at most `seconds`, which `MAX_WAIT_SEC` caps). */
 async function waitForProgress(service: EngineService, bus: EngineBus, id: string, seconds: number, role?: string) {
+  const t0 = Date.now()
   const first = await snapshotOf(service, id)
-  if (!first.running || clientCounts(service, id, role).waiting > 0) return describe(service, first, first.project, [], false, role)
+  if (!first.running || clientCounts(service, id, role).waiting > 0) return { ...describe(service, first, first.project, [], false, role), waitedMs: Date.now() - t0 }
   const finished = (c: { done: number; failed: number }) => c.done + c.failed
   const baseline = finished(first.counts)
   const errors: string[] = []
@@ -487,5 +489,5 @@ async function waitForProgress(service: EngineService, bus: EngineBus, id: strin
     })
   })
   const now = await snapshotOf(service, id)
-  return describe(service, now, now.project, errors, timedOut, role)
+  return { ...describe(service, now, now.project, errors, timedOut, role), waitedMs: Date.now() - t0 }
 }

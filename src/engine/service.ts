@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { chunkBudget, planChunks } from './chunker'
-import { refreshChunks, translatableBlocks } from './project/refresh'
+import { cut, refreshChunks, translatableBlocks } from './project/refresh'
 import { formatNothingTranslated, formatRefusal, formatWarning, untranslatedReport } from './untranslated'
 import { loadDefaults, resolveLanguage } from './config'
 import { adapterFor, briefWithNote, hashSource } from './formats'
@@ -402,7 +402,7 @@ export class EngineService {
     const hash = await hashSource(file)
     const oldChunks = await this.store.listChunks(id)
     if (hash === project.sourceHash && file === project.sourcePath) {
-      return { unchanged: true, sourcePath: file, blocks: { kept: 0, toTranslate: 0, removed: 0 }, chunks: { total: oldChunks.length, kept: oldChunks.length, toTranslate: 0 }, editedKept: 0, editsDropped: 0 }
+      return { unchanged: true, sourcePath: file, blocks: { kept: 0, toTranslate: 0, removed: 0 }, chunks: { total: oldChunks.length, kept: oldChunks.length, toTranslate: 0 }, editedKept: 0, editsDropped: 0, droppedEdits: [] }
     }
     const newIr = await adapterFor(file).read(file)
     if (newIr.format !== project.format) throw new Error(`the new source is ${newIr.format}, the project is ${project.format}`)
@@ -412,7 +412,8 @@ export class EngineService {
       blocks: { kept: 0, toTranslate: translatableBlocks(newIr).length, removed: translatableBlocks(oldIr).length },
       chunks: { total: 0, kept: 0, toTranslate: 0 },
       editedKept: 0,
-      editsDropped: 0
+      editsDropped: 0,
+      droppedEdits: []
     }
     const budget = project.chunking?.budget ?? chunkBudget({ contexts: [], userMax: project.settings.maxChunkTokens })
     if (oldChunks.length > 0) ({ chunks, report } = refreshChunks(oldIr, oldChunks, newIr, budget))
@@ -422,8 +423,10 @@ export class EngineService {
     project.chunking = chunks.length ? { budget, chunks: chunks.length } : null
     if (chunks.length > 0) project.status = chunks.some((c) => c.state !== 'done' && c.state !== 'flagged') ? 'incomplete' : 'done'
     await this.store.save(project)
-    const { blocks, chunks: cs, editedKept, editsDropped } = report
-    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited segment(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed); ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
+    const { blocks, chunks: cs, editedKept, editsDropped, droppedEdits } = report
+    const named = droppedEdits.slice(0, 5).map((d) => `chunk ${d.chunk} ${d.segment} "${cut(d.text, 40)}"`)
+    if (editsDropped > named.length && named.length > 0) named.push(`${editsDropped - named.length} more`)
+    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited segment(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed)${named.length ? `: ${named.join(', ')}` : ''}; ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
     await this.store.log(id, `info: ${message}`)
     this.emit({ type: 'log', projectId: id, level: 'info', message })
     this.emit({ type: 'project.updated', project: summarize(project, chunks) })
