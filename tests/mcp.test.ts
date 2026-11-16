@@ -135,6 +135,10 @@ describe('MCP HTTP endpoint', () => {
     expect(res.content[0]!.text).toMatch(/ENOENT|missing/)
     const bad = (await c.callTool({ name: 'wait_for_progress', arguments: { projectId: 'x', timeoutSec: 61 } })) as ToolResult
     expect(bad.isError).toBe(true)
+    // an unknown key is refused, not stripped (BTT-35: timeoutMs once ran with the default timeout)
+    const unknownKey = (await c.callTool({ name: 'wait_for_progress', arguments: { projectId: 'x', timeoutMs: 600000 } })) as ToolResult
+    expect(unknownKey.isError).toBe(true)
+    expect(unknownKey.content[0]!.text).toMatch(/^wait_for_progress: unknown argument "timeoutMs"; valid: projectId, timeoutSec/)
     const noFile = (await c.callTool({ name: 'create_project', arguments: { sourcePath: path.join(r!.dir, 'nope.md'), targetLanguage: 'hr' } })) as ToolResult
     expect(noFile.isError).toBe(true)
   })
