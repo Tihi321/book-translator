@@ -52,6 +52,7 @@ describe('segment protocol', () => {
     expect(same.ok).toBe(false)
     expect(same.conflicting).toEqual([])
     expect(salvage(same, ids)).toMatchObject({ ask: [] })
+    expect(parseSegments(seg('a', 'B  B') + seg('a', 'B B'), ['a']).conflicting).toEqual([])
     // 2. a conflicting repeat plus a missing id: both are asked, the conflicting one is not kept
     const garbled = parseSegments([seg('a', 'A'), seg('b', 'B'), seg('b', 'X'), seg('d', 'D')].join(''), ids)
     expect(garbled.conflicting).toEqual(['b'])

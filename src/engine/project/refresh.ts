@@ -20,7 +20,7 @@ interface Item {
 
 /**
  * Re-chunks a project for an edited source, with no I/O. Blocks are matched by exact text, never by id (ids are positional, so an inserted
- * paragraph renumbers everything after it). A block with a match whose segments are all translated (chunk `done` or `flagged`) keeps its
+ * paragraph renumbers everything after it), with an in-order alignment (`alignTexts`), so a repeated paragraph matches the copy in its place. A block with a match whose segments are all translated (chunk `done` or `flagged`) keeps its
  * translation, proofread text, hand edit and QA verdict in a kept chunk, which is never run again. Changed and new blocks go into new pending
  * chunks. Removed blocks are dropped. Chunks are numbered 1..N in document order.
  */
@@ -29,14 +29,10 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
   const oldSegs = new Map<string, { chunk: ChunkRecord; seg: SegmentRec }>()
   for (const chunk of oldChunks) for (const seg of chunk.segments) oldSegs.set(seg.id, { chunk, seg })
 
-  // old blocks by text, in document order: each new block takes the first unused one
-  const queues = new Map<string, Block[]>()
+  // the old and new blocks aligned in order by text: match[k] is the old block of the k-th new translatable block
   const oldBlocks = translatableBlocks(oldIr)
-  for (const b of oldBlocks) {
-    const q = queues.get(b.text) ?? []
-    q.push(b)
-    queues.set(b.text, q)
-  }
+  const match = alignTexts(oldBlocks.map((b) => b.text), translatableBlocks(newIr).map((b) => b.text))
+  let k = 0
 
   const carriedFrom = (oldId: string, text: string): Item['from'] => {
     const o = oldSegs.get(oldId)
@@ -54,7 +50,8 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
     for (const block of section.blocks) {
       if (block.kind === 'meta' || block.text.trim() === '') continue
       const segs = segmentsForBlock(block, budget, count)
-      const old = queues.get(block.text)?.shift()
+      const m = match[k++]
+      const old = m === undefined ? undefined : oldBlocks[m]
       let froms: Item['from'][] = segs.map(() => undefined)
       if (old) {
         matched++
@@ -96,6 +93,125 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
       blocks: { kept: blocksKept, toTranslate: blocksToTranslate, removed: oldBlocks.length - matched },
       chunks: { total: chunks.length, kept: kept.size, toTranslate: chunks.length - kept.size },
       editedKept: [...kept].filter((c) => c.edited).length
+    }
+  }
+}
+
+/** Above this many cells a gap with no unique anchor is matched greedily instead of by a full LCS table. */
+const LCS_CELLS = 1_000_000
+
+/**
+ * Aligns two text sequences in order, patience-diff style: the result gives, for each new index, the old index it matches, and matched
+ * pairs keep their relative order. A common prefix and suffix match first; then the texts that occur once on each side are anchors (their
+ * longest run in order), and the gaps between anchors are aligned the same way. A gap with no anchor gets an exact LCS, or, when too big for
+ * one, a greedy in-order match. Linear in practice on a book; repeats ("* * *", "Yes.") match the copy in the same place.
+ */
+export function alignTexts(oldTexts: readonly string[], newTexts: readonly string[]): (number | undefined)[] {
+  const ids = new Map<string, number>()
+  const id = (t: string) => {
+    let v = ids.get(t)
+    if (v === undefined) ids.set(t, (v = ids.size))
+    return v
+  }
+  const a = oldTexts.map(id)
+  const b = newTexts.map(id)
+  const out: (number | undefined)[] = new Array<number | undefined>(b.length).fill(undefined)
+  const stack: [number, number, number, number][] = [[0, a.length, 0, b.length]]
+  while (stack.length) {
+    let [a0, a1, b0, b1] = stack.pop()!
+    while (a0 < a1 && b0 < b1 && a[a0] === b[b0]) out[b0++] = a0++
+    while (a0 < a1 && b0 < b1 && a[a1 - 1] === b[b1 - 1]) out[--b1] = --a1
+    if (a0 === a1 || b0 === b1) continue
+
+    // anchors: texts that occur exactly once in each range, the longest chain increasing on both sides
+    const seen = new Map<number, { na: number; ia: number; nb: number; ib: number }>()
+    for (let i = a0; i < a1; i++) {
+      const s = seen.get(a[i]!) ?? { na: 0, ia: i, nb: 0, ib: 0 }
+      s.na++
+      seen.set(a[i]!, s)
+    }
+    for (let j = b0; j < b1; j++) {
+      const s = seen.get(b[j]!)
+      if (s) {
+        s.nb++
+        s.ib = j
+      }
+    }
+    const pairs = [...seen.values()].filter((s) => s.na === 1 && s.nb === 1).sort((x, y) => x.ib - y.ib)
+    if (pairs.length) {
+      const chain = longestIncreasing(pairs.map((p) => p.ia))
+      let pa = a0
+      let pb = b0
+      for (const c of chain) {
+        const p = pairs[c]!
+        out[p.ib] = p.ia
+        stack.push([pa, p.ia, pb, p.ib])
+        pa = p.ia + 1
+        pb = p.ib + 1
+      }
+      stack.push([pa, a1, pb, b1])
+    } else if ((a1 - a0) * (b1 - b0) <= LCS_CELLS) lcs(a, a0, a1, b, b0, b1, out)
+    else greedy(a, a0, a1, b, b0, b1, out)
+  }
+  return out
+}
+
+/** The indices (into `xs`) of a longest strictly increasing subsequence, in order. */
+function longestIncreasing(xs: readonly number[]): number[] {
+  const tails: number[] = []
+  const prev: number[] = new Array<number>(xs.length).fill(-1)
+  for (let i = 0; i < xs.length; i++) {
+    let lo = 0
+    let hi = tails.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (xs[tails[mid]!]! < xs[i]!) lo = mid + 1
+      else hi = mid
+    }
+    if (lo > 0) prev[i] = tails[lo - 1]!
+    tails[lo] = i
+  }
+  const chain: number[] = []
+  for (let i = tails.length ? tails[tails.length - 1]! : -1; i >= 0; i = prev[i]!) chain.push(i)
+  return chain.reverse()
+}
+
+function lcs(a: readonly number[], a0: number, a1: number, b: readonly number[], b0: number, b1: number, out: (number | undefined)[]): void {
+  const n = a1 - a0
+  const m = b1 - b0
+  // t[i][j] = LCS length of a[a0+i..a1) and b[b0+j..b1)
+  const t = new Uint32Array((n + 1) * (m + 1))
+  const at = (i: number, j: number) => t[i * (m + 1) + j]!
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--) t[i * (m + 1) + j] = a[a0 + i] === b[b0 + j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1))
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (a[a0 + i] === b[b0 + j]) out[b0 + j++] = a0 + i++
+    else if (at(i + 1, j) >= at(i, j + 1)) i++
+    else j++
+  }
+}
+
+/** Each new text takes the first old copy after the last match. */
+function greedy(a: readonly number[], a0: number, a1: number, b: readonly number[], b0: number, b1: number, out: (number | undefined)[]): void {
+  const at = new Map<number, number[]>()
+  for (let i = a0; i < a1; i++) {
+    const q = at.get(a[i]!) ?? []
+    q.push(i)
+    at.set(a[i]!, q)
+  }
+  const next = new Map<number, number>()
+  let last = a0 - 1
+  for (let j = b0; j < b1; j++) {
+    const q = at.get(b[j]!)
+    if (!q) continue
+    let p = next.get(b[j]!) ?? 0
+    while (p < q.length && q[p]! <= last) p++
+    next.set(b[j]!, p)
+    if (p < q.length) {
+      out[j] = q[p]!
+      last = q[p]!
     }
   }
 }

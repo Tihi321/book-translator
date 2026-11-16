@@ -2,6 +2,9 @@ import { promises as fs } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
+import { refreshChunks } from '../src/engine/project/refresh'
+import type { DocumentIR } from '../src/shared/ir'
+import type { ChunkRecord } from '../src/shared/project'
 
 let r: Rig | undefined
 afterEach(async () => {
@@ -64,5 +67,16 @@ describe('refresh_source', () => {
     expect(out).not.toContain('Paragraph 5 of chapter 1:')
 
     expect((await service.refreshSource(id)).unchanged).toBe(true)
+  })
+
+  it('aligns repeated paragraphs in order: deleting the first of two identical ones keeps the hand edit of the second', () => {
+    const ir = (texts: string[], p: string): DocumentIR => ({ format: 'txt', meta: {}, sections: [{ id: 's1', blocks: texts.map((text, i) => ({ id: `${p}${i + 1}`, kind: 'para', text, tags: [] })) }] })
+    const oldIr = ir(['Alpha', 'Yes.', 'Bravo', 'Yes.', 'Charlie'], 'o')
+    const segments = oldIr.sections[0]!.blocks.map((b) => ({ id: b.id, blockId: b.id, text: b.text }))
+    const final = { o1: 'ALFA', o2: 'DA-FIRST', o3: 'BRAVO', o4: 'DA-SECOND', o5: 'CHARLIE' }
+    const old: ChunkRecord = { index: 1, sectionId: 's1', blockIds: segments.map((s) => s.id), segments, translation: final, proofread: {}, final, qa: { issues: [] }, state: 'done', tokens: { in: 0, out: 0 }, costUsd: 0, ms: 0, edited: true }
+    const { chunks, report } = refreshChunks(oldIr, [old], ir(['Alpha', 'Bravo', 'Yes.', 'Charlie'], 'n'), 1000, (t) => t.length)
+    expect(chunks.flatMap((c) => c.segments.map((s) => c.final[s.id]))).toEqual(['ALFA', 'BRAVO', 'DA-SECOND', 'CHARLIE'])
+    expect(report).toMatchObject({ blocks: { kept: 4, toTranslate: 0, removed: 1 }, editedKept: 1 })
   })
 })
