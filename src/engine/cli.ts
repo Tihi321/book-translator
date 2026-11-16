@@ -204,7 +204,7 @@ export async function exportProject(argv: string[]): Promise<number> {
 export async function refreshProject(argv: string[]): Promise<number> {
   const s = await serviceFor(argv)
   if (!s) {
-    out('Usage: npm run engine -- refresh <projectId> [--source <file>]  (re-reads the edited source: unchanged blocks keep their translation and hand edits, also when moved; changed and new ones are translated by the next run, and hand edits on changed text are dropped and counted, with a copy in refresh-backup/)')
+    out('Usage: npm run engine -- refresh <projectId> [--source <file>]  (re-reads the edited source: unchanged blocks keep their translation and hand edits, also when moved; changed and new ones are translated by the next run, and hand edits on changed or removed text are dropped and counted, with a copy in refresh-backup/)')
     return 2
   }
   const r = await s.service.refreshSource(s.id, argValue(argv, 'source'))
