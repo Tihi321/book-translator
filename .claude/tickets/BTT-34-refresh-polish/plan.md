@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: REQ-0028
 repos: [book-translator]
 branch: BTT-34_refresh-polish
