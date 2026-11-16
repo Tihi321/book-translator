@@ -198,6 +198,8 @@ export interface RefreshResult {
   chunks: { total: number; kept: number; toTranslate: number }
   /** Kept chunks that carry a hand edit (edit_chunk). */
   editedKept: number
+  /** Hand-edited segments that were dropped because their text changed or was removed (the old text is in refresh-backup/). */
+  editsDropped: number
   /** The backup folder, relative to the data folder (forward slashes). Absent when unchanged. */
   backupRel?: string
 }

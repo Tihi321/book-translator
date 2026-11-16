@@ -373,7 +373,7 @@ export class EngineService {
 
   /**
    * Re-reads the source after it was edited (or another file of the same format) into the same project. Blocks whose text did not change keep
-   * their translation, QA verdict and hand edit; changed and new blocks go into new pending chunks; removed blocks are dropped. The old
+   * their translation, QA verdict and hand edit, also when moved; changed and new blocks go into new pending chunks; removed blocks are dropped. The old
    * files are backed up first. Chunk numbers change.
    */
   async refreshSource(id: string, sourcePath?: string): Promise<RefreshResult> {
@@ -384,7 +384,7 @@ export class EngineService {
     const hash = await hashSource(file)
     const oldChunks = await this.store.listChunks(id)
     if (hash === project.sourceHash && file === project.sourcePath) {
-      return { unchanged: true, sourcePath: file, blocks: { kept: 0, toTranslate: 0, removed: 0 }, chunks: { total: oldChunks.length, kept: oldChunks.length, toTranslate: 0 }, editedKept: 0 }
+      return { unchanged: true, sourcePath: file, blocks: { kept: 0, toTranslate: 0, removed: 0 }, chunks: { total: oldChunks.length, kept: oldChunks.length, toTranslate: 0 }, editedKept: 0, editsDropped: 0 }
     }
     const newIr = await adapterFor(file).read(file)
     if (newIr.format !== project.format) throw new Error(`the new source is ${newIr.format}, the project is ${project.format}`)
@@ -393,7 +393,8 @@ export class EngineService {
     let report: Omit<RefreshResult, 'unchanged' | 'sourcePath' | 'backupRel'> = {
       blocks: { kept: 0, toTranslate: translatableBlocks(newIr).length, removed: translatableBlocks(oldIr).length },
       chunks: { total: 0, kept: 0, toTranslate: 0 },
-      editedKept: 0
+      editedKept: 0,
+      editsDropped: 0
     }
     const budget = project.chunking?.budget ?? chunkBudget({ contexts: [], userMax: project.settings.maxChunkTokens })
     if (oldChunks.length > 0) ({ chunks, report } = refreshChunks(oldIr, oldChunks, newIr, budget))
@@ -403,8 +404,8 @@ export class EngineService {
     project.chunking = chunks.length ? { budget, chunks: chunks.length } : null
     if (chunks.length > 0) project.status = chunks.some((c) => c.state !== 'done' && c.state !== 'flagged') ? 'incomplete' : 'done'
     await this.store.save(project)
-    const { blocks, chunks: cs, editedKept } = report
-    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited chunk(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
+    const { blocks, chunks: cs, editedKept, editsDropped } = report
+    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited chunk(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed); ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
     await this.store.log(id, `info: ${message}`)
     this.emit({ type: 'log', projectId: id, level: 'info', message })
     this.emit({ type: 'project.updated', project: summarize(project, chunks) })

@@ -20,7 +20,8 @@ interface Item {
 
 /**
  * Re-chunks a project for an edited source, with no I/O. Blocks are matched by exact text, never by id (ids are positional, so an inserted
- * paragraph renumbers everything after it), with an in-order alignment (`alignTexts`), so a repeated paragraph matches the copy in its place. A block with a match whose segments are all translated (chunk `done` or `flagged`) keeps its
+ * paragraph renumbers everything after it), with an in-order alignment (`alignTexts`), so a repeated paragraph matches the copy in its place,
+ * then a second pass (`matchMoved`) that gives a moved paragraph its old block. A block with a match whose segments are all translated (chunk `done` or `flagged`) keeps its
  * translation, proofread text, hand edit and QA verdict in a kept chunk, which is never run again. Changed and new blocks go into new pending
  * chunks. Removed blocks are dropped. Chunks are numbered 1..N in document order.
  */
@@ -31,7 +32,9 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
 
   // the old and new blocks aligned in order by text: match[k] is the old block of the k-th new translatable block
   const oldBlocks = translatableBlocks(oldIr)
-  const match = alignTexts(oldBlocks.map((b) => b.text), translatableBlocks(newIr).map((b) => b.text))
+  const oldTexts = oldBlocks.map((b) => b.text)
+  const newTexts = translatableBlocks(newIr).map((b) => b.text)
+  const match = matchMoved(oldTexts, newTexts, alignTexts(oldTexts, newTexts))
   let k = 0
 
   const carriedFrom = (oldId: string, text: string): Item['from'] => {
@@ -44,6 +47,7 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
   let blocksKept = 0
   let blocksToTranslate = 0
   let matched = 0
+  const carried = new Set<string>()
   const sections: { id: string; items: Item[] }[] = []
   for (const section of newIr.sections) {
     const items: Item[] = []
@@ -61,7 +65,11 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
       }
       if (froms.every((f) => f)) blocksKept++
       else blocksToTranslate++
-      segs.forEach((seg, i) => items.push({ seg, from: froms[i] }))
+      segs.forEach((seg, i) => {
+        const from = froms[i]
+        if (from) carried.add(from.oldId)
+        items.push({ seg, from })
+      })
     }
     sections.push({ id: section.id, items })
   }
@@ -92,9 +100,32 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
     report: {
       blocks: { kept: blocksKept, toTranslate: blocksToTranslate, removed: oldBlocks.length - matched },
       chunks: { total: chunks.length, kept: kept.size, toTranslate: chunks.length - kept.size },
-      editedKept: [...kept].filter((c) => c.edited).length
+      editedKept: [...kept].filter((c) => c.edited).length,
+      editsDropped: oldChunks.reduce((n, c) => n + (c.edited ? c.segments.filter((s) => !carried.has(s.id) && isHandEdit(c, s.id)).length : 0), 0)
     }
   }
+}
+
+/** A segment of a hand-edited chunk whose final text is not the translator's or proofreader's text: the user (or the fix pass) wrote it. */
+function isHandEdit(c: ChunkRecord, segId: string): boolean {
+  const final = c.final[segId]
+  return final !== undefined && final !== (c.proofread[segId] ?? c.translation[segId])
+}
+
+/**
+ * The second pass after `alignTexts`: each new text still unmatched takes an unused old block with exactly the same text, the first such
+ * old block in document order. So a moved paragraph keeps its translation and hand edit, while repeats keep their in-order match.
+ */
+function matchMoved(oldTexts: readonly string[], newTexts: readonly string[], match: (number | undefined)[]): (number | undefined)[] {
+  const used = new Set(match.filter((m) => m !== undefined))
+  const free = new Map<string, number[]>()
+  oldTexts.forEach((t, i) => {
+    if (used.has(i)) return
+    const q = free.get(t)
+    if (q) q.push(i)
+    else free.set(t, [i])
+  })
+  return match.map((m, j) => m ?? free.get(newTexts[j]!)?.shift())
 }
 
 /** Above this many cells a gap with no unique anchor is matched greedily instead of by a full LCS table. */

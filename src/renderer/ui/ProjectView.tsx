@@ -142,7 +142,7 @@ export function ProjectView({ id }: { id: string }) {
     const res = await attempt(getApi().request<'refreshSource'>({ type: 'refreshSource', projectId: id, ...(sourcePath ? { sourcePath } : {}) }))
     setRefreshing('closed')
     if (!res) return
-    toast(res.unchanged ? 'The source has not changed' : `Source refreshed: ${res.blocks.kept} paragraphs kept, ${res.blocks.toTranslate} to translate, ${res.blocks.removed} removed`, 'info')
+    toast(res.unchanged ? 'The source has not changed' : `Source refreshed: ${res.blocks.kept} paragraphs kept, ${res.blocks.toTranslate} to translate, ${res.blocks.removed} removed${res.editsDropped ? `; ${res.editsDropped} hand-edited segment(s) dropped because their text changed (copy in refresh-backup/)` : ''}`, 'info')
     await loadDetail(id)
   }
 
@@ -213,7 +213,7 @@ export function ProjectView({ id }: { id: string }) {
 
       {refreshing !== 'closed' && (
         <div className="row" data-testid="refresh-row">
-          <span className="small">Re-read the source and keep the translations of unchanged paragraphs (hand edits too). Changed and new paragraphs are translated by the next run.</span>
+          <span className="small">Re-read the source and keep the translations of unchanged paragraphs (hand edits too, also when moved). Changed and new paragraphs are translated by the next run.</span>
           <button className="primary" onClick={() => void refreshFrom(false)} disabled={refreshing === 'busy'} data-testid="refresh-same">Refresh from {p.sourcePath.split(/[\\/]/).pop()}</button>
           <button onClick={() => void refreshFrom(true)} disabled={refreshing === 'busy'} data-testid="refresh-pick">Choose another file...</button>
           <button onClick={() => setRefreshing('closed')} disabled={refreshing === 'busy'}>Cancel</button>
