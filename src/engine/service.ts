@@ -25,7 +25,7 @@ import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
 import { EXPORT_REFUSED, SOURCE_CHANGED } from '../shared/protocol'
-import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, RefreshResult, SubmitResult, TranslationTask } from '../shared/protocol'
+import type { ChunkBrief, CreateProjectResult, EngineEvent, PrepareChunksResult, ProjectDetail, RefreshResult, SubmitResult, TranslationTask } from '../shared/protocol'
 import { AGENTS } from '../shared/schemas'
 import type { AgentName } from '../shared/schemas'
 
@@ -175,8 +175,11 @@ export class EngineService {
     }
   }
 
-  /** Creates the project (project.json, source.json ...). The same file and language give the same project: its settings are updated. */
-  async createProject(req: CreateProjectRequest): Promise<ProjectSummary> {
+  /**
+   * Creates the project (project.json, source.json ...). The same file and language give the same project: its settings are updated. A new
+   * project for a file and language that an older project has with other contents (the file was edited) gets a `hint` naming that project.
+   */
+  async createProject(req: CreateProjectRequest): Promise<CreateProjectResult> {
     const sourcePath = path.resolve(req.sourcePath)
     const hash = await hashSource(sourcePath)
     const base = await this.defaultSettings(req.targetLanguage, req.sourceLanguage)
@@ -214,7 +217,19 @@ export class EngineService {
     if (names.length > 0 && !localizesNames(project)) await this.store.writeGlossary(id, names.map((n) => ({ source: n, target: n, type: 'person', note: KEEP_NAME_NOTE })))
     const summary = summarize(project, [])
     this.emit({ type: 'project.updated', project: summary })
-    return summary
+    const hint = await this.editedSourceHint(project)
+    return hint ? { ...summary, hint } : summary
+  }
+
+  /** For a new project: an older project of the same source path and target language whose file hash differs, and what to do instead. */
+  private async editedSourceHint(project: ProjectFile): Promise<string | undefined> {
+    const key = (p: ProjectFile) => {
+      const file = path.resolve(p.sourcePath)
+      return `${process.platform === 'win32' ? file.toLowerCase() : file}|${(p.settings.targetLanguageCode ?? p.settings.targetLanguage).toLowerCase()}`
+    }
+    const older = (await this.store.list()).find((p) => p.id !== project.id && p.sourceHash !== project.sourceHash && key(p) === key(project))
+    if (!older) return undefined
+    return `project ${older.id} already translates ${project.sourcePath} into ${project.settings.targetLanguage}, from the file before it was edited. To keep its translations and hand edits, run refresh_source on ${older.id} (the app: Refresh source; CLI: engine refresh ${older.id}) and delete this new project ${project.id}.`
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -354,8 +369,10 @@ export class EngineService {
     if (this.runs.has(id)) throw new Error('pause the project before editing a chunk')
     const chunk = await this.store.readChunk(id, index)
     const known = new Set(chunk.segments.map((s) => s.id))
+    const editedSegs = new Set(chunk.editedSegs ?? [])
     for (const [segId, text] of Object.entries(final)) {
       if (!known.has(segId)) throw new Error(`chunk ${index} has no segment ${segId}`)
+      if (chunk.final[segId] !== text) editedSegs.add(segId)
       chunk.final[segId] = text
     }
     chunk.state = 'done'
@@ -364,6 +381,7 @@ export class EngineService {
     chunk.qa = { issues: [], ...(score !== undefined ? { score, edited: true, ...(model ? { model } : {}) } : {}) }
     chunk.error = undefined
     chunk.edited = true
+    chunk.editedSegs = chunk.segments.map((s) => s.id).filter((s) => editedSegs.has(s))
     await this.store.writeChunk(id, chunk)
     this.emit({ type: 'chunk.state', projectId: id, index, state: 'done', model: chunk.model, tokens: chunk.tokens, issues: 0, ...(chunk.qa.score !== undefined ? { qaScore: chunk.qa.score } : {}) })
     const project = await this.store.load(id)
@@ -405,7 +423,7 @@ export class EngineService {
     if (chunks.length > 0) project.status = chunks.some((c) => c.state !== 'done' && c.state !== 'flagged') ? 'incomplete' : 'done'
     await this.store.save(project)
     const { blocks, chunks: cs, editedKept, editsDropped } = report
-    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited chunk(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed); ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
+    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited segment(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed); ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
     await this.store.log(id, `info: ${message}`)
     this.emit({ type: 'log', projectId: id, level: 'info', message })
     this.emit({ type: 'project.updated', project: summarize(project, chunks) })
@@ -515,6 +533,7 @@ export class EngineService {
     chunk.qa = { issues: [] }
     chunk.error = undefined
     chunk.edited = undefined
+    chunk.editedSegs = undefined
     chunk.model = input.model?.trim() || EXTERNAL_MODEL
     chunk.state = 'done'
     await this.store.writeChunk(id, chunk)

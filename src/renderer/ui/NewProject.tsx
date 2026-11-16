@@ -211,6 +211,7 @@ export function NewProject() {
     setStarting(true)
     const project = await attempt(getApi().request<'createProject'>({ type: 'createProject', sourcePath: file, targetLanguage, sourceLanguage: sourceLang.trim() || undefined, settings }))
     if (project) {
+      if (project.hint) toast(project.hint)
       await attempt(getApi().request<'start'>({ type: 'start', projectId: project.id }))
       setView({ name: 'project', id: project.id })
     }
@@ -249,9 +250,11 @@ export function NewProject() {
     setDone(0)
     let ok = 0
     const failed: string[] = []
+    const hints: string[] = []
     for (const x of batchOn) {
       try {
         const project = await getApi().request<'createProject'>({ type: 'createProject', sourcePath: x.path, targetLanguage, sourceLanguage: sourceLang.trim() || undefined, settings })
+        if (project.hint) hints.push(project.hint)
         if (startNow) await getApi().request<'start'>({ type: 'start', projectId: project.id })
         ok++
       } catch (err) {
@@ -261,6 +264,7 @@ export function NewProject() {
     }
     setStarting(false)
     if (failed.length > 0) toast(`${failed.length} of ${batchOn.length} could not be created: ${failed.join('; ')}`, 'error')
+    if (hints.length > 0) toast(hints.join(' '))
     if (ok > 0) {
       toast(`${ok} translation(s) ${startNow ? 'started' : 'created'}`, 'info')
       setView({ name: 'list' })

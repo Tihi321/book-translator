@@ -187,6 +187,12 @@ export interface ProjectDetail {
   outputRel: string
 }
 
+/** The answer to `createProject`. */
+export interface CreateProjectResult extends ProjectSummary {
+  /** A new project for a file and language that an older project has with other file contents: names it and refresh_source. */
+  hint?: string
+}
+
 /** The answer to `refreshSource`. */
 export interface RefreshResult {
   /** Same file and hash as before: nothing was changed. */
@@ -196,7 +202,7 @@ export interface RefreshResult {
   blocks: { kept: number; toTranslate: number; removed: number }
   /** Chunks after the refresh: all, kept from before (translated), pending ones that need translation. */
   chunks: { total: number; kept: number; toTranslate: number }
-  /** Kept chunks that carry a hand edit (edit_chunk). */
+  /** Kept segments that carry a hand edit (edit_chunk). A chunk without `editedSegs` (edited before they were recorded) counts every segment whose text is not the model's. */
   editedKept: number
   /** Hand-edited segments that were dropped because their text changed or was removed (the old text is in refresh-backup/). */
   editsDropped: number
@@ -414,7 +420,7 @@ export interface CommandResults {
   saveProviders: ModelsInfo
   getDefaults: DefaultsConfig
   setDefaults: DefaultsConfig
-  createProject: ProjectSummary
+  createProject: CreateProjectResult
   analyze: AnalyzeResult
   getProject: ProjectDetail
   getChunk: ChunkRecord

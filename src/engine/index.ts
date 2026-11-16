@@ -13,7 +13,7 @@ Usage:
                                                  <file> may be a Scriptorium visual-novel book folder: the export is a folder
   npm run engine -- export <projectId> [--out <file>] [--cover title] [--allow-partial]   Write the document; refuses while a block is untranslated unless --allow-partial (--cover title: EPUB cover becomes a plain text title page)
   npm run engine -- refresh <projectId> [--source <file>]   Re-read the edited source into the project: unchanged blocks keep their translation and hand edits, also when moved;
-                                                 hand edits on changed text are dropped and counted (copy in refresh-backup/)
+                                                 hand edits on changed or removed text are dropped and counted (copy in refresh-backup/)
   npm run engine -- status <projectId>           Show chunk states, spend and flagged chunks
   node out/engine/index.js serve [--data <dir>] [--mcp]  Run as the app's engine process (Electron utilityProcess or a Node child with IPC); --mcp turns the MCP server on for this run
   npm run headless -- [--data <dir>] [--port <n>]  Engine without a window: the MCP server is on, its URL and token are printed once (Ctrl+C pauses running projects and stops)

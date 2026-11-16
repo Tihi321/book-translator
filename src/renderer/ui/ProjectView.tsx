@@ -142,7 +142,7 @@ export function ProjectView({ id }: { id: string }) {
     const res = await attempt(getApi().request<'refreshSource'>({ type: 'refreshSource', projectId: id, ...(sourcePath ? { sourcePath } : {}) }))
     setRefreshing('closed')
     if (!res) return
-    toast(res.unchanged ? 'The source has not changed' : `Source refreshed: ${res.blocks.kept} paragraphs kept, ${res.blocks.toTranslate} to translate, ${res.blocks.removed} removed${res.editsDropped ? `; ${res.editsDropped} hand-edited segment(s) dropped because their text changed (copy in refresh-backup/)` : ''}`, 'info')
+    toast(res.unchanged ? 'The source has not changed' : `Source refreshed: ${res.blocks.kept} paragraphs kept, ${res.blocks.toTranslate} to translate, ${res.blocks.removed} removed${res.editsDropped ? `; ${res.editsDropped} hand-edited segment(s) dropped because their text changed or was removed (copy in refresh-backup/)` : ''}`, 'info')
     await loadDetail(id)
   }
 
