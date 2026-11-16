@@ -95,8 +95,15 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
 
   /** Registers a tool whose handler returns data (turned into JSON text) or a ready result. */
   const tool = <S extends z.ZodRawShape>(name: string, description: string, shape: S, fn: (args: z.infer<z.ZodObject<S>>) => Promise<unknown>, readOnly = false) => {
-    server.registerTool(name, { description, inputSchema: shape, annotations: { readOnlyHint: readOnly } }, (async (args: z.infer<z.ZodObject<S>>) => {
+    // A loose object lets unknown keys reach the check below: the SDK would strip them from a plain shape, and a call like
+    // wait_for_progress {timeoutMs} would silently run with the default timeout (BTT-35).
+    const valid = Object.keys(shape)
+    server.registerTool(name, { description, inputSchema: z.looseObject(shape), annotations: { readOnlyHint: readOnly } }, (async (args: z.infer<z.ZodObject<S>>) => {
       try {
+        const unknown = Object.keys(args ?? {}).filter((k) => !valid.includes(k))
+        if (unknown.length > 0) {
+          return fail(new Error(`${name}: unknown argument${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => `"${k}"`).join(', ')}; valid: ${valid.length > 0 ? valid.join(', ') : '(none)'}`))
+        }
         const out = await fn(args)
         return typeof out === 'object' && out !== null && 'content' in out ? out : text(out)
       } catch (err) {

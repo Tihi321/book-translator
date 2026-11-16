@@ -120,6 +120,8 @@ Two ways to work:
 - **Answering the app's models (full pipeline).** Set an agent's model to `client/claude-code` (see [the client provider](#the-client-provider-claude-code-does-the-model-work)) and the app's own pipeline runs, but each model call waits for the client: glossary, translator, proofreader and QA review and fix are all answered by the client, one request at a time, through `get_client_task` and `submit_client_task`.
 - **Translator.** The client translates the book itself, the first pass only. `prepare_chunks` makes the chunks, `get_translation_task` returns the same prompt the app's translator would get (rules, brief, glossary terms, the previous passage, `<seg>` segments), and `submit_translation` checks segment ids and inline tags and stores the text. Nothing is spent on the app's models. The glossary builder, the proofreader and QA are not run by this path: they need a model, so use the full pipeline above (agents on `client/claude-code`) when you want them. The `translate_book_yourself` prompt gives the client the steps.
 
+Tools (BTT-35): a call with an argument a tool does not have is refused, not silently dropped, with an error that names the key and lists the valid ones (`wait_for_progress: unknown argument "timeoutMs"; valid: projectId, timeoutSec, role`).
+
 Tools:
 
 - Info: `get_info`, `list_models`, `get_defaults`, `list_languages`
