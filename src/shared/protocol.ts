@@ -206,6 +206,8 @@ export interface RefreshResult {
   editedKept: number
   /** Hand-edited segments that were dropped because their text changed or was removed (the old text is in refresh-backup/). */
   editsDropped: number
+  /** The first dropped hand edits (at most 20): the old chunk index, the old segment id and the edited text, cut to about 160 characters. */
+  droppedEdits: Array<{ chunk: number; segment: string; text: string }>
   /** The backup folder, relative to the data folder (forward slashes). Absent when unchanged. */
   backupRel?: string
 }

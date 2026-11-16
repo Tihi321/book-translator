@@ -217,6 +217,8 @@ export async function refreshProject(argv: string[]): Promise<number> {
   out(`chunks: ${r.chunks.total} (${r.chunks.kept} kept, ${r.chunks.toTranslate} to translate)`)
   out(`hand-edited segments kept: ${r.editedKept}`)
   out(`hand-edited segments dropped (text changed or removed): ${r.editsDropped}`)
+  for (const d of r.droppedEdits) out(`  chunk ${d.chunk}, ${d.segment}: ${d.text}`)
+  if (r.editsDropped > r.droppedEdits.length) out(`  ${r.editsDropped - r.droppedEdits.length} more (the old texts are in refresh-backup/)`)
   out(`backup: ${r.backupRel}`)
   return 0
 }

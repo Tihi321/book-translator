@@ -90,7 +90,7 @@ describe('refresh_source', () => {
     const old: ChunkRecord = { index: 1, sectionId: 's1', blockIds: segments.map((s) => s.id), segments, translation, proofread: {}, final, qa: { issues: [] }, state: 'done', tokens: { in: 0, out: 0 }, costUsd: 0, ms: 0, edited: true }
     const { chunks, report } = refreshChunks(oldIr, [old], ir(['Alpha', 'Charlie', 'Bravo', 'Delta changed'], 'n'), 1000, (t) => t.length)
     expect(chunks.flatMap((c) => c.segments.map((s) => `${s.text}:${c.state === 'pending' ? '(pending)' : c.final[s.id]}`))).toEqual(['Alpha:ALFA', 'Charlie:CHARLIE', 'Bravo:BRAVO-EDIT', 'Delta changed:(pending)'])
-    expect(report).toMatchObject({ blocks: { kept: 3, toTranslate: 1, removed: 1 }, editsDropped: 1 })
+    expect(report).toMatchObject({ blocks: { kept: 3, toTranslate: 1, removed: 1 }, editsDropped: 1, droppedEdits: [{ chunk: 1, segment: 'o4', text: 'DELTA-EDIT' }] })
   })
 
   it('counts only the segments edit_chunk changed: a QA fix-pass rewrite is no dropped hand edit, and editedKept counts segments', () => {

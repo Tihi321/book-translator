@@ -258,7 +258,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'refresh_source',
-    'Reads the source document again after it was edited and keeps the translation of every block whose text did not change, hand edits (edit_chunk) and QA verdicts included, also when the block moved. Changed and new blocks go into new pending chunks: start_translation (or get_translation_task) translates only them. Removed blocks are dropped. A hand edit on changed or removed text is dropped and counted in editsDropped. Chunk numbers change. The old chunks, source.json and project.json are copied to refresh-backup/ first. Refused while the project runs, and for visual-novel folders and packs.',
+    'Reads the source document again after it was edited and keeps the translation of every block whose text did not change, hand edits (edit_chunk) and QA verdicts included, also when the block moved. Changed and new blocks go into new pending chunks: start_translation (or get_translation_task) translates only them. Removed blocks are dropped. A hand edit on changed or removed text is dropped and counted in editsDropped; droppedEdits names the first 20 (old chunk, segment id, the edited text cut to 160 characters). Chunk numbers change. The old chunks, source.json and project.json are copied to refresh-backup/ first. Refused while the project runs, and for visual-novel folders and packs.',
     { projectId, sourcePath: z.string().optional().describe("Absolute path of the edited source, the same format (default: the project's source path)") },
     (a) => run({ type: 'refreshSource', projectId: a.projectId, sourcePath: a.sourcePath })
   )
