@@ -13,6 +13,8 @@ export interface CallRequest {
   task?: string
   /** Which piece of work (for example `chunk-3`). */
   unit?: string
+  /** Resolved model refs (as `CallResult.model` returns them) that already failed this piece of work. The call starts at the first model of the project's own list for the agent not in it; if that would leave none of the own models, the call is made as today. */
+  skipModels?: readonly string[]
 }
 
 export interface CallResult {
@@ -37,6 +39,8 @@ export interface AgentEnv {
   /** The project's format, for the checks that only one format has (a pack's catalog values). */
   format?: DocFormat
   call: CallFn
+  /** The project's own models for the agent (agentModels[agent], translatorModel first), resolved and deduplicated, in order. Never the shared fallback rows. Absent: treated as one model, no rotation. */
+  models?: (agent: AgentName) => string[]
   log: (level: 'info' | 'warn' | 'error', message: string) => void
   signal?: AbortSignal
 }

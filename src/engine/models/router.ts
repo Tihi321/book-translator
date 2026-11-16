@@ -15,6 +15,10 @@ export interface RoutedRequest {
   extraBody?: Record<string, unknown>
   /** Use the list exactly as given: the registry's shared fallback list adds no rows. */
   exact?: boolean
+  /** Resolved refs tried first, in this order (the rest of the list follows). */
+  lead?: readonly string[]
+  /** Resolved refs left out of the list, unless that would leave nothing. */
+  skip?: readonly string[]
 }
 
 /** A model reference: `provider/model` or an already resolved model. */
@@ -135,7 +139,15 @@ export class ModelRouter {
    * After a failed attempt the consumer sees a new `attempt` event and should drop the text so far.
    */
   async *chat(refs: readonly ModelRef[], req: RoutedRequest, held: ReadonlySet<string> = new Set()): AsyncGenerator<RoutedEvent, void, void> {
-    const models = this.resolve(refs, { exact: req.exact })
+    let models = this.resolve(refs, { exact: req.exact })
+    if (req.skip?.length) {
+      const kept = models.filter((m) => !req.skip!.includes(m.ref))
+      if (kept.length > 0) models = kept
+    }
+    if (req.lead?.length) {
+      const front = req.lead.flatMap((ref) => models.filter((m) => m.ref === ref))
+      models = [...front, ...models.filter((m) => !req.lead!.includes(m.ref))]
+    }
     if (models.length === 0) throw new ProviderError(`no available model in: ${refs.map((r) => (typeof r === 'string' ? r : r.ref)).join(', ') || '(empty list)'}`)
     let lastError: unknown
     let attempts = 0

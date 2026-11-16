@@ -68,15 +68,15 @@ export function translatorUserContent(
 }
 
 /** One request for a set of segments. Returns the parse of the reply. */
-async function ask(env: AgentEnv, segs: readonly SegmentRec[], opts: TranslateOptions, note: string | undefined, task: string) {
+async function ask(env: AgentEnv, segs: readonly SegmentRec[], opts: TranslateOptions, note: string | undefined, task: string, skipModels: readonly string[] = []) {
   const messages = await buildMessages(
     env.dataDir,
     'translator',
     { sourceLanguage: env.sourceLanguage, targetLanguage: env.targetLanguage, brief: env.brief },
     translatorUserContent(env, segs, opts.prev, note)
   )
-  const r = await env.call('translator', { messages, temperature: 0.3, task, unit: opts.unit }, { onDelta: opts.onDelta })
-  return parseSegments(r.text, segs.map((s) => s.id))
+  const r = await env.call('translator', { messages, temperature: 0.3, task, unit: opts.unit, ...(skipModels.length > 0 ? { skipModels } : {}) }, { onDelta: opts.onDelta })
+  return { parse: parseSegments(r.text, segs.map((s) => s.id)), model: r.model }
 }
 
 /** The inline-tag problem of a translated segment, if it has one. */
@@ -87,9 +87,13 @@ export function tagIssue(seg: SegmentRec, text: string): QaIssue | undefined {
   return { segId: seg.id, type: 'tags', severity: 'major', comment: `Inline tags do not match the source (${bits.join(', ')}); plain text kept.` }
 }
 
+/** Calls on one model (the first, then a retry with a note) before the next model of the project's list is tried. */
+const MISMATCHES_PER_MODEL = 2
+
 /**
- * Translates the segments of a chunk. A reply that does not have exactly the asked ids is retried once with a note, then the chunk is
- * split in half and each half tried (again with one retry); if that fails too, throws ChunkFailure. Per segment, inline tags must match
+ * Translates the segments of a chunk. A reply that does not have exactly the asked ids is retried once with a note; if that fails too,
+ * the next model of the project's own translator list is asked (a fresh call, then one retry), and so on. Only when every model of the
+ * list failed twice is the chunk split in half, each half tried again from the head of the list; if that fails too, throws ChunkFailure. Per segment, inline tags must match
  * the source: one retry for the segments that do not, then the plain text is kept and a `tags` issue recorded.
  * Segments that were already translated before a failure or a pause are in `out` (an optional shared record): they are not asked for
  * again, and a kept segment whose tags do not match the source gets its `tags` issue again.
@@ -102,7 +106,7 @@ export async function translateChunk(env: AgentEnv, segs: readonly SegmentRec[],
     if (issue) issues.push(issue)
   }
 
-  const accept = async (group: readonly SegmentRec[], got: Map<string, string>) => {
+  const accept = async (group: readonly SegmentRec[], got: Map<string, string>, failed: readonly string[]) => {
     const bad: SegmentRec[] = []
     const first = new Map<string, string>() // a segment with bad tags is stored only once settled: a stop in between asks for it again
     for (const s of group) {
@@ -116,7 +120,7 @@ export async function translateChunk(env: AgentEnv, segs: readonly SegmentRec[],
     let retry: Map<string, string> | undefined
     try {
       const note = `The inline tags (<1>, </1>, <2/> ...) must be copied exactly as in the source segment. Problems: ${bad.map((s) => `${s.id}: ${tagIssue(s, first.get(s.id)!)!.comment}`).join(' ')}`
-      const p = await ask(env, bad, opts, note, 'retry-tags')
+      const { parse: p } = await ask(env, bad, opts, note, 'retry-tags', failed)
       if (p.ok) retry = p.segments
     } catch (err) {
       if (env.signal?.aborted || (err as Error).name === 'AbortError') throw err
@@ -134,11 +138,26 @@ export async function translateChunk(env: AgentEnv, segs: readonly SegmentRec[],
 
   const attempt = async (group: readonly SegmentRec[], canSplit: boolean): Promise<void> => {
     let note: string | undefined
-    for (let n = 0; n < 2; n++) {
-      const p = await ask(env, group, opts, note, n === 0 ? 'translate' : 'retry')
-      if (p.ok) return accept(group, p.segments)
+    const failed: string[] = [] // models that returned a wrong set of segments MISMATCHES_PER_MODEL times
+    let count = 0
+    let current: string | undefined
+    for (;;) {
+      const { parse: p, model } = await ask(env, group, opts, note, count === 0 ? 'translate' : 'retry', failed)
+      if (p.ok) return accept(group, p.segments, failed)
       note = `${describeParse(p)}. Return every segment exactly once, each in its own seg element with the same id, and nothing else.`
-      env.log('warn', `${opts.unit}: segment mismatch (${describeParse(p)})`)
+      env.log('warn', `${opts.unit}: segment mismatch on ${model} (${describeParse(p)})`)
+      if (model !== current) {
+        count = 0
+        current = model
+      }
+      count++
+      if (count < MISMATCHES_PER_MODEL) continue
+      failed.push(model)
+      const left = (env.models?.('translator') ?? [model]).filter((m) => !failed.includes(m))
+      if (left.length === 0) break
+      env.log('warn', `${opts.unit}: segment mismatch ${MISMATCHES_PER_MODEL} times on ${model}, trying ${left[0]}`)
+      count = 0
+      note = undefined
     }
     if (canSplit && group.length > 1) {
       env.log('warn', `${opts.unit}: splitting the chunk in two`)

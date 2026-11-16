@@ -11,6 +11,7 @@ import { DEFAULT_PARALLEL, IN_PROGRESS_STATES, isClientRef, reviewerAgents } fro
 import type { DocumentIR } from '../../shared/ir'
 import type { ChunkRecord, ChunkState, ProjectFile, ProjectSettings, Spend } from '../../shared/project'
 import type { EngineEvent } from '../../shared/protocol'
+import type { AgentName } from '../../shared/schemas'
 import { ClientOnlyRefusal } from './env'
 import type { AgentEnv, CallFn } from './env'
 import { buildGlossary, mergeBriefText } from './glossary'
@@ -438,15 +439,26 @@ export class ProjectRunner {
       glossary,
       format: this.project.format,
       call: this.makeCall(chunk),
+      models: (agent) => this.ownModels(agent),
       log: (level, message) => this.log(level, message),
       signal: this.signal
     }
   }
 
+  /** The project's own model list for an agent: `agentModels[agent]` with the translator model first. */
+  private ownRefs(agent: AgentName): string[] {
+    const base = this.project.settings.agentModels[agent] ?? []
+    return agent === 'translator' && this.translatorModel ? [this.translatorModel, ...base.filter((r) => r !== this.translatorModel)] : base
+  }
+
+  /** The own list resolved, deduplicated and available, without the registry's shared fallback rows. */
+  private ownModels(agent: AgentName): string[] {
+    return this.deps.router.resolve(this.ownRefs(agent), { exact: true }).map((m) => m.ref)
+  }
+
   private makeCall(chunk: ChunkRecord | null): CallFn {
     return async (agent, req, hooks) => {
-      const base = this.project.settings.agentModels[agent] ?? []
-      const refs = agent === 'translator' && this.translatorModel ? [this.translatorModel, ...base.filter((r) => r !== this.translatorModel)] : base
+      const refs = this.ownRefs(agent)
       // the one place every model call passes: a client-only project never reaches a model that is not the client's
       const clientOnly = this.project.settings.clientOnly === true
       if (clientOnly) {
@@ -465,9 +477,13 @@ export class ProjectRunner {
           )
         }
       }
+      // after a mismatch on some models: start at the next own model; a provider error on it still falls back as before
+      const skip = new Set(req.skipModels ?? [])
+      const lead = skip.size > 0 ? this.ownModels(agent).filter((m) => !skip.has(m)) : []
+      const rotation = lead.length > 0 ? { lead, skip: req.skipModels } : {}
       const r = await this.deps.router.complete(
         refs,
-        { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, exact: clientOnly, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit, job: [this.projectId, req.unit ?? 'run', req.task ?? 'call'].join('--') } },
+        { messages: req.messages, schema: req.schema, maxTokens: req.maxTokens, temperature: req.temperature, signal: this.signal, exact: clientOnly, ...rotation, meta: { role: agent, task: req.task, project: this.projectId, unit: req.unit, job: [this.projectId, req.unit ?? 'run', req.task ?? 'call'].join('--') } },
         {
           onDelta: (t) => {
             hooks?.onDelta?.(t)

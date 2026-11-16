@@ -197,6 +197,21 @@ describe('MCP operator flow (the app models translate)', () => {
     expect(r.events.some((e) => e.type === 'project.updated' && e.project.status === 'done')).toBe(true)
   })
 
+  it('export_project refuses while a chunk failed, and exports with allowPartial', async () => {
+    const { r, c } = await setup()
+    r.mock.on({ role: 'translator' }, (req) => (req.meta?.unit === 'chunk-2' ? 'garbage' : segsIn(req.messages[req.messages.length - 1]!.content).map((s) => `<seg id="${s.id}">[hr] ${s.text}</seg>`).join('\n')))
+    const p = await call<{ id: string }>(c, 'create_project', { sourcePath: r.file, targetLanguage: 'Croatian', sourceLanguage: 'English', agentModels: MODELS, enabledAgents: NO_AGENTS, maxChunkTokens: 100 })
+    await call(c, 'start_translation', { projectId: p.id })
+    for (let i = 0; i < 60; i++) if (!(await call<{ running: boolean }>(c, 'wait_for_progress', { projectId: p.id, timeoutSec: 5 })).running) break
+    const refused = (await c.callTool({ name: 'export_project', arguments: { projectId: p.id } })) as ToolResult
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]!.text).toMatch(/^export refused: .*chunk 2 failed/)
+    const out = await call<{ path: string; warnings: string[] }>(c, 'export_project', { projectId: p.id, allowPartial: true })
+    expect(out.path).toBeTruthy()
+    expect(out.warnings).toHaveLength(1)
+    expect(out.warnings[0]).toMatch(/chunk 2 failed/)
+  })
+
   it('get_project keeps only the last 40 lines of the log', async () => {
     const { r, c } = await setup()
     const p = await call<{ id: string }>(c, 'create_project', { sourcePath: r.file, targetLanguage: 'hr', agentModels: MODELS, enabledAgents: NO_AGENTS })

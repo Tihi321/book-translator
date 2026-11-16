@@ -5,7 +5,7 @@ import type { ChatRequest } from '../src/engine/models/types'
 import { ProviderError } from '../src/engine/models/types'
 import { parseGlossary } from '../src/engine/pipeline/glossary'
 import { summarize } from '../src/engine/project/summary'
-import { asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
+import { MODEL, QA_MODEL, asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
 
 let r: Rig | undefined
@@ -178,7 +178,9 @@ describe('resume', () => {
     expect((await service.getProject(id)).status).toBe('paused')
 
     // partial export: translated blocks and untouched source text together
-    const partial = await fs.readFile(await service.export(id), 'utf8')
+    const report = await service.exportWithReport(id, undefined, { allowPartial: true })
+    expect(report.warnings).toEqual([expect.stringMatching(/stay in the source language: chunks? [\d, ]+ pending/)])
+    const partial = await fs.readFile(report.path, 'utf8')
     expect(partial).toContain('[hr] ')
     expect(partial).toContain('\nParagraph 12 of chapter 2: Alice met Bob') // not translated yet: source text stays
 
@@ -301,6 +303,32 @@ describe('translator retries', () => {
     expect(r.calls('translator').filter((c) => c.unit === 'chunk-2').map((c) => c.task)).toEqual(['translate', 'retry'])
   })
 
+  it('moves to the next model after two mismatches, and splits only when every model failed', async () => {
+    r = await rig()
+    // a third mock model as a shared fallback row, behind the project's own two
+    const prov = path.join(r.dir, 'config', 'providers.md')
+    const text = (await fs.readFile(prov, 'utf8')).replace(/(- id: mock-reviewer\s+family: mock-other)/, '$1\n      - id: mock-fallback\n        family: mock')
+    await fs.writeFile(prov, text, 'utf8')
+    await r.service.registry.load()
+    r.service.registry.setDefaults({ fallbacks: [MODEL, QA_MODEL, 'mock/mock-fallback'], shared: true, lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    r.mock.on({ role: 'translator' }, (req) => {
+      const segs = segsIn(lastUser(req))
+      const unit = unitOf(req)
+      if (unit === 'chunk-2' && req.model.endsWith('mock-translator')) return asSegs(segs.slice(0, -1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      if (unit === 'chunk-3' && segs.length >= 3) return asSegs(segs.slice(1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      return echo(req)
+    })
+    const id = await r.create({ agentModels: { glossary: [MODEL], translator: [MODEL, QA_MODEL], proofreader: [MODEL], qa: [QA_MODEL] } })
+    expect((await r.service.start(id)).status).toBe('done')
+    const seq = (unit: string) => r!.mock.calls.filter((c) => c.meta?.role === 'translator' && c.meta.unit === unit).map((c) => `${c.model.replace('mock-', '')} ${c.meta!.task}`)
+    expect(seq('chunk-2')).toEqual(['translator translate', 'translator retry', 'reviewer translate'])
+    expect((await r.service.store.listChunks(id))[1]!.model).toBe(QA_MODEL)
+    expect(seq('chunk-3')).toEqual(['translator translate', 'translator retry', 'reviewer translate', 'reviewer retry', 'translator translate', 'translator translate'])
+    for (const c of await r.service.store.listChunks(id)) expect(Object.values(c.final).every((x) => x.startsWith('[hr] '))).toBe(true)
+    expect(r.mock.calls.filter((c) => c.meta?.role === 'translator' && c.model.endsWith('mock-fallback'))).toEqual([])
+    expect(r.events.some((e) => e.type === 'log' && /chunk-2: segment mismatch 2 times on mock\/mock-translator, trying mock\/mock-reviewer/.test(e.message))).toBe(true)
+  })
+
   it('splits the chunk in half when the retry fails too', async () => {
     r = await rig()
     r.mock.on({ role: 'translator' }, (req) => {
@@ -330,11 +358,17 @@ describe('translator retries', () => {
     expect(chunks.filter((c) => c.state === 'done').length).toBe(chunks.length - 1)
     expect(r.events.some((e) => e.type === 'chunk.state' && e.state === 'failed' && e.index === 3)).toBe(true)
 
-    // export works: the failed chunk's blocks keep the source text
-    const text = await fs.readFile(await r.service.export(id), 'utf8')
+    // export refuses while a chunk is failed, and writes nothing
+    await expect(r.service.exportWithReport(id)).rejects.toThrow(/^export refused: \d+ block\(s\) would stay in the source language: chunk 3 failed .*retry_chunk.*allowPartial/)
+    expect(await fs.readdir(path.dirname(r.service.store.file(id, 'output', 'x'))).catch(() => [])).toEqual([])
+    // allowPartial: the failed chunk's blocks keep the source text, with one warning
+    const partial = await r.service.exportWithReport(id, undefined, { allowPartial: true })
+    const text = await fs.readFile(partial.path, 'utf8')
     const failedText = chunks[2]!.segments[0]!.text
     expect(text).toContain(`\n${failedText}\n`)
     expect(text).toContain('[hr] ')
+    expect(partial.warnings).toHaveLength(1)
+    expect(partial.warnings[0]).toMatch(/^\d+ block\(s\) stay in the source language: chunk 3 failed/)
 
     undo()
     const retry = await r.service.retryChunk(id, 3)
@@ -343,6 +377,7 @@ describe('translator retries', () => {
     expect(after.state).toBe('done')
     expect(after.error).toBeUndefined()
     expect(after.final[after.segments[0]!.id]).toBe(`[hr] ${failedText}`)
+    expect((await r.service.exportWithReport(id)).warnings).toEqual([])
   })
 
   it('fails a chunk on a provider error that is not retryable', async () => {

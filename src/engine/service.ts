@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { chunkBudget, planChunks } from './chunker'
+import { formatNothingTranslated, formatRefusal, formatWarning, untranslatedReport } from './untranslated'
 import { loadDefaults, resolveLanguage } from './config'
 import { adapterFor, briefWithNote, hashSource } from './formats'
 import { vnPackSlug, writeVnPack } from './formats/vnPack'
@@ -22,6 +23,7 @@ import { typographyCheck, typographyRuleOf } from './pipeline/typography'
 import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
+import { EXPORT_REFUSED } from '../shared/protocol'
 import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, SubmitResult, TranslationTask } from '../shared/protocol'
 import { AGENTS } from '../shared/schemas'
 import type { AgentName } from '../shared/schemas'
@@ -84,6 +86,14 @@ interface AdapterExtras {
  * The engine's API: one method per protocol command (the transport in Phase 5 maps `Command`s to these). Progress comes back
  * through `emit` as `EngineEvent`s. `start` and `resume` return a promise that settles when the run ends: the caller need not await it.
  */
+/** An export that was refused because blocks are untranslated. The message tells what to do; only the message crosses the wire. */
+export class ExportRefused extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ExportRefused'
+  }
+}
+
 export class EngineService {
   readonly store: ProjectStore
   readonly router: ModelRouter
@@ -486,10 +496,10 @@ export class EngineService {
   // ---- export ----
 
   /** The translated text per block id from the chunks. Blocks without a (complete) translation are left out, so they keep the source text. */
-  async translations(id: string): Promise<Map<string, string>> {
+  async translations(id: string, chunks?: readonly ChunkRecord[]): Promise<Map<string, string>> {
     const map = new Map<string, string>()
     const parts = new Map<string, { total: number; texts: Map<number, string> }>()
-    for (const chunk of await this.store.listChunks(id)) {
+    for (const chunk of chunks ?? (await this.store.listChunks(id))) {
       for (const seg of chunk.segments) {
         const text = chunk.final[seg.id]
         if (text === undefined) continue
@@ -507,8 +517,8 @@ export class EngineService {
     return map
   }
 
-  /** Writes the translated document to output/. Works with partial progress. Returns the path. */
-  async export(id: string, outPath?: string, opts: { cover?: 'source' | 'title' } = {}): Promise<string> {
+  /** Writes the translated document to output/. Refuses while a block is untranslated, unless `allowPartial`. Returns the path. */
+  async export(id: string, outPath?: string, opts: { cover?: 'source' | 'title'; allowPartial?: boolean } = {}): Promise<string> {
     return (await this.exportWithReport(id, outPath, opts)).path
   }
 
@@ -516,9 +526,26 @@ export class EngineService {
    * Exports and says what was written. A visual-novel pack writes a hand-off bundle (also its bare catalog), so the report carries the bundle path,
    * the catalog path, the language, how many values it has and the warnings; every other format just has its path.
    */
-  async exportWithReport(id: string, outPath?: string, opts: { cover?: 'source' | 'title' } = {}): Promise<ExportReport> {
+  async exportWithReport(id: string, outPath?: string, opts: { cover?: 'source' | 'title'; allowPartial?: boolean } = {}): Promise<ExportReport> {
     const project = await this.store.load(id)
     const ir = await this.store.readIr(id)
+    // refuse before anything is written: a book with failed or pending chunks would silently keep the source text in those places
+    const chunks = await this.store.listChunks(id)
+    const translations = await this.translations(id, chunks)
+    let untranslated: string | undefined
+    if (chunks.length === 0) {
+      const blocks = new Set(planChunks(ir, 1000).flatMap((c) => c.segments.map((s) => s.blockId))).size
+      if (blocks > 0) {
+        if (!opts.allowPartial) throw new ExportRefused(formatNothingTranslated(EXPORT_REFUSED, blocks))
+        untranslated = `${blocks} block(s) stay in the source language: nothing is translated yet`
+      }
+    } else {
+      const report = untranslatedReport(chunks, translations)
+      if (report.blocks > 0) {
+        if (!opts.allowPartial) throw new ExportRefused(formatRefusal(EXPORT_REFUSED, report))
+        untranslated = formatWarning(report)
+      }
+    }
     const adapter = adapterFor(project.sourcePath) as unknown as AdapterExtras
     const ext = adapter.outputExt ?? path.extname(project.sourcePath)
     const lang = project.settings.targetLanguageCode ?? project.settings.targetLanguage
@@ -531,13 +558,13 @@ export class EngineService {
           : path.basename(project.sourcePath, path.extname(project.sourcePath))
     const out = outPath ? path.resolve(outPath) : this.store.file(id, 'output', `${stem}.${lang}${ext}`)
     await fs.mkdir(path.dirname(out), { recursive: true })
-    const translations = await this.translations(id)
     const warnings: string[] = []
     const onWarning = (message: string) => {
       warnings.push(message)
       this.emit({ type: 'log', projectId: id, level: 'warn', message })
       void this.store.log(id, `warn: ${message}`)
     }
+    if (untranslated) onWarning(untranslated)
     if (project.format === 'vnp') {
       const report = await writeVnPack(ir, translations, project.sourcePath, out, { targetLanguage: lang, onWarning })
       this.emit({ type: 'log', projectId: id, level: 'info', message: `exported ${translations.size} block(s) to ${report.path} (catalog ${report.lang}, ${report.keys} value(s))` })
