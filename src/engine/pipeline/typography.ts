@@ -34,6 +34,12 @@ export function languageCodeOf(s: Pick<ProjectSettings, 'targetLanguage' | 'targ
   return undefined
 }
 
+/** The target language's default typography, if the table has one. */
+export function languageDefault(s: Pick<ProjectSettings, 'targetLanguage' | 'targetLanguageCode'>): Typography | undefined {
+  const code = languageCodeOf(s)
+  return code ? TYPOGRAPHY_DEFAULTS[code] : undefined
+}
+
 /** What the project's typography is: its own setting, with the language's default for what it leaves out. Undefined when neither says how dialogue is marked. */
 export function effectiveTypography(s: LangSettings): Typography | undefined {
   const code = languageCodeOf(s)

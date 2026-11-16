@@ -20,7 +20,7 @@ import { characterLabels, ensureNameEntries, KEEP_NAME_NOTE, localizesNames, nam
 import { describeParse, parseSegments } from './pipeline/segments'
 import type { SegmentParse } from './pipeline/segments'
 import { fitEdges, prevTail, tagIssue, translatorUserContent } from './pipeline/translator'
-import { typographyCheck, typographyRuleOf } from './pipeline/typography'
+import { languageDefault, typographyCheck, typographyRuleOf } from './pipeline/typography'
 import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
@@ -283,6 +283,7 @@ export class EngineService {
       sections: ir.sections.map((s) => ({ id: s.id, title: s.title })),
       qa: qaScoreOf(chunks, project.settings),
       typography: typographyCheck(chunks, project.settings),
+      ...(languageDefault(project.settings) ? { typographyDefault: languageDefault(project.settings) } : {}),
       glossary,
       brief,
       log,

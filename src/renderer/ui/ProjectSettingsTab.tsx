@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ProjectSettings } from '../../shared/project'
+import type { DialogueStyle, ProjectSettings } from '../../shared/project'
 import type { ProjectDetail } from '../../shared/protocol'
 import { AGENTS } from '../../shared/agents'
 import type { AgentName } from '../../shared/agents'
@@ -8,6 +8,8 @@ import { getApi } from '../api'
 import { attempt, useStore } from '../store/store'
 import { ModelListEditor } from './ModelListEditor'
 import { ParallelFields } from './ParallelFields'
+
+const DIALOGUE_LABEL: Record<DialogueStyle, string> = { dash: 'Dash at the start (– Text – he said.)', quotes: 'Quotation marks', guillemets: 'Guillemets « »' }
 
 const AGENT_LABEL: Record<AgentName, string> = { glossary: 'Glossary builder', translator: 'Translator', proofreader: 'Proofreader', qa: 'QA reviewer' }
 
@@ -34,6 +36,8 @@ export function ProjectSettingsTab({ detail }: { detail: ProjectDetail }) {
   const s: ProjectSettings = { ...detail.project.settings, ...draft }
   const dirty = Object.keys(draft).length > 0
   const set = (patch: Partial<ProjectSettings>) => setDraft((d) => ({ ...d, ...patch }))
+  const t = s.typography ?? {}
+  const d = detail.typographyDefault
 
   async function save() {
     setSaving(true)
@@ -77,9 +81,22 @@ export function ProjectSettingsTab({ detail }: { detail: ProjectDetail }) {
           </>
         )}
         <ParallelFields value={s.parallel} onChange={(v) => set({ parallel: v })} disabled={locked} testId="settings-parallel" />
+        <label>Dialogue</label>
+        <select style={{ width: 'fit-content' }} disabled={locked} value={t.dialogue ?? ''} onChange={(e) => set({ typography: { ...t, dialogue: e.target.value as DialogueStyle } })} data-testid="settings-dialogue">
+          <option value="">{d?.dialogue ? `Language default (${DIALOGUE_LABEL[d.dialogue]})` : 'Not set'}</option>
+          <option value="dash">{DIALOGUE_LABEL.dash}</option>
+          <option value="quotes">{DIALOGUE_LABEL.quotes}</option>
+          <option value="guillemets">{DIALOGUE_LABEL.guillemets}</option>
+        </select>
+        <label>Quote marks</label>
+        <input style={{ width: 80 }} disabled={locked} value={t.quotes ?? ''} placeholder={d?.quotes ?? '„…”'} onChange={(e) => set({ typography: { ...t, quotes: e.target.value } })} data-testid="settings-quotes" />
+        <label>Typography notes</label>
+        <input disabled={locked} value={t.notes ?? ''} placeholder="Number format, ellipsis, ..." onChange={(e) => set({ typography: { ...t, notes: e.target.value } })} data-testid="settings-typography-notes" />
         <label>Chunk size (tokens)</label>
         <input type="number" min={200} max={20000} step={100} style={{ width: 100 }} disabled={locked} value={s.maxChunkTokens} onChange={(e) => set({ maxChunkTokens: Number(e.target.value) })} data-testid="settings-chunk" />
       </div>
+      <div className="dim small">Typography goes into every translator and proofreader prompt; chunks translated before keep their style.</div>
+      {detail.typography.inconsistent && <div className="warn small">{detail.typography.message}</div>}
       <div className="dim small">A new chunk size applies only while every chunk is still pending. Once chunks have been made and some are done, the old size stays.</div>
       <div className="row">
         <button className="primary" disabled={locked || !dirty || saving} onClick={() => void save()} data-testid="settings-save">{saving ? 'Saving...' : 'Save settings'}</button>

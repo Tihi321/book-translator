@@ -227,6 +227,12 @@ export function mergeSettings(base: ProjectSettings, patch: Partial<ProjectSetti
     parallel: { ...DEFAULT_PARALLEL, ...base.parallel, ...(patch.parallel ?? {}) },
     ...(base.typography || patch.typography ? { typography: { ...base.typography, ...(patch.typography ?? {}) } } : {})
   }
+  // an empty value clears the project's own typography field, so the language default applies again
+  if (merged.typography) {
+    const kept = Object.fromEntries(Object.entries(merged.typography).filter(([, v]) => v !== '' && v !== undefined))
+    if (Object.keys(kept).length > 0) merged.typography = kept
+    else delete merged.typography
+  }
   // clientOnly wins over any agentModels given with it or kept from before: every agent sits on the client model
   if (merged.clientOnly) merged.agentModels = Object.fromEntries(AGENTS.map((a) => [a, [CLIENT_ONLY_MODEL]])) as Record<AgentName, string[]>
   for (const a of reviewerAgents(merged)) merged.agentModels[a] = [...(merged.reviewer?.models ?? [])]
