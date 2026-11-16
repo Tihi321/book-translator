@@ -23,7 +23,7 @@ const INSTRUCTIONS = `Book Translator translates books (EPUB, DOCX, TXT, MD, PDF
 
 Three ways to work:
 
-1. Operator: the app's own models translate. analyze_file, create_project (pick models with list_models and agentModels), start_translation, then wait_for_progress until the status is done (paused: start_translation again to resume), look at chunks that came back flagged or failed (get_project, get_chunk, edit_chunk, retry_chunk), then export_project (it refuses while a chunk is failed or pending and names them: retry_chunk them, or pass allowPartial true to export anyway with a warning). Models of paid providers cost money: check analyze_file's estimate first.
+1. Operator: the app's own models translate. analyze_file, create_project (pick models with list_models and agentModels), start_translation, then wait_for_progress until the status is done (paused: start_translation again to resume), look at chunks that came back flagged or failed (get_project, get_chunk, edit_chunk, retry_chunk), then export_project (it refuses while a chunk is failed or pending and names them: retry_chunk them, or pass allowPartial true to export anyway with a warning). If the source was edited after the project was made, refresh_source keeps the translations of unchanged blocks; export_project refuses until then. Models of paid providers cost money: check analyze_file's estimate first.
 
 2. Translator: you translate, the app's models are not used and nothing is spent. create_project with enabledAgents all false, then prepare_chunks. Optionally write a glossary (update_glossary) and a brief (set_brief) first. Then repeat get_translation_task and submit_translation until get_translation_task says nothing is left. A submission whose segment ids or inline tags (<1>, </1>, <2/>) do not match is rejected with the reason: fix it and submit again. Finish with export_project. The prompt translate_book_yourself has the full loop. This path does the first pass only: no glossary builder, proofreader or QA.
 
@@ -33,7 +33,7 @@ Visual-novel packs v2 (a folder with vn/pack.json and vn/text/<sourceLang>.json)
 
 Visual-novel book folders v1 (book.md, outline.md, chapters/, bible/bible.md, cover-brief.md): give the folder (with no vn/pack.json) as sourcePath; it is translated by its script lines. Every script line is one segment and the export is a folder of the same layout with the same lines: SCENE:, ON SCREEN: and speaker tags stay, a spoken line comes as <1>NAME (expression):</1> text (keep the tag, translate the text), the bible and cover brief are copied. CLUE:/EVIDENCE: keep their label and ids (their prose is translated), PUZZLE: and END TESTIMONY stay whole, and TESTIMONY: keeps its label. Character names stay as they are unless you set localizeNames true: then the glossary builder gives each name a form for the target language, you can edit those rows with update_glossary before export_project, and the export writes the names into the speaker tags, the ON SCREEN: lines and the bible's character list. VN Studio can add the exported folder as an edition (vno_add_edition).
 
-Paths are on the machine the app runs on. Projects are named after the file, the language and a hash, so the same file and language give the same project.`
+Paths are on the machine the app runs on. Projects are named after the file, the language and a hash, so the same file and language give the same project; an edited file gives a new id, so use refresh_source on the existing project instead of create_project.`
 
 const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }] })
 const fail = (err: unknown) => ({ isError: true as const, content: [{ type: 'text' as const, text: err instanceof Error ? err.message : String(err) }] })
@@ -257,6 +257,12 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     (a) => run({ type: 'editChunk', projectId: a.projectId, index: a.index, final: a.final })
   )
   tool(
+    'refresh_source',
+    'Reads the source document again after it was edited and keeps the translation of every block whose text did not change, hand edits (edit_chunk) and QA verdicts included, also when the block moved. Changed and new blocks go into new pending chunks: start_translation (or get_translation_task) translates only them. Removed blocks are dropped. A hand edit on changed or removed text is dropped and counted in editsDropped. Chunk numbers change. The old chunks, source.json and project.json are copied to refresh-backup/ first. Refused while the project runs, and for visual-novel folders and packs.',
+    { projectId, sourcePath: z.string().optional().describe("Absolute path of the edited source, the same format (default: the project's source path)") },
+    (a) => run({ type: 'refreshSource', projectId: a.projectId, sourcePath: a.sourcePath })
+  )
+  tool(
     'retry_chunk',
     "Translates a chunk again with the app's models, optionally trying another translator model first. Returns at once: follow it with wait_for_progress.",
     { projectId, index: z.number().int().min(1), model: z.string().optional().describe('provider/model to try first') },
@@ -281,7 +287,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
     await run({ type: 'setBrief', projectId: a.projectId, brief: a.brief })
     return { saved: true }
   })
-  tool('export_project', 'Writes the translated document. Refuses while any block is untranslated (a failed, pending or running chunk): the error names the chunks, the block count and what to do (retry_chunk, start_translation); allowPartial true exports anyway, untranslated blocks keep the source text and warnings says which. Returns the file path (a folder for a visual-novel book; for a visual-novel pack v2 the bundle folder with an unchanged vn/pack.json and the translated catalog, plus catalog, lang, keys and warnings).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder; a folder for a visual-novel book or pack)'), allowPartial: z.boolean().optional().describe('Default false: refused while any block is untranslated (a failed or pending chunk); the error names the chunks. true: export anyway, untranslated blocks keep the source text and warnings says which'), cover: z.enum(['source', 'title']).optional().describe('EPUB only. source (default): keep the cover image and translate its alt text. title: replaces it by a plain text title page (translated title and author); never an image (the source cover has the original title drawn on it).') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath, cover: a.cover, allowPartial: a.allowPartial }))
+  tool('export_project', 'Writes the translated document. Refuses while the source file changed since the project was made or refreshed (run refresh_source), and while any block is untranslated (a failed, pending or running chunk): the error names the chunks, the block count and what to do (retry_chunk, start_translation); allowPartial true exports anyway, untranslated blocks keep the source text and warnings says which. Returns the file path (a folder for a visual-novel book; for a visual-novel pack v2 the bundle folder with an unchanged vn/pack.json and the translated catalog, plus catalog, lang, keys and warnings).', { projectId, outPath: z.string().optional().describe('Absolute output path (default: the project output folder; a folder for a visual-novel book or pack)'), allowPartial: z.boolean().optional().describe('Default false: refused while any block is untranslated (a failed or pending chunk); the error names the chunks. true: export anyway, untranslated blocks keep the source text and warnings says which'), cover: z.enum(['source', 'title']).optional().describe('EPUB only. source (default): keep the cover image and translate its alt text. title: replaces it by a plain text title page (translated title and author); never an image (the source cover has the original title drawn on it).') }, (a) => run({ type: 'export', projectId: a.projectId, outPath: a.outPath, cover: a.cover, allowPartial: a.allowPartial }))
 
   // ---- the client provider: you answer the app's model calls ----
 
@@ -299,7 +305,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       client: z.string().optional().describe('Which client you are: the model id after client/. Default claude-code. Antigravity: pass client: "antigravity". You only get the tasks made for your client name.'),
       role: z.string().optional().describe('glossary, translator, proofreader or qa'),
       project: z.string().optional(),
-      task: z.string().optional().describe('For example translate, retry, retry-tags, fix, proofread, glossary, review, recheck'),
+      task: z.string().optional().describe('For example translate, retry, reask, retry-tags, fix, proofread, glossary, review, recheck'),
       leaseMinutes: z.number().int().min(1).max(60).optional().describe('How long you hold it before it goes back to the queue (default 10)')
     },
     (a) => run({ type: 'getClientTask', client: a.client, role: a.role, project: a.project, task: a.task, leaseMinutes: a.leaseMinutes })

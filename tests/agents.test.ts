@@ -68,6 +68,33 @@ describe('translator', () => {
     expect(logs.some((l) => /splitting/.test(l))).toBe(true)
   })
 
+  it('asks again only for a dropped and a garbled segment, with the passages around them', async () => {
+    const logs: string[] = []
+    const ids = 'abcdefgh'.split('')
+    const names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']
+    const segs = ids.map((id, i) => seg(id, names[i]!))
+    const { env, tasks, users } = envWith((u) => {
+      const asked = segsIn(u)
+      const t = (s: { id: string; text: string }) => ({ id: s.id, text: `T ${s.text}` })
+      if (asked.length >= 5) {
+        const out = asked.filter((s) => s.id !== 'e').map(t)
+        out.splice(3, 0, { id: 'c', text: 'T Five' }) // the sonnet pattern: c twice with another text, e missing
+        return asSegs(out)
+      }
+      if (asked.length >= 3) return asSegs(asked.slice(0, -1).map(t))
+      return asSegs(asked.map(t))
+    }, logs)
+    const r = await translateChunk(env, segs, { unit: 'c' })
+    expect(tasks).toEqual(['translate', 'reask'])
+    expect(segsIn(users[1]!).map((s) => s.id)).toEqual(['c', 'e'])
+    expect(users[1]).toContain('Previous passage')
+    expect(users[1]).toContain('T Two')
+    expect(users[1]).toContain('Following passage')
+    expect(users[1]).toContain('T Six')
+    expect(r.translation).toEqual(Object.fromEntries(ids.map((id, i) => [id, `T ${names[i]}`])))
+    expect(logs.some((l) => /asking mock\/m again for 2 segment\(s\) only: c, e/.test(l))).toBe(true)
+  })
+
   it('keeps the first half when the second half fails', async () => {
     const { env } = envWith((u) => {
       const segs = segsIn(u)

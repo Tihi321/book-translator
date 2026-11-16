@@ -589,6 +589,11 @@ describe('external translator commands (prepareChunks, getTranslationTask, submi
     await run({ type: 'updateProjectSettings', projectId: id, patch: { typography: { dialogue: 'dash', notes: 'Numbers in words.' } } })
     const lone = (await run<TranslationTask>({ type: 'getTranslationTask', projectId: id, index: f })).messages
     expect(lone[1]!.content).toContain(`chunk ${f - 1} is not translated yet`)
+    // the language default is in the detail (the settings tab's placeholder); an empty value clears the project's own field
+    expect((await run<ProjectDetail>({ type: 'getProject', projectId: id })).typographyDefault).toEqual({ dialogue: 'dash', quotes: '„…”' })
+    await run({ type: 'updateProjectSettings', projectId: id, patch: { typography: { dialogue: '' as never } } })
+    expect((await run<ProjectDetail>({ type: 'getProject', projectId: id })).project.settings.typography).toEqual({ notes: 'Numbers in words.' })
+    await run({ type: 'updateProjectSettings', projectId: id, patch: { typography: { dialogue: 'dash' } } })
     expect(lone[1]!.content).toContain('Typography')
     expect(lone[0]!.content).toMatch(/Typography.*dash.*Numbers in words/s)
 

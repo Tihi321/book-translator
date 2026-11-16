@@ -5,7 +5,7 @@ import type { ChatRequest } from '../src/engine/models/types'
 import { ProviderError } from '../src/engine/models/types'
 import { parseGlossary } from '../src/engine/pipeline/glossary'
 import { summarize } from '../src/engine/project/summary'
-import { MODEL, QA_MODEL, asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
+import { MODEL, QA_MODEL, asSegs, bookText, lastUser, rig, segsIn, withStray } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
 
 let r: Rig | undefined
@@ -226,7 +226,7 @@ describe('resume', () => {
       asked.push(ids)
       const full = asked[0]!
       const half = Math.ceil(full.length / 2)
-      if (ids.length === full.length) return asSegs(segsIn(lastUser(req)).slice(1).map((s) => ({ id: s.id, text: s.text }))) // an id is missing: retry, then split
+      if (ids.length === full.length) return withStray(segsIn(lastUser(req)).slice(1).map((s) => ({ id: s.id, text: s.text }))) // an id is missing: retry, then split
       if (ids[0] === full[half] && !pausedOnce) {
         pausedOnce = true
         void service.pause(id) // the second half is in flight
@@ -291,11 +291,11 @@ describe('resume', () => {
 })
 
 describe('translator retries', () => {
-  it('retries once with a note when segments are missing', async () => {
+  it('retries once with a note when a reply cannot be salvaged', async () => {
     r = await rig()
     r.mock.on({ role: 'translator' }, (req) => {
       const segs = segsIn(lastUser(req))
-      if (unitOf(req) === 'chunk-2' && req.meta?.task === 'translate') return asSegs(segs.slice(0, -1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      if (unitOf(req) === 'chunk-2' && req.meta?.task === 'translate') return withStray(segs.slice(0, -1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
       return echo(req)
     })
     const id = await r.create()
@@ -314,8 +314,8 @@ describe('translator retries', () => {
     r.mock.on({ role: 'translator' }, (req) => {
       const segs = segsIn(lastUser(req))
       const unit = unitOf(req)
-      if (unit === 'chunk-2' && req.model.endsWith('mock-translator')) return asSegs(segs.slice(0, -1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
-      if (unit === 'chunk-3' && segs.length >= 3) return asSegs(segs.slice(1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      if (unit === 'chunk-2' && req.model.endsWith('mock-translator')) return withStray(segs.slice(0, -1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      if (unit === 'chunk-3' && segs.length >= 3) return withStray(segs.slice(1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
       return echo(req)
     })
     const id = await r.create({ agentModels: { glossary: [MODEL], translator: [MODEL, QA_MODEL], proofreader: [MODEL], qa: [QA_MODEL] } })
@@ -333,7 +333,7 @@ describe('translator retries', () => {
     r = await rig()
     r.mock.on({ role: 'translator' }, (req) => {
       const segs = segsIn(lastUser(req))
-      if (unitOf(req) === 'chunk-2' && segs.length >= 3) return asSegs(segs.slice(1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      if (unitOf(req) === 'chunk-2' && segs.length >= 3) return withStray(segs.slice(1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
       return echo(req)
     })
     const id = await r.create()

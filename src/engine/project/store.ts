@@ -153,6 +153,27 @@ export class ProjectStore {
     return out
   }
 
+  /**
+   * Swaps the source and the chunks of a project for an edited source. The old source.json, project.json and chunks/ are copied to
+   * refresh-backup/<time>/ first; the new chunks are written to chunks.next/ and renamed into place. Returns the backup folder,
+   * relative to the data folder (forward slashes).
+   */
+  async replaceSource(id: string, ir: DocumentIR, chunks: readonly ChunkRecord[]): Promise<string> {
+    const backup = this.file(id, 'refresh-backup', new Date().toISOString().replace(/[:.]/g, '-'))
+    await fs.mkdir(backup, { recursive: true })
+    await fs.copyFile(this.file(id, 'source.json'), path.join(backup, 'source.json'))
+    await fs.copyFile(this.file(id, 'project.json'), path.join(backup, 'project.json'))
+    await fs.cp(this.file(id, 'chunks'), path.join(backup, 'chunks'), { recursive: true })
+    const next = this.file(id, 'chunks.next')
+    await fs.rm(next, { recursive: true, force: true })
+    await fs.mkdir(next, { recursive: true })
+    for (const c of chunks) await atomicWrite(path.join(next, chunkName(c.index)), JSON.stringify(c, null, 2))
+    await fs.rm(this.file(id, 'chunks'), { recursive: true, force: true })
+    await fs.rename(next, this.file(id, 'chunks'))
+    await atomicWrite(this.file(id, 'source.json'), JSON.stringify(ir))
+    return path.relative(this.dataDir, backup).split(path.sep).join('/')
+  }
+
   async clearChunks(id: string): Promise<void> {
     await fs.rm(this.file(id, 'chunks'), { recursive: true, force: true })
     await fs.mkdir(this.file(id, 'chunks'), { recursive: true })
@@ -205,6 +226,12 @@ export function mergeSettings(base: ProjectSettings, patch: Partial<ProjectSetti
     enabled: { ...base.enabled, ...(patch.enabled ?? {}) },
     parallel: { ...DEFAULT_PARALLEL, ...base.parallel, ...(patch.parallel ?? {}) },
     ...(base.typography || patch.typography ? { typography: { ...base.typography, ...(patch.typography ?? {}) } } : {})
+  }
+  // an empty value clears the project's own typography field, so the language default applies again
+  if (merged.typography) {
+    const kept = Object.fromEntries(Object.entries(merged.typography).filter(([, v]) => v !== '' && v !== undefined))
+    if (Object.keys(kept).length > 0) merged.typography = kept
+    else delete merged.typography
   }
   // clientOnly wins over any agentModels given with it or kept from before: every agent sits on the client model
   if (merged.clientOnly) merged.agentModels = Object.fromEntries(AGENTS.map((a) => [a, [CLIENT_ONLY_MODEL]])) as Record<AgentName, string[]>

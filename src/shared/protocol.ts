@@ -1,5 +1,5 @@
 import type { DocFormat } from './ir'
-import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary, QaScore, TypographyCheck } from './project'
+import type { ChunkRecord, ChunkState, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary, QaScore, Typography, TypographyCheck } from './project'
 import type { AgentName } from './agents'
 import type { DefaultsConfig } from './schemas'
 import type { ClientTaskSummary } from '../engine/models/client'
@@ -11,6 +11,9 @@ import type { ClientTaskSummary } from '../engine/models/client'
 
 /** The start of the message of an export refused because blocks are untranslated (the UI recognises it). */
 export const EXPORT_REFUSED = 'export refused:'
+
+/** The start of the message of an export refused because the source file changed after the project was made or last refreshed. It starts with EXPORT_REFUSED. */
+export const SOURCE_CHANGED = 'export refused: the source changed:'
 
 /** Electron wraps an error thrown in `ipcMain.handle` ("Error invoking remote method ...: Error: export refused: ..."), so the prefix is searched, not anchored. Returns the refusal text from the prefix on, or null. */
 export function exportRefusal(message: string): string | null {
@@ -174,12 +177,31 @@ export interface ProjectDetail {
   qa: QaScore
   /** Dialogue style per chunk: flags a book whose chunks mix styles or leave the brief's. */
   typography: TypographyCheck
+  /** The target language's default typography, if the table has one; the UI shows it as the placeholder of the typography fields. */
+  typographyDefault?: Typography
   brief: string
   /** The last lines of log.md. */
   log: string
   running: boolean
   /** Folder of the exported files, relative to the data folder (forward slashes). */
   outputRel: string
+}
+
+/** The answer to `refreshSource`. */
+export interface RefreshResult {
+  /** Same file and hash as before: nothing was changed. */
+  unchanged: boolean
+  sourcePath: string
+  /** Translatable blocks: kept with their translation, to translate (changed or new), removed. */
+  blocks: { kept: number; toTranslate: number; removed: number }
+  /** Chunks after the refresh: all, kept from before (translated), pending ones that need translation. */
+  chunks: { total: number; kept: number; toTranslate: number }
+  /** Kept chunks that carry a hand edit (edit_chunk). */
+  editedKept: number
+  /** Hand-edited segments that were dropped because their text changed or was removed (the old text is in refresh-backup/). */
+  editsDropped: number
+  /** The backup folder, relative to the data folder (forward slashes). Absent when unchanged. */
+  backupRel?: string
 }
 
 /** The answer to `prepareChunks`: the chunks that were made (or kept) and the token budget they were planned with. */
@@ -334,6 +356,8 @@ export type Command =
   | { type: 'cancel'; projectId: string }
   | { type: 'retryChunk'; projectId: string; index: number; model?: string }
   | { type: 'editChunk'; projectId: string; index: number; final: Record<string, string> }
+  /** Re-reads the source after an edit (`sourcePath`: another file of the same format) and keeps the translation of unchanged blocks. */
+  | { type: 'refreshSource'; projectId: string; sourcePath?: string }
   | { type: 'updateGlossary'; projectId: string; entries: GlossaryEntry[] }
   /**
    * EPUB: `cover: 'title'` replaces it by a plain text title page (translated title and author), never an image (default: the source cover, alt text translated).
@@ -400,6 +424,7 @@ export interface CommandResults {
   cancel: undefined
   retryChunk: undefined
   editChunk: ChunkRecord
+  refreshSource: RefreshResult
   updateGlossary: undefined
   export: {
     /** The written document, or a visual-novel pack's bundle folder. */
