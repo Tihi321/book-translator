@@ -164,6 +164,8 @@ export interface ChunkRecord {
   error?: string
   /** The user edited the text. */
   edited?: boolean
+  /** The segment ids whose text the user changed (edit_chunk). Absent in chunks edited before it was kept: refresh then guesses per chunk. */
+  editedSegs?: string[]
 }
 
 export interface QaScore {

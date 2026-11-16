@@ -354,8 +354,10 @@ export class EngineService {
     if (this.runs.has(id)) throw new Error('pause the project before editing a chunk')
     const chunk = await this.store.readChunk(id, index)
     const known = new Set(chunk.segments.map((s) => s.id))
+    const editedSegs = new Set(chunk.editedSegs ?? [])
     for (const [segId, text] of Object.entries(final)) {
       if (!known.has(segId)) throw new Error(`chunk ${index} has no segment ${segId}`)
+      if (chunk.final[segId] !== text) editedSegs.add(segId)
       chunk.final[segId] = text
     }
     chunk.state = 'done'
@@ -364,6 +366,7 @@ export class EngineService {
     chunk.qa = { issues: [], ...(score !== undefined ? { score, edited: true, ...(model ? { model } : {}) } : {}) }
     chunk.error = undefined
     chunk.edited = true
+    chunk.editedSegs = chunk.segments.map((s) => s.id).filter((s) => editedSegs.has(s))
     await this.store.writeChunk(id, chunk)
     this.emit({ type: 'chunk.state', projectId: id, index, state: 'done', model: chunk.model, tokens: chunk.tokens, issues: 0, ...(chunk.qa.score !== undefined ? { qaScore: chunk.qa.score } : {}) })
     const project = await this.store.load(id)
@@ -405,7 +408,7 @@ export class EngineService {
     if (chunks.length > 0) project.status = chunks.some((c) => c.state !== 'done' && c.state !== 'flagged') ? 'incomplete' : 'done'
     await this.store.save(project)
     const { blocks, chunks: cs, editedKept, editsDropped } = report
-    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited chunk(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed); ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
+    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited segment(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${editsDropped} hand-edited segment(s) dropped (text changed or removed); ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
     await this.store.log(id, `info: ${message}`)
     this.emit({ type: 'log', projectId: id, level: 'info', message })
     this.emit({ type: 'project.updated', project: summarize(project, chunks) })
@@ -515,6 +518,7 @@ export class EngineService {
     chunk.qa = { issues: [] }
     chunk.error = undefined
     chunk.edited = undefined
+    chunk.editedSegs = undefined
     chunk.model = input.model?.trim() || EXTERNAL_MODEL
     chunk.state = 'done'
     await this.store.writeChunk(id, chunk)

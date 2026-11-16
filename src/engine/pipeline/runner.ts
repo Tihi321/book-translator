@@ -90,6 +90,7 @@ function resetChunk(c: ChunkRecord): void {
   c.qa = { issues: [] }
   c.error = undefined
   c.edited = undefined
+  c.editedSegs = undefined
 }
 
 const hasText = (r: Record<string, string>) => Object.keys(r).length > 0
@@ -107,6 +108,7 @@ function parkChunk(c: ChunkRecord): void {
     c.final = {}
     c.error = undefined
     c.edited = undefined
+    c.editedSegs = undefined
     return
   }
   if (c.state !== 'proofreading' && c.state !== 'reviewing' && c.state !== 'fixing') return resetChunk(c)
@@ -380,12 +382,14 @@ export class ProjectRunner {
     if (resumed) {
       chunk.error = undefined
       chunk.edited = undefined
+      chunk.editedSegs = undefined
       this.log('info', `chunk ${chunk.index} resumes after its ${proofDone ? 'proofreading' : 'translation'}`)
     } else {
       if (parked) {
         // stopped inside the translator: the accepted segments stay, only the others are asked for
         chunk.error = undefined
         chunk.edited = undefined
+        chunk.editedSegs = undefined
         chunk.final = {}
         chunk.proofread = {}
         this.log('info', `chunk ${chunk.index} resumes the translation: ${Object.keys(chunk.translation).length} of ${segs.length} segments kept`)

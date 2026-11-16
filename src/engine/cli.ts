@@ -215,7 +215,7 @@ export async function refreshProject(argv: string[]): Promise<number> {
   out(`source: ${r.sourcePath}`)
   out(`blocks: ${r.blocks.kept} kept, ${r.blocks.toTranslate} to translate, ${r.blocks.removed} removed`)
   out(`chunks: ${r.chunks.total} (${r.chunks.kept} kept, ${r.chunks.toTranslate} to translate)`)
-  out(`hand-edited chunks kept: ${r.editedKept}`)
+  out(`hand-edited segments kept: ${r.editedKept}`)
   out(`hand-edited segments dropped (text changed or removed): ${r.editsDropped}`)
   out(`backup: ${r.backupRel}`)
   return 0

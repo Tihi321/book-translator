@@ -23,7 +23,8 @@ interface Item {
  * paragraph renumbers everything after it), with an in-order alignment (`alignTexts`), so a repeated paragraph matches the copy in its place,
  * then a second pass (`matchMoved`) that gives a moved paragraph its old block. A block with a match whose segments are all translated (chunk `done` or `flagged`) keeps its
  * translation, proofread text, hand edit and QA verdict in a kept chunk, which is never run again. Changed and new blocks go into new pending
- * chunks. Removed blocks are dropped. Chunks are numbered 1..N in document order.
+ * chunks. Removed blocks are dropped. Chunks are numbered 1..N in document order. `editedKept` and `editsDropped` count hand-edited segments
+ * (`isHandEdit`), kept and dropped.
  */
 export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord[], newIr: DocumentIR, budget: number, count: (t: string) => number = countTokens): { chunks: ChunkRecord[]; report: Counts } {
   // the old segments by id, with the chunk that holds them
@@ -46,6 +47,7 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
 
   let blocksKept = 0
   let blocksToTranslate = 0
+  let editedKept = 0
   let matched = 0
   const carried = new Set<string>()
   const sections: { id: string; items: Item[] }[] = []
@@ -67,7 +69,10 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
       else blocksToTranslate++
       segs.forEach((seg, i) => {
         const from = froms[i]
-        if (from) carried.add(from.oldId)
+        if (from) {
+          carried.add(from.oldId)
+          if (isHandEdit(from.chunk, from.oldId)) editedKept++
+        }
         items.push({ seg, from })
       })
     }
@@ -100,14 +105,19 @@ export function refreshChunks(oldIr: DocumentIR, oldChunks: readonly ChunkRecord
     report: {
       blocks: { kept: blocksKept, toTranslate: blocksToTranslate, removed: oldBlocks.length - matched },
       chunks: { total: chunks.length, kept: kept.size, toTranslate: chunks.length - kept.size },
-      editedKept: [...kept].filter((c) => c.edited).length,
-      editsDropped: oldChunks.reduce((n, c) => n + (c.edited ? c.segments.filter((s) => !carried.has(s.id) && isHandEdit(c, s.id)).length : 0), 0)
+      editedKept,
+      editsDropped: oldChunks.reduce((n, c) => n + c.segments.filter((s) => !carried.has(s.id) && isHandEdit(c, s.id)).length, 0)
     }
   }
 }
 
-/** A segment of a hand-edited chunk whose final text is not the translator's or proofreader's text: the user (or the fix pass) wrote it. */
+/**
+ * A segment the user changed with edit_chunk (`editedSegs`). A chunk edited before `editedSegs` was kept falls back to a guess: in a chunk
+ * marked `edited`, a segment whose final text is not the translator's or proofreader's text (a fix-pass rewrite matches it too).
+ */
 function isHandEdit(c: ChunkRecord, segId: string): boolean {
+  if (c.editedSegs) return c.editedSegs.includes(segId)
+  if (!c.edited) return false
   const final = c.final[segId]
   return final !== undefined && final !== (c.proofread[segId] ?? c.translation[segId])
 }
@@ -265,6 +275,7 @@ function keptChunk(index: number, sectionId: string, run: Item[], c: ChunkRecord
     translation: rekey(c.translation),
     proofread: rekey(c.proofread),
     final: rekey(c.final),
+    editedSegs: c.editedSegs && run.filter((x) => c.editedSegs!.includes(x.from!.oldId)).map((x) => x.seg.id),
     qa: { ...c.qa, issues: c.qa.issues.filter((q) => ids.has(q.segId)).map((q) => ({ ...q, segId: ids.get(q.segId)! })) },
     tokens: whole ? c.tokens : { in: 0, out: 0 },
     costUsd: whole ? c.costUsd : 0,

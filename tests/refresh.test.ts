@@ -74,7 +74,7 @@ describe('refresh_source', () => {
     const oldIr = ir(['Alpha', 'Yes.', 'Bravo', 'Yes.', 'Charlie'], 'o')
     const segments = oldIr.sections[0]!.blocks.map((b) => ({ id: b.id, blockId: b.id, text: b.text }))
     const final = { o1: 'ALFA', o2: 'DA-FIRST', o3: 'BRAVO', o4: 'DA-SECOND', o5: 'CHARLIE' }
-    const old: ChunkRecord = { index: 1, sectionId: 's1', blockIds: segments.map((s) => s.id), segments, translation: final, proofread: {}, final, qa: { issues: [] }, state: 'done', tokens: { in: 0, out: 0 }, costUsd: 0, ms: 0, edited: true }
+    const old: ChunkRecord = { index: 1, sectionId: 's1', blockIds: segments.map((s) => s.id), segments, translation: { ...final, o4: 'DA' }, proofread: {}, final, qa: { issues: [] }, state: 'done', tokens: { in: 0, out: 0 }, costUsd: 0, ms: 0, edited: true }
     const { chunks, report } = refreshChunks(oldIr, [old], ir(['Alpha', 'Bravo', 'Yes.', 'Charlie'], 'n'), 1000, (t) => t.length)
     expect(chunks.flatMap((c) => c.segments.map((s) => c.final[s.id]))).toEqual(['ALFA', 'BRAVO', 'DA-SECOND', 'CHARLIE'])
     expect(report).toMatchObject({ blocks: { kept: 4, toTranslate: 0, removed: 1 }, editedKept: 1 })
@@ -90,5 +90,18 @@ describe('refresh_source', () => {
     const { chunks, report } = refreshChunks(oldIr, [old], ir(['Alpha', 'Charlie', 'Bravo', 'Delta changed'], 'n'), 1000, (t) => t.length)
     expect(chunks.flatMap((c) => c.segments.map((s) => `${s.text}:${c.state === 'pending' ? '(pending)' : c.final[s.id]}`))).toEqual(['Alpha:ALFA', 'Charlie:CHARLIE', 'Bravo:BRAVO-EDIT', 'Delta changed:(pending)'])
     expect(report).toMatchObject({ blocks: { kept: 3, toTranslate: 1, removed: 1 }, editsDropped: 1 })
+  })
+
+  it('counts only the segments edit_chunk changed: a QA fix-pass rewrite is no dropped hand edit, and editedKept counts segments', () => {
+    const ir = (texts: string[], p: string): DocumentIR => ({ format: 'txt', meta: {}, sections: [{ id: 's1', blocks: texts.map((text, i) => ({ id: `${p}${i + 1}`, kind: 'para', text, tags: [] })) }] })
+    const oldIr = ir(['Alpha', 'Bravo', 'Charlie', 'Delta'], 'o')
+    const segments = oldIr.sections[0]!.blocks.map((b) => ({ id: b.id, blockId: b.id, text: b.text }))
+    const translation = { o1: 'ALFA', o2: 'BRAVO', o3: 'CHARLIE', o4: 'DELTA' }
+    // o2 was rewritten by the fix pass, o1, o3 and o4 by hand
+    const final = { o1: 'ALFA-EDIT', o2: 'BRAVO-FIXED', o3: 'CHARLIE-EDIT', o4: 'DELTA-EDIT' }
+    const old: ChunkRecord = { index: 1, sectionId: 's1', blockIds: segments.map((s) => s.id), segments, translation, proofread: {}, final, qa: { issues: [] }, state: 'done', tokens: { in: 0, out: 0 }, costUsd: 0, ms: 0, edited: true, editedSegs: ['o1', 'o3', 'o4'] }
+    const { chunks, report } = refreshChunks(oldIr, [old], ir(['Alpha', 'Bravo changed', 'Charlie', 'Delta'], 'n'), 1000, (t) => t.length)
+    expect(report).toMatchObject({ editsDropped: 0, editedKept: 3 })
+    expect(chunks.flatMap((c) => c.editedSegs ?? [])).toEqual(['n1', 'n3', 'n4'])
   })
 })
