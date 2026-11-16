@@ -151,6 +151,7 @@ Choose other models (--model ...), or run the project from an MCP client: start_
     return 2
   }
   out(`project ${summary.id} (${summary.format}, ${summary.chunks > 0 ? summary.chunks + ' chunks, resuming' : 'new'})`)
+  if (summary.hint) out(`note: ${summary.hint}`)
   const est = await service.analyze(summary.id)
   out(`estimate: ${est.chunks} chunks of up to ${est.budget} tokens, ${est.sourceTokens} source tokens, ~${est.estTokensIn}/${est.estTokensOut} tokens in/out, ~$${est.estCostUsd.toFixed(3)}, ~${fmtDuration(est.estSeconds)}`)
 
