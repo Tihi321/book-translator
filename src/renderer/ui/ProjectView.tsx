@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { CHUNK_STATES, IN_PROGRESS_STATES } from '../../shared/project'
 import type { ChunkState } from '../../shared/project'
-import { EXPORT_REFUSED } from '../../shared/protocol'
+import { exportRefusal } from '../../shared/protocol'
 import type { ChunkBrief, Command, ProjectDetail } from '../../shared/protocol'
 import { getApi } from '../api'
 import { fmtCost, fmtCount, fmtDuration, modelName, STATE_LABEL } from '../format'
@@ -146,7 +146,8 @@ export function ProjectView({ id }: { id: string }) {
       }
     } catch (err) {
       const message = (err as Error).message
-      if (message.startsWith(EXPORT_REFUSED)) setRefused({ message, action })
+      const refusal = exportRefusal(message)
+      if (refusal !== null) setRefused({ message: refusal, action })
       else toast(message)
     } finally {
       setExporting(false)

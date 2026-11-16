@@ -12,6 +12,12 @@ import type { ClientTaskSummary } from '../engine/models/client'
 /** The start of the message of an export refused because blocks are untranslated (the UI recognises it). */
 export const EXPORT_REFUSED = 'export refused:'
 
+/** Electron wraps an error thrown in `ipcMain.handle` ("Error invoking remote method ...: Error: export refused: ..."), so the prefix is searched, not anchored. Returns the refusal text from the prefix on, or null. */
+export function exportRefusal(message: string): string | null {
+  const at = message.indexOf(EXPORT_REFUSED)
+  return at < 0 ? null : message.slice(at)
+}
+
 export interface ProgressInfo {
   done: number
   total: number
