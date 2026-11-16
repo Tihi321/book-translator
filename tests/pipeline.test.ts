@@ -5,7 +5,7 @@ import type { ChatRequest } from '../src/engine/models/types'
 import { ProviderError } from '../src/engine/models/types'
 import { parseGlossary } from '../src/engine/pipeline/glossary'
 import { summarize } from '../src/engine/project/summary'
-import { asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
+import { MODEL, QA_MODEL, asSegs, bookText, lastUser, rig, segsIn } from './pipelineHelpers'
 import type { Rig } from './pipelineHelpers'
 
 let r: Rig | undefined
@@ -299,6 +299,32 @@ describe('translator retries', () => {
     const id = await r.create()
     expect((await r.service.start(id)).status).toBe('done')
     expect(r.calls('translator').filter((c) => c.unit === 'chunk-2').map((c) => c.task)).toEqual(['translate', 'retry'])
+  })
+
+  it('moves to the next model after two mismatches, and splits only when every model failed', async () => {
+    r = await rig()
+    // a third mock model as a shared fallback row, behind the project's own two
+    const prov = path.join(r.dir, 'config', 'providers.md')
+    const text = (await fs.readFile(prov, 'utf8')).replace(/(- id: mock-reviewer\s+family: mock-other)/, '$1\n      - id: mock-fallback\n        family: mock')
+    await fs.writeFile(prov, text, 'utf8')
+    await r.service.registry.load()
+    r.service.registry.setDefaults({ fallbacks: [MODEL, QA_MODEL, 'mock/mock-fallback'], shared: true, lmLoad: { parallel: 1, context: 8192, ttlMinutes: 30 } })
+    r.mock.on({ role: 'translator' }, (req) => {
+      const segs = segsIn(lastUser(req))
+      const unit = unitOf(req)
+      if (unit === 'chunk-2' && req.model.endsWith('mock-translator')) return asSegs(segs.slice(0, -1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      if (unit === 'chunk-3' && segs.length >= 3) return asSegs(segs.slice(1).map((s) => ({ id: s.id, text: `[hr] ${s.text}` })))
+      return echo(req)
+    })
+    const id = await r.create({ agentModels: { glossary: [MODEL], translator: [MODEL, QA_MODEL], proofreader: [MODEL], qa: [QA_MODEL] } })
+    expect((await r.service.start(id)).status).toBe('done')
+    const seq = (unit: string) => r!.mock.calls.filter((c) => c.meta?.role === 'translator' && c.meta.unit === unit).map((c) => `${c.model.replace('mock-', '')} ${c.meta!.task}`)
+    expect(seq('chunk-2')).toEqual(['translator translate', 'translator retry', 'reviewer translate'])
+    expect((await r.service.store.listChunks(id))[1]!.model).toBe(QA_MODEL)
+    expect(seq('chunk-3')).toEqual(['translator translate', 'translator retry', 'reviewer translate', 'reviewer retry', 'translator translate', 'translator translate'])
+    for (const c of await r.service.store.listChunks(id)) expect(Object.values(c.final).every((x) => x.startsWith('[hr] '))).toBe(true)
+    expect(r.mock.calls.filter((c) => c.meta?.role === 'translator' && c.model.endsWith('mock-fallback'))).toEqual([])
+    expect(r.events.some((e) => e.type === 'log' && /chunk-2: segment mismatch 2 times on mock\/mock-translator, trying mock\/mock-reviewer/.test(e.message))).toBe(true)
   })
 
   it('splits the chunk in half when the retry fails too', async () => {
