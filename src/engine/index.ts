@@ -1,4 +1,4 @@
-import { exportProject, keySet, listModels, parseFile, projectStatus, translate } from './cli'
+import { exportProject, keySet, listModels, parseFile, projectStatus, refreshProject, translate } from './cli'
 import { headless, serve } from './serve'
 
 const USAGE = `Book Translator engine
@@ -12,6 +12,7 @@ Usage:
                                                  Translate a document (creates the project or resumes it) and export it.
                                                  <file> may be a Scriptorium visual-novel book folder: the export is a folder
   npm run engine -- export <projectId> [--out <file>] [--cover title] [--allow-partial]   Write the document; refuses while a block is untranslated unless --allow-partial (--cover title: EPUB cover becomes a plain text title page)
+  npm run engine -- refresh <projectId> [--source <file>]   Re-read the edited source into the project: unchanged blocks keep their translation and hand edits
   npm run engine -- status <projectId>           Show chunk states, spend and flagged chunks
   node out/engine/index.js serve [--data <dir>] [--mcp]  Run as the app's engine process (Electron utilityProcess or a Node child with IPC); --mcp turns the MCP server on for this run
   npm run headless -- [--data <dir>] [--port <n>]  Engine without a window: the MCP server is on, its URL and token are printed once (Ctrl+C pauses running projects and stops)
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   else if (cmd === 'parse') process.exitCode = await parseFile(rest)
   else if (cmd === 'translate') process.exitCode = await translate(rest)
   else if (cmd === 'export') process.exitCode = await exportProject(rest)
+  else if (cmd === 'refresh') process.exitCode = await refreshProject(rest)
   else if (cmd === 'status') process.exitCode = await projectStatus(rest)
   else if (cmd === 'serve') await serve(rest)
   else if (cmd === 'headless') await headless(rest)

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { chunkBudget, planChunks } from './chunker'
+import { refreshChunks, translatableBlocks } from './project/refresh'
 import { formatNothingTranslated, formatRefusal, formatWarning, untranslatedReport } from './untranslated'
 import { loadDefaults, resolveLanguage } from './config'
 import { adapterFor, briefWithNote, hashSource } from './formats'
@@ -23,8 +24,8 @@ import { typographyCheck, typographyRuleOf } from './pipeline/typography'
 import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
-import { EXPORT_REFUSED } from '../shared/protocol'
-import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, SubmitResult, TranslationTask } from '../shared/protocol'
+import { EXPORT_REFUSED, SOURCE_CHANGED } from '../shared/protocol'
+import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, RefreshResult, SubmitResult, TranslationTask } from '../shared/protocol'
 import { AGENTS } from '../shared/schemas'
 import type { AgentName } from '../shared/schemas'
 
@@ -369,6 +370,46 @@ export class EngineService {
     return chunk
   }
 
+  /**
+   * Re-reads the source after it was edited (or another file of the same format) into the same project. Blocks whose text did not change keep
+   * their translation, QA verdict and hand edit; changed and new blocks go into new pending chunks; removed blocks are dropped. The old
+   * files are backed up first. Chunk numbers change.
+   */
+  async refreshSource(id: string, sourcePath?: string): Promise<RefreshResult> {
+    this.refuseWhileRunning(id, 'refreshing the source')
+    const project = await this.store.load(id)
+    if (project.format === 'vn' || project.format === 'vnp') throw new Error('refresh_source does not take visual-novel folders or packs: create a new project for the changed book')
+    const file = path.resolve(sourcePath ?? project.sourcePath)
+    const hash = await hashSource(file)
+    const oldChunks = await this.store.listChunks(id)
+    if (hash === project.sourceHash && file === project.sourcePath) {
+      return { unchanged: true, sourcePath: file, blocks: { kept: 0, toTranslate: 0, removed: 0 }, chunks: { total: oldChunks.length, kept: oldChunks.length, toTranslate: 0 }, editedKept: 0 }
+    }
+    const newIr = await adapterFor(file).read(file)
+    if (newIr.format !== project.format) throw new Error(`the new source is ${newIr.format}, the project is ${project.format}`)
+    const oldIr = await this.store.readIr(id)
+    let chunks: ChunkRecord[] = []
+    let report: Omit<RefreshResult, 'unchanged' | 'sourcePath' | 'backupRel'> = {
+      blocks: { kept: 0, toTranslate: translatableBlocks(newIr).length, removed: translatableBlocks(oldIr).length },
+      chunks: { total: 0, kept: 0, toTranslate: 0 },
+      editedKept: 0
+    }
+    const budget = project.chunking?.budget ?? chunkBudget({ contexts: [], userMax: project.settings.maxChunkTokens })
+    if (oldChunks.length > 0) ({ chunks, report } = refreshChunks(oldIr, oldChunks, newIr, budget))
+    const backupRel = await this.store.replaceSource(id, newIr, chunks)
+    project.sourcePath = file
+    project.sourceHash = hash
+    project.chunking = chunks.length ? { budget, chunks: chunks.length } : null
+    if (chunks.length > 0) project.status = chunks.some((c) => c.state !== 'done' && c.state !== 'flagged') ? 'incomplete' : 'done'
+    await this.store.save(project)
+    const { blocks, chunks: cs, editedKept } = report
+    const message = `source refreshed from ${file}: ${blocks.kept} block(s) kept (${editedKept} hand-edited chunk(s)), ${blocks.toTranslate} to translate, ${blocks.removed} removed; ${cs.total} chunks, ${cs.toTranslate} to translate; backup in ${backupRel}`
+    await this.store.log(id, `info: ${message}`)
+    this.emit({ type: 'log', projectId: id, level: 'info', message })
+    this.emit({ type: 'project.updated', project: summarize(project, chunks) })
+    return { unchanged: false, sourcePath: file, ...report, backupRel }
+  }
+
   /** Replaces glossary.md. Chunks that start after this see the new entries. */
   async updateGlossary(id: string, entries: GlossaryEntry[]): Promise<void> {
     await this.store.writeGlossary(id, entries)
@@ -528,6 +569,10 @@ export class EngineService {
    */
   async exportWithReport(id: string, outPath?: string, opts: { cover?: 'source' | 'title'; allowPartial?: boolean } = {}): Promise<ExportReport> {
     const project = await this.store.load(id)
+    // an edited source file: the translations no longer match it (an EPUB or DOCX is written by block position into that file)
+    if (['epub', 'docx', 'txt', 'md', 'pdf'].includes(project.format) && (await fs.access(project.sourcePath).then(() => true, () => false)) && (await hashSource(project.sourcePath)) !== project.sourceHash) {
+      throw new ExportRefused(`${SOURCE_CHANGED} ${project.sourcePath} was edited after the project was made or last refreshed, so the translation no longer matches it. Run refresh_source (the app: Refresh source; CLI: engine refresh <id>) to keep the translations of unchanged blocks and translate the rest.`)
+    }
     const ir = await this.store.readIr(id)
     // refuse before anything is written: a book with failed or pending chunks would silently keep the source text in those places
     const chunks = await this.store.listChunks(id)

@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { CHUNK_STATES, IN_PROGRESS_STATES } from '../../shared/project'
 import type { ChunkState } from '../../shared/project'
-import { exportRefusal } from '../../shared/protocol'
+import { exportRefusal, SOURCE_CHANGED } from '../../shared/protocol'
 import type { ChunkBrief, Command, ProjectDetail } from '../../shared/protocol'
 import { getApi } from '../api'
 import { fmtCost, fmtCount, fmtDuration, modelName, STATE_LABEL } from '../format'
@@ -114,6 +114,8 @@ export function ProjectView({ id }: { id: string }) {
   const [exporting, setExporting] = useState(false)
   // the engine refuses an export while a block is untranslated: its message is shown with "Export anyway"
   const [refused, setRefused] = useState<{ message: string; action: 'open' | 'read' } | null>(null)
+  // "Refresh source": re-read the edited source file into this project
+  const [refreshing, setRefreshing] = useState<'closed' | 'open' | 'busy'>('closed')
 
   // a quiet refresh now and then while a run is on keeps flagged counts and issue marks current
   const running = detail?.project.id === id && RUNNING_STATUSES.includes(detail.project.status)
@@ -132,6 +134,18 @@ export function ProjectView({ id }: { id: string }) {
   const send = (command: Command) => attempt(getApi().request(command as never))
   const canStart = !running && p.status !== 'done'
 
+  /** Re-reads the source (the project's own file, or another one the user picked) and keeps the translations of unchanged paragraphs. */
+  async function refreshFrom(pick: boolean) {
+    const sourcePath = pick ? await attempt(getApi().pickFile()) : undefined
+    if (pick && !sourcePath) return
+    setRefreshing('busy')
+    const res = await attempt(getApi().request<'refreshSource'>({ type: 'refreshSource', projectId: id, ...(sourcePath ? { sourcePath } : {}) }))
+    setRefreshing('closed')
+    if (!res) return
+    toast(res.unchanged ? 'The source has not changed' : `Source refreshed: ${res.blocks.kept} paragraphs kept, ${res.blocks.toTranslate} to translate, ${res.blocks.removed} removed`, 'info')
+    await loadDetail(id)
+  }
+
   /** Exports, then shows the folder (`open`) or opens the reader (`read`). A refusal for untranslated blocks is asked about, not toasted. */
   async function exportFor(action: 'open' | 'read', allowPartial = false) {
     setExporting(true)
@@ -147,7 +161,9 @@ export function ProjectView({ id }: { id: string }) {
     } catch (err) {
       const message = (err as Error).message
       const refusal = exportRefusal(message)
-      if (refusal !== null) setRefused({ message: refusal, action })
+      // a changed source cannot be exported past: "Export anyway" is not offered, refreshing is the way on
+      if (refusal !== null && refusal.startsWith(SOURCE_CHANGED)) toast(refusal)
+      else if (refusal !== null) setRefused({ message: refusal, action })
       else toast(message)
     } finally {
       setExporting(false)
@@ -189,8 +205,20 @@ export function ProjectView({ id }: { id: string }) {
           )}
           <button onClick={() => void exportFor('open')} disabled={exporting} title="Writes the document; asks first when something is untranslated" data-testid="export">{exporting ? 'Exporting...' : 'Export'}</button>
           <button onClick={() => void attempt(getApi().openPath(detail.outputRel))}>Open folder</button>
+          {p.format !== 'vn' && p.format !== 'vnp' && (
+            <button onClick={() => setRefreshing(refreshing === 'closed' ? 'open' : 'closed')} disabled={running || refreshing === 'busy'} title="Re-read the source file after it was edited" data-testid="refresh-source">Refresh source</button>
+          )}
         </div>
       </div>
+
+      {refreshing !== 'closed' && (
+        <div className="row" data-testid="refresh-row">
+          <span className="small">Re-read the source and keep the translations of unchanged paragraphs (hand edits too). Changed and new paragraphs are translated by the next run.</span>
+          <button className="primary" onClick={() => void refreshFrom(false)} disabled={refreshing === 'busy'} data-testid="refresh-same">Refresh from {p.sourcePath.split(/[\\/]/).pop()}</button>
+          <button onClick={() => void refreshFrom(true)} disabled={refreshing === 'busy'} data-testid="refresh-pick">Choose another file...</button>
+          <button onClick={() => setRefreshing('closed')} disabled={refreshing === 'busy'}>Cancel</button>
+        </div>
+      )}
 
       {refused && (
         <div className="row" data-testid="export-refused">

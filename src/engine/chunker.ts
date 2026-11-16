@@ -112,24 +112,33 @@ export function segmentsForBlock(block: { id: string; text: string }, budget: nu
 export function planChunks(ir: DocumentIR, budget: number, count: Counter = countTokens): PlannedChunk[] {
   const chunks: PlannedChunk[] = []
   for (const section of ir.sections) {
-    let cur: SegmentRec[] = []
-    let tokens = 0
-    const flush = () => {
-      if (cur.length === 0) return
-      chunks.push({ index: chunks.length + 1, sectionId: section.id, segments: cur, tokens })
-      cur = []
-      tokens = 0
-    }
+    const segs: SegmentRec[] = []
     for (const block of section.blocks) {
       if (block.kind === 'meta' || block.text.trim() === '') continue
-      for (const seg of segmentsForBlock(block, budget, count)) {
-        const t = count(seg.text) + SEG_OVERHEAD
-        if (cur.length > 0 && tokens + t > budget) flush()
-        cur.push(seg)
-        tokens += t
-      }
+      segs.push(...segmentsForBlock(block, budget, count))
     }
-    flush()
+    chunks.push(...packSegments(section.id, segs, budget, chunks.length + 1, count))
   }
+  return chunks
+}
+
+/** Packs the segments of one section into chunks of at most `budget` tokens, in order, numbered from `firstIndex`. */
+export function packSegments(sectionId: string, segs: readonly SegmentRec[], budget: number, firstIndex: number, count: Counter = countTokens): PlannedChunk[] {
+  const chunks: PlannedChunk[] = []
+  let cur: SegmentRec[] = []
+  let tokens = 0
+  const flush = () => {
+    if (cur.length === 0) return
+    chunks.push({ index: firstIndex + chunks.length, sectionId, segments: cur, tokens })
+    cur = []
+    tokens = 0
+  }
+  for (const seg of segs) {
+    const t = count(seg.text) + SEG_OVERHEAD
+    if (cur.length > 0 && tokens + t > budget) flush()
+    cur.push(seg)
+    tokens += t
+  }
+  flush()
   return chunks
 }

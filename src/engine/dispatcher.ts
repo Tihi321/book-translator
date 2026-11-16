@@ -725,6 +725,8 @@ export class CommandDispatcher {
         return undefined
       case 'editChunk':
         return s.editChunk(cmd.projectId, cmd.index, cmd.final)
+      case 'refreshSource':
+        return s.refreshSource(cmd.projectId, cmd.sourcePath)
       case 'updateGlossary':
         await s.updateGlossary(cmd.projectId, cmd.entries)
         return undefined

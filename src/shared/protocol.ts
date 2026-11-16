@@ -12,6 +12,9 @@ import type { ClientTaskSummary } from '../engine/models/client'
 /** The start of the message of an export refused because blocks are untranslated (the UI recognises it). */
 export const EXPORT_REFUSED = 'export refused:'
 
+/** The start of the message of an export refused because the source file changed after the project was made or last refreshed. It starts with EXPORT_REFUSED. */
+export const SOURCE_CHANGED = 'export refused: the source changed:'
+
 /** Electron wraps an error thrown in `ipcMain.handle` ("Error invoking remote method ...: Error: export refused: ..."), so the prefix is searched, not anchored. Returns the refusal text from the prefix on, or null. */
 export function exportRefusal(message: string): string | null {
   const at = message.indexOf(EXPORT_REFUSED)
@@ -182,6 +185,21 @@ export interface ProjectDetail {
   outputRel: string
 }
 
+/** The answer to `refreshSource`. */
+export interface RefreshResult {
+  /** Same file and hash as before: nothing was changed. */
+  unchanged: boolean
+  sourcePath: string
+  /** Translatable blocks: kept with their translation, to translate (changed or new), removed. */
+  blocks: { kept: number; toTranslate: number; removed: number }
+  /** Chunks after the refresh: all, kept from before (translated), pending ones that need translation. */
+  chunks: { total: number; kept: number; toTranslate: number }
+  /** Kept chunks that carry a hand edit (edit_chunk). */
+  editedKept: number
+  /** The backup folder, relative to the data folder (forward slashes). Absent when unchanged. */
+  backupRel?: string
+}
+
 /** The answer to `prepareChunks`: the chunks that were made (or kept) and the token budget they were planned with. */
 export interface PrepareChunksResult {
   chunks: ChunkBrief[]
@@ -334,6 +352,8 @@ export type Command =
   | { type: 'cancel'; projectId: string }
   | { type: 'retryChunk'; projectId: string; index: number; model?: string }
   | { type: 'editChunk'; projectId: string; index: number; final: Record<string, string> }
+  /** Re-reads the source after an edit (`sourcePath`: another file of the same format) and keeps the translation of unchanged blocks. */
+  | { type: 'refreshSource'; projectId: string; sourcePath?: string }
   | { type: 'updateGlossary'; projectId: string; entries: GlossaryEntry[] }
   /**
    * EPUB: `cover: 'title'` replaces it by a plain text title page (translated title and author), never an image (default: the source cover, alt text translated).
@@ -400,6 +420,7 @@ export interface CommandResults {
   cancel: undefined
   retryChunk: undefined
   editChunk: ChunkRecord
+  refreshSource: RefreshResult
   updateGlossary: undefined
   export: {
     /** The written document, or a visual-novel pack's bundle folder. */

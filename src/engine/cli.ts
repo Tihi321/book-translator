@@ -71,7 +71,7 @@ export async function parseFile(argv: string[]): Promise<number> {
   return 0
 }
 
-const VALUE_FLAGS = ['data', 'seed', 'to', 'from', 'model', 'glossary-model', 'proofread-model', 'qa-model', 'max-chunk', 'project', 'out']
+const VALUE_FLAGS = ['data', 'seed', 'to', 'from', 'model', 'glossary-model', 'proofread-model', 'qa-model', 'max-chunk', 'project', 'out', 'source']
 
 /** The first argument that is neither a flag nor a flag's value. */
 function positional(argv: string[]): string | undefined {
@@ -197,6 +197,26 @@ export async function exportProject(argv: string[]): Promise<number> {
     return 2
   }
   printExport(await s.service.exportWithReport(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined, allowPartial: argv.includes('--allow-partial') }))
+  return 0
+}
+
+/** `engine refresh <projectId> [--source <file>]`: re-reads the edited source into the project and keeps the translations of unchanged blocks. */
+export async function refreshProject(argv: string[]): Promise<number> {
+  const s = await serviceFor(argv)
+  if (!s) {
+    out('Usage: npm run engine -- refresh <projectId> [--source <file>]  (re-reads the edited source: unchanged blocks keep their translation and hand edits, changed and new ones are translated by the next run)')
+    return 2
+  }
+  const r = await s.service.refreshSource(s.id, argValue(argv, 'source'))
+  if (r.unchanged) {
+    out('unchanged')
+    return 0
+  }
+  out(`source: ${r.sourcePath}`)
+  out(`blocks: ${r.blocks.kept} kept, ${r.blocks.toTranslate} to translate, ${r.blocks.removed} removed`)
+  out(`chunks: ${r.chunks.total} (${r.chunks.kept} kept, ${r.chunks.toTranslate} to translate)`)
+  out(`hand-edited chunks kept: ${r.editedKept}`)
+  out(`backup: ${r.backupRel}`)
   return 0
 }
 
