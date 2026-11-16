@@ -1,2 +1,4 @@
 {"ts":"2026-11-15T20:00:00Z","actor":"director-scribe","type":"plan.created","request":"creative-hub/REQ-0025","ticket":"BTT-31-retry-and-export","detail":"plan written for bugs 5-6"}
 {"ts":"2026-11-15T20:08:00Z","actor":"director-scribe","type":"plan.approved","request":"creative-hub/REQ-0025","ticket":"BTT-31-retry-and-export","detail":"user approved the plan; implement after REQ-0024"}
+{"ts":"2026-11-16T08:40:00Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0025","ticket":"BTT-31-retry-and-export","detail":"PASS after polish round 1","data":{"verdict":"PASS","polish_round":1}}
+{"ts":"2026-11-16T08:40:00Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0025","ticket":"BTT-31-retry-and-export","detail":"ticket done after PASS verdict (polish round 1)"}

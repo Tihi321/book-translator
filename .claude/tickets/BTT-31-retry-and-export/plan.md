@@ -1,9 +1,9 @@
 ---
-status: approved
+status: done
 request: REQ-0025
 repos: [book-translator]
 branch: BTT-31_retry-and-export
-updated: 2026-11-15
+updated: 2026-11-16
 ---
 
 # BTT-31 Retry on the next model, and refuse an export with untranslated blocks
