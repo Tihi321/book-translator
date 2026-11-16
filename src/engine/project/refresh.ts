@@ -277,6 +277,7 @@ function keptChunk(index: number, sectionId: string, run: Item[], c: ChunkRecord
     return out
   }
   const whole = run.length === c.segments.length
+  const editedSegs = c.editedSegs && run.filter((x) => c.editedSegs!.includes(x.from!.oldId)).map((x) => x.seg.id)
   return {
     ...c,
     index,
@@ -286,7 +287,9 @@ function keptChunk(index: number, sectionId: string, run: Item[], c: ChunkRecord
     translation: rekey(c.translation),
     proofread: rekey(c.proofread),
     final: rekey(c.final),
-    editedSegs: c.editedSegs && run.filter((x) => c.editedSegs!.includes(x.from!.oldId)).map((x) => x.seg.id),
+    editedSegs,
+    // a part of a split chunk that holds none of its hand edits shows no "edited" badge (an older chunk without editedSegs keeps the flag)
+    edited: !whole && editedSegs?.length === 0 ? false : c.edited,
     qa: { ...c.qa, issues: c.qa.issues.filter((q) => ids.has(q.segId)).map((q) => ({ ...q, segId: ids.get(q.segId)! })) },
     tokens: whole ? c.tokens : { in: 0, out: 0 },
     costUsd: whole ? c.costUsd : 0,
