@@ -178,7 +178,9 @@ describe('resume', () => {
     expect((await service.getProject(id)).status).toBe('paused')
 
     // partial export: translated blocks and untouched source text together
-    const partial = await fs.readFile(await service.export(id), 'utf8')
+    const report = await service.exportWithReport(id, undefined, { allowPartial: true })
+    expect(report.warnings).toEqual([expect.stringMatching(/stay in the source language: chunks? [\d, ]+ pending/)])
+    const partial = await fs.readFile(report.path, 'utf8')
     expect(partial).toContain('[hr] ')
     expect(partial).toContain('\nParagraph 12 of chapter 2: Alice met Bob') // not translated yet: source text stays
 
@@ -356,11 +358,17 @@ describe('translator retries', () => {
     expect(chunks.filter((c) => c.state === 'done').length).toBe(chunks.length - 1)
     expect(r.events.some((e) => e.type === 'chunk.state' && e.state === 'failed' && e.index === 3)).toBe(true)
 
-    // export works: the failed chunk's blocks keep the source text
-    const text = await fs.readFile(await r.service.export(id), 'utf8')
+    // export refuses while a chunk is failed, and writes nothing
+    await expect(r.service.exportWithReport(id)).rejects.toThrow(/^export refused: \d+ block\(s\) would stay in the source language: chunk 3 failed .*retry_chunk.*allowPartial/)
+    expect(await fs.readdir(path.dirname(r.service.store.file(id, 'output', 'x'))).catch(() => [])).toEqual([])
+    // allowPartial: the failed chunk's blocks keep the source text, with one warning
+    const partial = await r.service.exportWithReport(id, undefined, { allowPartial: true })
+    const text = await fs.readFile(partial.path, 'utf8')
     const failedText = chunks[2]!.segments[0]!.text
     expect(text).toContain(`\n${failedText}\n`)
     expect(text).toContain('[hr] ')
+    expect(partial.warnings).toHaveLength(1)
+    expect(partial.warnings[0]).toMatch(/^\d+ block\(s\) stay in the source language: chunk 3 failed/)
 
     undo()
     const retry = await r.service.retryChunk(id, 3)
@@ -369,6 +377,7 @@ describe('translator retries', () => {
     expect(after.state).toBe('done')
     expect(after.error).toBeUndefined()
     expect(after.final[after.segments[0]!.id]).toBe(`[hr] ${failedText}`)
+    expect((await r.service.exportWithReport(id)).warnings).toEqual([])
   })
 
   it('fails a chunk on a provider error that is not retryable', async () => {

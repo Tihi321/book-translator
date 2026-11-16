@@ -167,7 +167,8 @@ Choose other models (--model ...), or run the project from an MCP client: start_
     out(`glossary written to ${service.store.file(summary.id, 'glossary.md')}. Edit it, then run the same command to continue.`)
     return 0
   }
-  const report = await service.exportWithReport(summary.id, argValue(argv, 'out'))
+  // the run's end writes what there is (the status line says what failed); only `engine export` refuses
+  const report = await service.exportWithReport(summary.id, argValue(argv, 'out'), { allowPartial: true })
   printExport(report)
   return result.status === 'done' ? 0 : 1
 }
@@ -187,15 +188,15 @@ async function serviceFor(argv: string[]): Promise<{ service: EngineService; id:
   return { service: new EngineService({ dataDir, registry }), id }
 }
 
-/** `engine export <projectId> [--out <file|folder>]`: writes the document from the chunks translated so far. */
+/** `engine export <projectId> [--out <file|folder>] [--allow-partial]`: writes the document; refuses while a block is untranslated unless `--allow-partial`. */
 export async function exportProject(argv: string[]): Promise<number> {
   const s = await serviceFor(argv)
   if (!s) {
-    out('Usage: npm run engine -- export <projectId> [--out <file|folder>] [--cover title]  (EPUB: --cover title replaces the cover image by a plain text title page)')
+    out('Usage: npm run engine -- export <projectId> [--out <file|folder>] [--cover title] [--allow-partial]  (EPUB: --cover title replaces the cover image by a plain text title page; refuses while a block is untranslated unless --allow-partial)')
     out('A visual-novel pack is exported as a folder <slug>.<lang>/ with edition.json, vn/pack.json, vn/text/<lang>.json and catalog.json.')
     return 2
   }
-  printExport(await s.service.exportWithReport(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined }))
+  printExport(await s.service.exportWithReport(s.id, argValue(argv, 'out'), { cover: argValue(argv, 'cover') === 'title' ? 'title' : undefined, allowPartial: argv.includes('--allow-partial') }))
   return 0
 }
 

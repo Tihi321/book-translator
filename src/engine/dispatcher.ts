@@ -729,7 +729,7 @@ export class CommandDispatcher {
         await s.updateGlossary(cmd.projectId, cmd.entries)
         return undefined
       case 'export': {
-        const report = await s.exportWithReport(cmd.projectId, cmd.outPath, { cover: cmd.cover })
+        const report = await s.exportWithReport(cmd.projectId, cmd.outPath, { cover: cmd.cover, allowPartial: cmd.allowPartial === true })
         return {
           path: report.path,
           rel: this.exportRel(report.path),

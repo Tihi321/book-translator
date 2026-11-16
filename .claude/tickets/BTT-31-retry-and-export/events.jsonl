@@ -1,0 +1,2 @@
+{"ts":"2026-11-15T20:00:00Z","actor":"director-scribe","type":"plan.created","request":"creative-hub/REQ-0025","ticket":"BTT-31-retry-and-export","detail":"plan written for bugs 5-6"}
+{"ts":"2026-11-15T20:08:00Z","actor":"director-scribe","type":"plan.approved","request":"creative-hub/REQ-0025","ticket":"BTT-31-retry-and-export","detail":"user approved the plan; implement after REQ-0024"}

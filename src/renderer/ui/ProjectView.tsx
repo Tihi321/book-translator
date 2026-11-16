@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { CHUNK_STATES, IN_PROGRESS_STATES } from '../../shared/project'
 import type { ChunkState } from '../../shared/project'
+import { EXPORT_REFUSED } from '../../shared/protocol'
 import type { ChunkBrief, Command, ProjectDetail } from '../../shared/protocol'
 import { getApi } from '../api'
 import { fmtCost, fmtCount, fmtDuration, modelName, STATE_LABEL } from '../format'
@@ -111,6 +112,8 @@ export function ProjectView({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>('chunks')
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [exporting, setExporting] = useState(false)
+  // the engine refuses an export while a block is untranslated: its message is shown with "Export anyway"
+  const [refused, setRefused] = useState<{ message: string; action: 'open' | 'read' } | null>(null)
 
   // a quiet refresh now and then while a run is on keeps flagged counts and issue marks current
   const running = detail?.project.id === id && RUNNING_STATUSES.includes(detail.project.status)
@@ -129,21 +132,25 @@ export function ProjectView({ id }: { id: string }) {
   const send = (command: Command) => attempt(getApi().request(command as never))
   const canStart = !running && p.status !== 'done'
 
-  async function doExport() {
+  /** Exports, then shows the folder (`open`) or opens the reader (`read`). A refusal for untranslated blocks is asked about, not toasted. */
+  async function exportFor(action: 'open' | 'read', allowPartial = false) {
     setExporting(true)
-    const res = await attempt(getApi().request<'export'>({ type: 'export', projectId: id }))
-    if (res) {
-      toast(`Exported to ${res.path}`, 'info')
-      await attempt(getApi().showInFolder(res.path))
+    setRefused(null)
+    try {
+      const res = await getApi().request<'export'>({ type: 'export', projectId: id, allowPartial })
+      for (const w of res.warnings ?? []) toast(`Export warning: ${w}`)
+      if (action === 'read') setView({ name: 'reader', source: { path: res.path, projectId: id } })
+      else {
+        toast(`Exported to ${res.path}`, 'info')
+        await attempt(getApi().showInFolder(res.path))
+      }
+    } catch (err) {
+      const message = (err as Error).message
+      if (message.startsWith(EXPORT_REFUSED)) setRefused({ message, action })
+      else toast(message)
+    } finally {
+      setExporting(false)
     }
-    setExporting(false)
-  }
-
-  async function readTranslation() {
-    setExporting(true)
-    const res = await attempt(getApi().request<'export'>({ type: 'export', projectId: id }))
-    setExporting(false)
-    if (res) setView({ name: 'reader', source: { path: res.path, projectId: id } })
   }
 
   return (
@@ -176,13 +183,21 @@ export function ProjectView({ id }: { id: string }) {
           {p.format !== 'docx' && p.format !== 'vn' && p.format !== 'vnp' && (
             <>
               <button onClick={() => setView({ name: 'reader', source: { projectId: id, side: 'source' } })} data-testid="read-original">Read original</button>
-              <button onClick={() => void readTranslation()} disabled={exporting} title="Exports what is translated so far, then opens it" data-testid="read-translation">Read translation</button>
+              <button onClick={() => void exportFor('read')} disabled={exporting} title="Exports the document, then opens it; asks first when something is untranslated" data-testid="read-translation">Read translation</button>
             </>
           )}
-          <button onClick={() => void doExport()} disabled={exporting} title="Writes the document with what is translated so far" data-testid="export">{exporting ? 'Exporting...' : 'Export'}</button>
+          <button onClick={() => void exportFor('open')} disabled={exporting} title="Writes the document; asks first when something is untranslated" data-testid="export">{exporting ? 'Exporting...' : 'Export'}</button>
           <button onClick={() => void attempt(getApi().openPath(detail.outputRel))}>Open folder</button>
         </div>
       </div>
+
+      {refused && (
+        <div className="row" data-testid="export-refused">
+          <span className="small">{refused.message}</span>
+          <button className="danger" onClick={() => void exportFor(refused.action, true)} disabled={exporting} data-testid="export-anyway">Export anyway</button>
+          <button onClick={() => setRefused(null)} data-testid="export-cancel">Cancel</button>
+        </div>
+      )}
 
       <div className="card stack">
         <div className="bar big" title={`${prog.done} of ${prog.total} chunks`}>

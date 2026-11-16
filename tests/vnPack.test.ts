@@ -717,7 +717,7 @@ describe('visual-novel pack: through the engine (mock models)', () => {
     })
     const other = await r!.service.createProject({ sourcePath: book, targetLanguage: 'Croatian', sourceLanguage: 'English' })
     expect(other.id).not.toBe(p.id)
-    await expect(r!.service.exportWithReport(p.id)).rejects.toThrow(/the pack changed since this project was made/)
+    await expect(r!.service.exportWithReport(p.id, undefined, { allowPartial: true })).rejects.toThrow(/the pack changed since this project was made/)
   })
 
   it('asks the glossary for the catalog names with localizeNames', async () => {

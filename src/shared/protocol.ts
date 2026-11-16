@@ -9,6 +9,9 @@ import type { ClientTaskSummary } from '../engine/models/client'
  * A command travels in a `Request` with an id, and the engine answers with a `reply` event carrying the same id.
  */
 
+/** The start of the message of an export refused because blocks are untranslated (the UI recognises it). */
+export const EXPORT_REFUSED = 'export refused:'
+
 export interface ProgressInfo {
   done: number
   total: number
@@ -326,8 +329,11 @@ export type Command =
   | { type: 'retryChunk'; projectId: string; index: number; model?: string }
   | { type: 'editChunk'; projectId: string; index: number; final: Record<string, string> }
   | { type: 'updateGlossary'; projectId: string; entries: GlossaryEntry[] }
-  /** EPUB: `cover: 'title'` replaces it by a plain text title page (translated title and author), never an image (default: the source cover, alt text translated). */
-  | { type: 'export'; projectId: string; outPath?: string; cover?: 'source' | 'title' }
+  /**
+   * EPUB: `cover: 'title'` replaces it by a plain text title page (translated title and author), never an image (default: the source cover, alt text translated).
+   * `allowPartial` false/absent: refused while a block is untranslated; true: exports anyway, with a warning.
+   */
+  | { type: 'export'; projectId: string; outPath?: string; cover?: 'source' | 'title'; allowPartial?: boolean }
   | { type: 'deleteProject'; projectId: string }
   /** Asks a provider for every chat model it lists (`GET /models`). The list is kept for `showModels`. */
   | { type: 'detectModels'; provider: string }
@@ -400,7 +406,7 @@ export interface CommandResults {
     lang?: string
     /** Visual-novel packs: how many catalog values the bundle carries. */
     keys?: number
-    /** Visual-novel packs: what the export had to say (untranslated values kept in the source text, ...). */
+    /** Any format: what the export had to say (blocks left in the source language, a pack's untranslated values, ...). */
     warnings?: string[]
   }
   deleteProject: undefined
