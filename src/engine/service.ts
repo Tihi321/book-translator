@@ -25,7 +25,7 @@ import type { DocumentIR, WriteOptions } from '../shared/ir'
 import { CLIENT_ONLY_MODEL, IN_PROGRESS_STATES, isClientRef } from '../shared/project'
 import type { ChunkRecord, Estimate, GlossaryEntry, ProjectFile, ProjectSettings, ProjectSummary } from '../shared/project'
 import { EXPORT_REFUSED, SOURCE_CHANGED } from '../shared/protocol'
-import type { ChunkBrief, EngineEvent, PrepareChunksResult, ProjectDetail, RefreshResult, SubmitResult, TranslationTask } from '../shared/protocol'
+import type { ChunkBrief, CreateProjectResult, EngineEvent, PrepareChunksResult, ProjectDetail, RefreshResult, SubmitResult, TranslationTask } from '../shared/protocol'
 import { AGENTS } from '../shared/schemas'
 import type { AgentName } from '../shared/schemas'
 
@@ -175,8 +175,11 @@ export class EngineService {
     }
   }
 
-  /** Creates the project (project.json, source.json ...). The same file and language give the same project: its settings are updated. */
-  async createProject(req: CreateProjectRequest): Promise<ProjectSummary> {
+  /**
+   * Creates the project (project.json, source.json ...). The same file and language give the same project: its settings are updated. A new
+   * project for a file and language that an older project has with other contents (the file was edited) gets a `hint` naming that project.
+   */
+  async createProject(req: CreateProjectRequest): Promise<CreateProjectResult> {
     const sourcePath = path.resolve(req.sourcePath)
     const hash = await hashSource(sourcePath)
     const base = await this.defaultSettings(req.targetLanguage, req.sourceLanguage)
@@ -214,7 +217,19 @@ export class EngineService {
     if (names.length > 0 && !localizesNames(project)) await this.store.writeGlossary(id, names.map((n) => ({ source: n, target: n, type: 'person', note: KEEP_NAME_NOTE })))
     const summary = summarize(project, [])
     this.emit({ type: 'project.updated', project: summary })
-    return summary
+    const hint = await this.editedSourceHint(project)
+    return hint ? { ...summary, hint } : summary
+  }
+
+  /** For a new project: an older project of the same source path and target language whose file hash differs, and what to do instead. */
+  private async editedSourceHint(project: ProjectFile): Promise<string | undefined> {
+    const key = (p: ProjectFile) => {
+      const file = path.resolve(p.sourcePath)
+      return `${process.platform === 'win32' ? file.toLowerCase() : file}|${(p.settings.targetLanguageCode ?? p.settings.targetLanguage).toLowerCase()}`
+    }
+    const older = (await this.store.list()).find((p) => p.id !== project.id && p.sourceHash !== project.sourceHash && key(p) === key(project))
+    if (!older) return undefined
+    return `project ${older.id} already translates ${project.sourcePath} into ${project.settings.targetLanguage}, from the file before it was edited. To keep its translations and hand edits, run refresh_source on ${older.id} (the app: Refresh source; CLI: engine refresh ${older.id}) and delete this new project ${project.id}.`
   }
 
   async deleteProject(id: string): Promise<void> {

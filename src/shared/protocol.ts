@@ -187,6 +187,12 @@ export interface ProjectDetail {
   outputRel: string
 }
 
+/** The answer to `createProject`. */
+export interface CreateProjectResult extends ProjectSummary {
+  /** A new project for a file and language that an older project has with other file contents: names it and refresh_source. */
+  hint?: string
+}
+
 /** The answer to `refreshSource`. */
 export interface RefreshResult {
   /** Same file and hash as before: nothing was changed. */
@@ -414,7 +420,7 @@ export interface CommandResults {
   saveProviders: ModelsInfo
   getDefaults: DefaultsConfig
   setDefaults: DefaultsConfig
-  createProject: ProjectSummary
+  createProject: CreateProjectResult
   analyze: AnalyzeResult
   getProject: ProjectDetail
   getChunk: ChunkRecord

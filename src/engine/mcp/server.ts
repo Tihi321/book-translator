@@ -127,7 +127,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
   )
   tool(
     'create_project',
-    'Creates a project for a book and a target language (or returns the one that exists for that file and language, with its settings updated). Defaults come from get_defaults. To translate it yourself, set enabledAgents to all false. For a Claude-only translation of the full pipeline set clientOnly true.',
+    'Creates a project for a book and a target language (or returns the one that exists for that file and language, with its settings updated). When an older project has the same file and language but the file was edited since, the answer has a hint that names it: refresh_source on it keeps its translations. Defaults come from get_defaults. To translate it yourself, set enabledAgents to all false. For a Claude-only translation of the full pipeline set clientOnly true.',
     {
       sourcePath: z.string().describe('Absolute path of the book, or of a visual-novel pack folder (vn/pack.json + vn/text/<lang>.json) or book folder (both are exported as a folder)'),
       targetLanguage: z.string().describe('Name or code, for example Croatian or hr'),

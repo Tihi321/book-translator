@@ -31,6 +31,7 @@ describe('refresh_source', () => {
     await fs.writeFile(r.file, bookText().replace(`${para(3, 1)}\n\n`, '').replace(para(5, 1), changed).replace(`${para(8, 2)}\n\n`, `${para(8, 2)}\n\n${added}\n\n`), 'utf8')
 
     await expect(service.exportWithReport(id, undefined, { allowPartial: true })).rejects.toThrow(/^export refused: the source changed:.*refresh_source/)
+    expect((await service.createProject({ sourcePath: r.file, targetLanguage: 'Croatian' })).hint).toMatch(new RegExp(`^project ${id} .*refresh_source on ${id}`))
 
     const res = await service.refreshSource(id)
     expect(res).toMatchObject({ unchanged: false, blocks: { toTranslate: 2, removed: 2, kept: oldBlocks - 2 }, editedKept: 1 })
