@@ -452,7 +452,7 @@ export class EngineService {
       for (const sid of ids) if (typeof map[sid] === 'string' && map[sid].trim()) found.set(sid, map[sid].trim())
       const missing = ids.filter((sid) => !found.has(sid))
       const extra = Object.keys(map).filter((k) => !known.has(k))
-      parsed = { segments: found, missing, extra, duplicate: [], ok: missing.length === 0 && extra.length === 0 }
+      parsed = { segments: found, missing, extra, duplicate: [], conflicting: [], ok: missing.length === 0 && extra.length === 0 }
     }
     const todo = async () => (await this.store.listChunks(id)).filter((c) => TODO_STATES.includes(c.state)).length
     const problems: string[] = []

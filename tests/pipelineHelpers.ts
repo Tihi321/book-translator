@@ -92,3 +92,6 @@ export async function rig(opts: { content?: string; delay?: number; script?: boo
 }
 
 export type { MockReply }
+
+/** A reply with a segment id that was not asked for: the translator cannot salvage it, so it falls back to the full retry. */
+export const withStray = (segs: { id: string; text: string }[]) => asSegs([...segs, { id: 'stray', text: '?' }])

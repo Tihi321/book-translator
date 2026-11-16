@@ -299,7 +299,7 @@ export function createMcpServer(dispatcher: CommandDispatcher, service: EngineSe
       client: z.string().optional().describe('Which client you are: the model id after client/. Default claude-code. Antigravity: pass client: "antigravity". You only get the tasks made for your client name.'),
       role: z.string().optional().describe('glossary, translator, proofreader or qa'),
       project: z.string().optional(),
-      task: z.string().optional().describe('For example translate, retry, retry-tags, fix, proofread, glossary, review, recheck'),
+      task: z.string().optional().describe('For example translate, retry, reask, retry-tags, fix, proofread, glossary, review, recheck'),
       leaseMinutes: z.number().int().min(1).max(60).optional().describe('How long you hold it before it goes back to the queue (default 10)')
     },
     (a) => run({ type: 'getClientTask', client: a.client, role: a.role, project: a.project, task: a.task, leaseMinutes: a.leaseMinutes })
