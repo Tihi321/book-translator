@@ -17,7 +17,7 @@ import { LEGACY_SEED_PROVIDERS } from './store/migrate'
 import { countTokens } from './tokens'
 import { parseMd, serializeMd, splitFrontmatter } from '../shared/md'
 import type { DocumentIR } from '../shared/ir'
-import { defaultsSchema, providersSchema } from '../shared/schemas'
+import { DEFAULT_FALLBACKS, defaultsSchema, providersSchema } from '../shared/schemas'
 import type { DefaultsConfig } from '../shared/schemas'
 import type { AnalyzeResult, CatalogResult, Command, CustomProviderForm, CustomProviderTest, EngineEvent, EngineInfo, EngineTransport, FileInfo, McpStatus, ModelsInfo, ProviderPatch } from '../shared/protocol'
 import { isRequest } from '../shared/protocol'
@@ -591,7 +591,7 @@ export class CommandDispatcher {
       const kept = list.filter((ref) => !mine(ref))
       if (kept.length > 0) agentModels[agent] = kept
     }
-    const seedFallbacks = ['deepseek/deepseek-flash', 'strata/default']
+    const seedFallbacks = [...DEFAULT_FALLBACKS]
     let fallbacks = (current.fallbacks ?? []).filter((ref) => !mine(ref))
     if (fallbacks.length === 0) fallbacks = seedFallbacks
     const next = { ...current, groupDefaults, modelOrder, agentModels, fallbacks }

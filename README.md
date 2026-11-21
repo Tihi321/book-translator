@@ -1,6 +1,6 @@
 # Book Translator
 
-A Windows desktop app that translates a book or document into another language with local models (LM Studio, Strata, Ollama, any OpenAI-compatible server) or API models (DeepSeek, Anthropic, Gemini, OpenAI, OpenRouter ...) and writes the translation back in the same format.
+A Windows desktop app that translates a book or document into another language with local models (through the ACP proxy, or LM Studio, Ollama, any OpenAI-compatible server) or API models (DeepSeek, Anthropic, Gemini, OpenAI, OpenRouter ...) and writes the translation back in the same format.
 
 Books are larger than any model's context, so the text is split into chunks that fit the chosen models. A small pipeline of agents keeps quality and consistency up:
 
@@ -58,17 +58,19 @@ API keys are never written to files. A key is looked up in an environment variab
 
 ## LM Studio notes
 
+The `lmstudio` provider is off in a new data folder (BTT-36): local models go through the ACP proxy (see the next sections). Set `enabled: true` in `providers.md` to use LM Studio directly.
+
 - Start the LM Studio server (default `http://localhost:1234/v1`). The app discovers the models and reads the context each one is **loaded** with. Press *Refresh local models* after loading or unloading.
 - LM Studio loads models with a small context (4096 or 8192) by default, which forces tiny chunks. Load the model you translate with **at least 32k**: `lms load <model> -c 32768 --parallel 1`.
 - Thinking models are slow and waste tokens on translation. Switch thinking off with `extra_body: { reasoning_effort: none }` on the model in `providers.md` (models that support it).
 - Quality varies a lot with the model: a 4B model (`nvidia/nemotron-3-nano-4b`) gave poor Croatian, while Qwen 35B (`qwen3.6-35b-a3b`) gave good Croatian. For gendered languages use the biggest model you can run, and keep the glossary builder on.
 - Local servers handle one request at a time, so concurrency is 1. API providers default to 4-8 chapters in parallel.
 
-## Strata notes
+## Local models through the ACP proxy (Strata notes)
 
-- Strata is a local Qwen3.8-Flash-Next server on `http://127.0.0.1:8080/v1`. It needs no key.
-- Start it with `D:\Strata\run-unsloth-ud-iq4_xs-parallel.bat` (or `scripts\hub.ps1 start strata` from the creative-hub folder). Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes.
-- The default models use Strata first and fall back to DeepSeek (QA falls back to Gemini last). If Strata is not running, the app moves on to the next model.
+- Local models go through the ACP proxy (`acp`, `http://127.0.0.1:8787/v1`), which serves `gufo/*`, `strata/*` and `llama/*`. Start it with `scripts\hub.ps1 start acp-proxy` from the creative-hub folder. One local model is loaded at a time; a request for another one waits for the switch, which takes minutes.
+- The `strata` and `lmstudio` providers are switched off (`enabled: false`) but kept in `providers.md` as a way back to a direct Strata (`http://127.0.0.1:8080/v1`, started with `D:\Strata\terminal\run-unsloth-ud-iq4_xs-parallel.bat`) or LM Studio. Direct Strata: check `curl http://127.0.0.1:8080/health`; it is ready when it shows `loaded: true`.
+- The default models use `acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs` first and fall back to DeepSeek (QA falls back to Gemini last). If the proxy is not running, the app moves on to the next model.
 - Strata takes most of the GPU memory. Keep only small models loaded in LM Studio while it runs.
 - Strata is set up with `json_schema: false` in `providers.md`, so glossary and QA JSON comes from the prompt and the app's repair step. See the Strata section in `providers.md`.
 
@@ -94,7 +96,7 @@ headless [--data <dir>] [--port <n>]        run with no window and the MCP serve
 
 Example: `npm run engine -- translate book.epub --to hr --model lmstudio/qwen3.6-35b-a3b --qa-model deepseek/deepseek-flash`
 
-With no `--model` flags the defaults from `config/defaults.json` apply (Strata first, then DeepSeek).
+With no `--model` flags the defaults from `config/defaults.json` apply (the local Strata model through the ACP proxy first, then DeepSeek).
 
 ## MCP (use it from another LLM)
 

@@ -1,14 +1,14 @@
 {
   "agentModels": {
-    "glossary": ["strata/default", "deepseek/deepseek-flash"],
-    "translator": ["strata/default", "deepseek/deepseek-flash"],
-    "proofreader": ["strata/default", "deepseek/deepseek-flash"],
-    "qa": ["strata/default-low", "deepseek/deepseek-flash", "gemini/gemini-2.5-flash"]
+    "glossary": ["acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs", "deepseek/deepseek-flash"],
+    "translator": ["acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs", "deepseek/deepseek-flash"],
+    "proofreader": ["acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs", "deepseek/deepseek-flash"],
+    "qa": ["acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs", "deepseek/deepseek-flash", "gemini/gemini-2.5-flash"]
   },
   "defaultMaxChunkTokens": 1500,
-  "fallbacks": ["deepseek/deepseek-flash", "strata/default"],
+  "fallbacks": ["deepseek/deepseek-flash", "acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs"],
   "fallbackShared": false,
-  "groupDefaults": { "paid": "deepseek/deepseek-flash", "strata": "strata/default" },
+  "groupDefaults": { "paid": "deepseek/deepseek-flash", "acp": "acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs" },
   "modelOrder": [],
   "lmstudio": { "parallel": 4, "context": 131072, "ttlMinutes": 60 },
   "parallel": { "enabled": true, "maxAtOnce": "auto", "splitSections": false },

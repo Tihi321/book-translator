@@ -389,7 +389,7 @@ export function Settings() {
             <b>{d.provider}</b>: {d.error ? <span className="warn">not reachable ({d.error})</span> : d.served ? `runs ${d.served}` : `${d.found} model(s) found`}
           </div>
         ))}
-        <div className="dim small">Local models: load LM Studio models with a context of 32k or more, then press Refresh local models. Strata needs no refresh: the app asks it which model it runs (context from Strata).</div>
+        <div className="dim small">Local models: load LM Studio models with a context of 32k or more, then press Refresh local models. Models of the ACP proxy are listed by the proxy; Strata (when switched on) needs no refresh: the app asks it which model it runs.</div>
       </div>
 
       <div className="card stack">
