@@ -193,7 +193,8 @@ describe('seed migration', () => {
     const state = JSON.parse(await fs.readFile(stateFile, 'utf8')) as { migrations?: string[] }
     delete state.migrations
     await fs.writeFile(stateFile, JSON.stringify(state), 'utf8')
-    const defaults = (await fs.readFile(defaultsFile, 'utf8')).replace(/"strata\/default-low"/g, '"strata/qwen3.8-flash-next-low"').replace(/"strata\/default"/g, '"strata/qwen3.8-flash-next"')
+    // an old folder: the seed's defaults named strata/default before BTT-36, so the old refs are written back here
+    const defaults = '{\n  "agentModels": { "translator": ["strata/qwen3.8-flash-next", "deepseek/deepseek-flash"], "qa": ["strata/qwen3.8-flash-next-low"] },\n  "groupDefaults": { "strata": "strata/qwen3.8-flash-next" }\n}\n'
     await fs.writeFile(defaultsFile, defaults, 'utf8')
 
     const res = await initDataFolder(dir, SEED_DIR)
@@ -285,7 +286,7 @@ describe('seed migration of acp and antigravity (BTT-21)', () => {
     const ids = await providerIds(dir)
     expect(ids.indexOf('acp')).toBe(ids.indexOf('mock') - 1)
     const parsed = parseMdWith(text, providersSchema, file)
-    expect(parsed.data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: false, local: true, base_url: 'http://127.0.0.1:8787/v1' })
+    expect(parsed.data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: true, local: true, base_url: 'http://127.0.0.1:8787/v1' })
     expect(parsed.data.providers.find((p) => p.id === 'client')!.models.map((m) => m.id)).toEqual(['claude-code', 'antigravity'])
     const registry = new ModelRegistry(dir, { keys: () => 'k' })
     await registry.load()

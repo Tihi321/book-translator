@@ -20,7 +20,7 @@ describe('ModelRegistry with the seed providers.md', () => {
     expect(s.registry.getModel('mock/mock-translator')).toBeDefined()
     expect(s.registry.getModel('mock/mock-reviewer')).toBeDefined()
     expect(s.registry.providers.get('ollama')!.available).toBe(false)
-    expect(s.registry.providers.get('acp')!.available).toBe(false)
+    expect(s.registry.providers.get('acp')!.available).toBe(true)
     expect(s.registry.providers.get('mock')!.available).toBe(true)
     expect(s.registry.providers.get('client')).toMatchObject({ available: true, local: true })
     expect(s.registry.providers.get('strata')).toMatchObject({ available: true, local: true, jsonSchema: false })
@@ -37,7 +37,8 @@ describe('ModelRegistry with the seed providers.md', () => {
     await registry.load()
     expect(registry.providers.get('openai')!.available).toBe(false)
     expect(registry.providers.get('openai')!.unavailableReason).toMatch(/OPENAI_API_KEY/)
-    expect(registry.providers.get('lmstudio')!.available).toBe(true)
+    expect(registry.providers.get('acp')!.available).toBe(true)
+    expect(registry.providers.get('lmstudio')!.available).toBe(false) // off in the seed (BTT-36)
   })
 
   it('computes cost per 1M tokens, cached input at its own price', async () => {
@@ -568,10 +569,18 @@ describe('custom providers', () => {
     expect(defaultsSchema.parse({ groupDefaults: { paid: 'a/b' }, modelOrder: ['strata'] }).groupDefaults).toEqual({ paid: 'a/b' })
   })
 
-  it('the seed acp provider is off, local, text only (no schema) and on port 8787', async () => {
-    const s = await seededRegistry()
+  it('the seed (BTT-36): acp is on at 8787 with the six local rows, strata and lmstudio are off, every agent list resolves to LOCAL or DeepSeek', async () => {
+    const s = await seededRegistry({ seedOnly: true })
     cleanups.push(s.cleanup)
-    expect(s.registry.providers.get('acp')).toMatchObject({ enabled: false, local: true, custom: false, baseUrl: 'http://127.0.0.1:8787/v1', jsonSchema: false, concurrency: 2, discover: true })
+    const LOCAL = 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
+    expect(s.registry.providers.get('acp')).toMatchObject({ enabled: true, local: true, custom: false, baseUrl: 'http://127.0.0.1:8787/v1', jsonSchema: false, concurrency: 4, discover: true })
+    expect([...s.registry.models.keys()].filter((r) => /^acp\/(strata|gufo|llama)\//.test(r))).toHaveLength(6)
+    expect(s.registry.getModel(LOCAL)).toMatchObject({ context: 131072, extraBody: { reasoning_effort: 'none' } })
+    expect(s.registry.providers.get('strata')).toMatchObject({ enabled: false, available: false })
+    expect(s.registry.providers.get('lmstudio')).toMatchObject({ enabled: false, available: false })
+    const seed = defaultsSchema.parse(JSON.parse(await fs.readFile(path.join(SEED_DIR, 'config', 'defaults.json'), 'utf8')))
+    for (const ref of [...Object.values(seed.agentModels).flat(), ...seed.fallbacks]) expect([LOCAL, 'deepseek/deepseek-flash', 'gemini/gemini-2.5-flash']).toContain(ref)
+    expect(seed.groupDefaults).toMatchObject({ acp: LOCAL })
     expect(s.registry.providers.has('custom')).toBe(false)
     expect(s.registry.getModel('client/antigravity')).toMatchObject({ context: 1000000 })
     expect(s.registry.groupOf('acp/x')).toBe('acp')

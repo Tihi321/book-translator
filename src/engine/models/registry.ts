@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseMdWith } from '../../shared/md'
-import { defaultsSchema, modelsConfigSchema, providersSchema } from '../../shared/schemas'
+import { DEFAULT_FALLBACKS, defaultsSchema, modelsConfigSchema, providersSchema } from '../../shared/schemas'
 import type { DefaultsConfig, ModelsConfig, ProviderEntry } from '../../shared/schemas'
 import { promises as fs } from 'node:fs'
 import { AnthropicClient } from './anthropic'
@@ -156,7 +156,7 @@ export function modelDefaultsOf(
       fallbacks = Object.values(d.groupDefaults ?? {}).filter((x): x is string => Boolean(x))
     }
     if (!fallbacks || fallbacks.length === 0) {
-      fallbacks = ['deepseek/deepseek-flash', 'strata/default']
+      fallbacks = [...DEFAULT_FALLBACKS]
     }
   }
 
@@ -643,7 +643,7 @@ export class ModelRegistry {
         fallbacks = Object.values(d.aliases ?? {}).filter((x): x is string => Boolean(x))
       }
       if (!fallbacks || fallbacks.length === 0) {
-        fallbacks = ['deepseek/deepseek-flash', 'strata/default']
+        fallbacks = [...DEFAULT_FALLBACKS]
       }
     }
     this.defaults = {

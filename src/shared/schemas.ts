@@ -127,6 +127,11 @@ export { AGENTS } from './agents'
 export type { AgentName } from './agents'
 
 /** config/defaults.json: default model per agent, default chunk size, languages for the pickers. */
+/** The local model: Strata behind the ACP proxy. */
+export const LOCAL_MODEL_REF = 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
+/** The fallback list a fresh or emptied config gets. */
+export const DEFAULT_FALLBACKS: readonly string[] = ['deepseek/deepseek-flash', LOCAL_MODEL_REF]
+
 export const defaultsSchema = z.looseObject({
   /** Per agent: ordered `provider/model` list. The first is the default, the rest are fallbacks. */
   agentModels: z.record(z.string(), z.array(z.string())).default({}),
@@ -135,7 +140,7 @@ export const defaultsSchema = z.looseObject({
   /**
    * The fallback list: arbitrary-length ordered list of models (SCP-19).
    */
-  fallbacks: z.array(z.string().min(1)).min(1).default(['deepseek/deepseek-flash', 'strata/default']),
+  fallbacks: z.array(z.string().min(1)).min(1).default([...DEFAULT_FALLBACKS]),
   /** One fallback order for every role / agent. False: each list keeps its own order. */
   fallbackShared: z.boolean().default(false),
   fallback_shared: z.boolean().optional(),

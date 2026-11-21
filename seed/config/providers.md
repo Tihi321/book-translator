@@ -88,6 +88,7 @@ providers:
         price_cached_in: 0.03
   - id: lmstudio
     kind: openai-compat
+    enabled: false                # off since BTT-36: local models go through the ACP proxy; the provider is kept as a way back
     local: true
     base_url: http://localhost:1234/v1
     concurrency: auto             # the sum of `parallel` over the loaded chat models (lms load --parallel <n>), 1 when none is loaded
@@ -97,6 +98,7 @@ providers:
     models: []
   - id: strata
     kind: openai-compat
+    enabled: false                # off since BTT-36: Strata runs under the ACP proxy (`strata/...` models of `acp`); the provider is kept as a way back
     local: true
     base_url: http://127.0.0.1:8080/v1
     api_key_env: STRATA_API_KEY   # optional; only sent if set
@@ -129,18 +131,47 @@ providers:
     concurrency: 1
     discover: true
     models: []
-  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-compatible server. Off until you start the proxy.
-  # See "The ACP proxy" below. Any other OpenAI-compatible server is added in the Models dialog (Add provider).
+  # The ACP proxy (api-acp-proxy) as an OpenAI-compatible server: Antigravity, Codex and Claude through ACP, and since BTT-36 the local models too
+  # (`gufo/*`, `strata/*`, `llama/*`). Start it with `scripts\hub.ps1 start acp-proxy` in the creative-hub folder. See "The ACP proxy" below.
+  # Any other OpenAI-compatible server is added in the Models dialog (Add provider).
   - id: acp
     name: ACP proxy
     kind: openai-compat
-    enabled: false
+    enabled: true
     local: true
     base_url: http://127.0.0.1:8787/v1
-    concurrency: 2
+    concurrency: 4
     json_schema: false
     discover: true
-    models: []
+    discover_skip: [ qwen-image, nomic-embed ]
+    models:
+      # Local models through the proxy (HUB-38). One local model is loaded at a time across gufo, strata and llama;
+      # a request for another one waits until the proxy has switched (minutes). The defaults use the strata row.
+      - id: strata/qwen3.8-flash-next-unsloth-ud-iq4_xs
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: none }
+      - id: gufo/Qwen3.8-27B
+        family: qwen
+        context: 32768
+        extra_body: { reasoning_effort: none }
+      - id: gufo/deepseek4
+        family: deepseek
+        context: 16384
+        extra_body: { reasoning_effort: none }
+      - id: gufo/flash-next-q4
+        family: qwen
+        context: 32768
+        vision: true
+        extra_body: { reasoning_effort: none }
+      - id: llama/inkling-2-mini
+        family: inkling
+        context: 32768
+        vision: true
+      - id: llama/inkling-2-mini-dspark
+        family: inkling
+        context: 32768
+        vision: true
   # Answered by an MCP client (Claude Code, Antigravity CLI): a request waits in a queue until the client takes it (get_client_task) and answers it (submit_client_task).
   # Nothing is spent and no key is needed. It is enabled because it costs nothing and does nothing until an MCP client answers. Give a project `clientOnly: true` (create_project / update_project_settings) to put all agents on `client/claude-code` and refuse every other model.
   # An agent left on it with no client connected waits for ever: switch the project back when the client is done.
@@ -204,7 +235,10 @@ A data folder that already exists gets the entry at the next start: the app adds
 
 ## The ACP proxy
 
-`acp` points at the api-acp-proxy (`http://127.0.0.1:8787/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API. It is off until you start the proxy and set `enabled: true`.
+`acp` points at the api-acp-proxy (`http://127.0.0.1:8787/v1`), which serves Antigravity, Codex and Claude through ACP as an OpenAI-compatible API, and the local models (`gufo/*`, `strata/*`, `llama/*`). It is enabled; start the proxy with `scripts\hub.ps1 start acp-proxy` from the creative-hub folder. While it is down, the app skips it and moves to the next model.
+
+- Local models: the defaults use `acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`. One local model is loaded at a time across `gufo`, `strata` and `llama`; a request for another one waits until the proxy has switched, which takes minutes. The `gufo` and `llama` (Inkling) rows are listed, not defaults.
+- The `strata` and `lmstudio` providers are switched off (`enabled: false`) but kept: set `enabled: true` to go back to a direct Strata or LM Studio.
 
 - Start the proxy with `PROXY_IGNORE_SAMPLING=1`: the app sends `temperature`, `max_tokens` and `stream_options`, which the proxy has to ignore.
 - It is text only: no vision.
@@ -224,11 +258,13 @@ A data folder that already exists gets the entry at the next start: the app adds
 
 ## Context size and local models
 
+The `lmstudio` provider is off since BTT-36 (local models go through the ACP proxy); the notes below apply when you switch it on.
+
 The app splits the book into chunks that fit the model's context window. For LM Studio it reads the window the model is loaded with. Otherwise it uses `context` from this file (the model's, else the provider's), 200000 for a `client` provider, and 8192 if that is missing. LM Studio loads models with a small window (often 4096 or 8192) unless you change it. Load the model you translate with 16384 tokens or more, for example `lms load <model> -c 16384 --parallel 1`, or set it in LM Studio's model settings. A larger window does not make chunks bigger than the chunk size you choose in the app (default 1500 tokens), because long chunks make models skip text.
 
 ## Strata
 
-Strata is a fast local server on `http://127.0.0.1:8080/v1` with an OpenAI-style API. It needs no key. Set `STRATA_API_KEY` only if you put one in front of it.
+Since BTT-36 the `strata` provider is off: Strata runs under the ACP proxy and its model is the `acp/strata/...` row. Set `enabled: true` to talk to Strata directly again. Strata is a fast local server on `http://127.0.0.1:8080/v1` with an OpenAI-style API. It needs no key. Set `STRATA_API_KEY` only if you put one in front of it.
 
 - It serves one model per process, on port 8080, chosen by the `run-*.bat` you start in `D:\Strata`: `run-unsloth-ud-iq4_xs-parallel.bat` (Qwen3.8-Flash-Next IQ4_XS, four requests at once), `run-unsloth-ud-iq4_xs.bat` (Qwen IQ4_XS, one at a time), `run-deepseek-v4.1-flash-ist-das-2.00bpw.bat` and `run-deepseek-v4.1-flash-ista-das-coder.bat` (DeepSeek V4.1 Flash). From the creative-hub folder, `scripts\hub.ps1 start strata <variant>` starts one.
 - Check `curl http://127.0.0.1:8080/health`. It is ready when it shows `loaded: true`. Loading takes 1 to 3 minutes (the DeepSeek config allows up to an hour).

@@ -5,6 +5,7 @@ import { CommandDispatcher, serveEngine } from '../src/engine/dispatcher'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { parseMd } from '../src/shared/md'
 import { ProviderError } from '../src/engine/models/types'
+import { DEFAULT_FALLBACKS } from '../src/shared/schemas'
 import type { DefaultsConfig } from '../src/shared/schemas'
 import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineTransport, ModelsInfo, PrepareChunksResult, ProjectDetail, Request, SubmitResult, TranslationTask } from '../src/shared/protocol'
 import type { ChunkRecord, ProjectSummary } from '../src/shared/project'
@@ -159,7 +160,7 @@ describe('command dispatcher', () => {
     const { run } = await setup()
     const d = await run<{ agentModels: Record<string, string[]>; languages: unknown[]; defaultMaxChunkTokens: number }>({ type: 'getDefaults' })
     expect(d.languages.length).toBeGreaterThan(10)
-    expect(d.agentModels.translator?.[0]).toBe('strata/default')
+    expect(d.agentModels.translator?.[0]).toBe('acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs')
     const next = await run<typeof d>({ type: 'setDefaults', patch: { agentModels: { qa: ['mock/mock-reviewer'] }, defaultMaxChunkTokens: 900 } })
     expect(next.agentModels.qa).toEqual(['mock/mock-reviewer'])
     expect(next.agentModels.translator).toEqual(d.agentModels.translator)
@@ -401,7 +402,7 @@ describe('group defaults in defaults.json', () => {
         parallel: { splitSections: true, maxAtOnce: 5 }
       }
     })
-    expect(next.groupDefaults).toEqual({ paid: 'deepseek/deepseek-flash', strata: 'strata/default', lmstudio: 'lmstudio/gemma' })
+    expect(next.groupDefaults).toEqual({ paid: 'deepseek/deepseek-flash', acp: 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs', lmstudio: 'lmstudio/gemma' })
     expect(next.modelOrder).toEqual(['strata', 'paid', 'lmstudio'])
     expect(next.lmstudio).toEqual({ parallel: 2, context: 131072, ttlMinutes: 60 })
     expect(next.parallel).toEqual({ enabled: true, maxAtOnce: 5, splitSections: true })
@@ -935,7 +936,7 @@ describe('custom providers', () => {
     await run({ type: 'setProviderLimits', provider: 'other-box', rpm: 7 })
     const modelsFile = path.join(r.dir, 'config', 'models.md')
     await fs.writeFile(modelsFile, (await fs.readFile(modelsFile, 'utf8')).replace(/hidden: \[\]/, `hidden:\n  - ${id}/gone\n  - deepseek/deepseek-flash`), 'utf8')
-    await run({ type: 'setDefaults', patch: { groupDefaults: { [id]: `${id}/picked-1`, paid: 'deepseek/deepseek-flash' }, modelOrder: ['paid', id, 'strata'], agentModels: { translator: [id, `${id}/picked-1`, MODEL], qa: [`${id}/picked-1`] } } })
+    await run({ type: 'setDefaults', patch: { groupDefaults: { [id]: `${id}/picked-1`, paid: 'deepseek/deepseek-flash' }, modelOrder: ['paid', id, 'strata'], agentModels: { translator: [id, `${id}/picked-1`, MODEL], qa: [`${id}/picked-1`] }, fallbacks: [`${id}/picked-1`] } })
 
     const info = await run<ModelsInfo>({ type: 'removeCustomProvider', id })
     expect(info.providers.some((p) => p.id === id)).toBe(false)
@@ -957,6 +958,7 @@ describe('custom providers', () => {
     expect(defaults.modelOrder).toEqual(['paid', 'strata'])
     expect(defaults.agentModels.translator).toEqual([MODEL])
     expect(defaults.agentModels.qa).toBeUndefined()
+    expect(defaults.fallbacks).toEqual([...DEFAULT_FALLBACKS]) // an emptied fallback list is re-seeded with the local ACP model
     await expect(run({ type: 'removeCustomProvider', id: 'deepseek' })).rejects.toThrow(/not a custom provider/)
     await expect(run({ type: 'removeCustomProvider', id })).rejects.toThrow(/unknown provider/)
   })
