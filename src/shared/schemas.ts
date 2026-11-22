@@ -126,12 +126,12 @@ export const modelsConfigSchema = configBase('models').extend({
 export { AGENTS } from './agents'
 export type { AgentName } from './agents'
 
-/** config/defaults.json: default model per agent, default chunk size, languages for the pickers. */
 /** The local model: Strata behind the ACP proxy. */
 export const LOCAL_MODEL_REF = 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
 /** The fallback list a fresh or emptied config gets. */
 export const DEFAULT_FALLBACKS: readonly string[] = ['deepseek/deepseek-flash', LOCAL_MODEL_REF]
 
+/** config/defaults.json: default model per agent, default chunk size, languages for the pickers. */
 export const defaultsSchema = z.looseObject({
   /** Per agent: ordered `provider/model` list. The first is the default, the rest are fallbacks. */
   agentModels: z.record(z.string(), z.array(z.string())).default({}),

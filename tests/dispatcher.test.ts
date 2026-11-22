@@ -5,7 +5,6 @@ import { CommandDispatcher, serveEngine } from '../src/engine/dispatcher'
 import { ModelRegistry } from '../src/engine/models/registry'
 import { parseMd } from '../src/shared/md'
 import { ProviderError } from '../src/engine/models/types'
-import { DEFAULT_FALLBACKS } from '../src/shared/schemas'
 import type { DefaultsConfig } from '../src/shared/schemas'
 import type { AnalyzeResult, CatalogResult, Command, EngineEvent, EngineTransport, ModelsInfo, PrepareChunksResult, ProjectDetail, Request, SubmitResult, TranslationTask } from '../src/shared/protocol'
 import type { ChunkRecord, ProjectSummary } from '../src/shared/project'
@@ -958,7 +957,7 @@ describe('custom providers', () => {
     expect(defaults.modelOrder).toEqual(['paid', 'strata'])
     expect(defaults.agentModels.translator).toEqual([MODEL])
     expect(defaults.agentModels.qa).toBeUndefined()
-    expect(defaults.fallbacks).toEqual([...DEFAULT_FALLBACKS]) // an emptied fallback list is re-seeded with the local ACP model
+    expect(defaults.fallbacks).toEqual(['deepseek/deepseek-flash', 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs']) // an emptied fallback list is re-seeded with the local ACP model
     await expect(run({ type: 'removeCustomProvider', id: 'deepseek' })).rejects.toThrow(/not a custom provider/)
     await expect(run({ type: 'removeCustomProvider', id })).rejects.toThrow(/unknown provider/)
   })

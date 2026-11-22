@@ -1,0 +1,7 @@
+{"ts":"2026-11-22T11:50:00Z","actor":"planner","type":"plan.created","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"plan drafted: extra ideas of REQ-0030 (BTT part)"}
+{"ts":"2026-11-22T12:00:00Z","actor":"director-scribe","type":"plan.approved","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"user: 'Yes, approve all'"}
+{"ts":"2026-11-22T12:03:19Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"branch BTT-37_extra-ideas from master"}
+{"ts":"2026-11-22T12:03:19Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"test 399, typecheck, lint, build:engine pass"}
+{"ts":"2026-11-22T12:03:19Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"changelog.md"}
+{"ts":"2026-11-22T12:22:00Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"director-checker PASS","data":{"verdict":"PASS"}}
+{"ts":"2026-11-22T12:22:00Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0030","ticket":"BTT-37-extra-ideas","detail":"done after PASS verdict"}
