@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: creative-hub/REQ-0030
 repos: [book-translator]
 branch: BTT-37_extra-ideas
